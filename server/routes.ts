@@ -162,7 +162,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
-    const account = await storage.getAccount(req.params.id);
+    const account = await storage.getAccount((req.params.id as string));
     if (!account) return res.status(404).json({ message: "Account not found" });
     return res.json(account);
   });
@@ -175,20 +175,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.patch("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
-    const account = await storage.updateAccount(req.params.id, req.body);
+    const account = await storage.updateAccount((req.params.id as string), req.body);
     if (!account) return res.status(404).json({ message: "Account not found" });
     return res.json(account);
   });
 
   app.delete("/api/accounts/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
-    await storage.deleteAccount(req.params.id);
+    await storage.deleteAccount((req.params.id as string));
     return res.json({ message: "Account deleted" });
   });
 
   // ── Users ─────────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/users", requireAuth, async (req: Request, res: Response) => {
-    const users = await storage.getUsersByAccount(req.params.accountId);
+    const users = await storage.getUsersByAccount((req.params.accountId as string));
     return res.json(users.map(({ password: _, ...u }) => u));
   });
 
@@ -197,7 +197,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const hashed = await hashPassword(password || "changeme");
     const user = await storage.createUser({
       ...rest,
-      accountId: req.params.accountId,
+      accountId: (req.params.accountId as string),
       password: hashed,
     });
     const { password: _, ...safeUser } = user;
@@ -242,29 +242,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Brand Profiles ────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getBrandProfiles(req.params.accountId));
+    return res.json(await storage.getBrandProfiles((req.params.accountId as string)));
   });
 
   app.post("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertBrandProfileSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertBrandProfileSchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createBrandProfile(parsed.data));
   });
 
   app.get("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
-    const bp = await storage.getBrandProfile(req.params.id);
+    const bp = await storage.getBrandProfile((req.params.id as string));
     if (!bp) return res.status(404).json({ message: "Brand profile not found" });
     return res.json(bp);
   });
 
   app.patch("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
-    const bp = await storage.updateBrandProfile(req.params.id, req.body);
+    const bp = await storage.updateBrandProfile((req.params.id as string), req.body);
     if (!bp) return res.status(404).json({ message: "Not found" });
     return res.json(bp);
   });
 
   app.delete("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteBrandProfile(req.params.id);
+    await storage.deleteBrandProfile((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
@@ -276,7 +276,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
-    const website = await storage.getWebsite(req.params.id);
+    const website = await storage.getWebsite((req.params.id as string));
     if (!website) return res.status(404).json({ message: "Website not found" });
     return res.json(website);
   });
@@ -288,13 +288,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.patch("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
-    const website = await storage.updateWebsite(req.params.id, req.body);
+    const website = await storage.updateWebsite((req.params.id as string), req.body);
     if (!website) return res.status(404).json({ message: "Not found" });
     return res.json(website);
   });
 
   app.delete("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteWebsite(req.params.id);
+    await storage.deleteWebsite((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
@@ -302,86 +302,86 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
     const type = req.query.type as string | undefined;
-    return res.json(await storage.getLocations(req.params.accountId, type));
+    return res.json(await storage.getLocations((req.params.accountId as string), type));
   });
 
   app.post("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertLocationSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertLocationSchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createLocation(parsed.data));
   });
 
   app.patch("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
-    const loc = await storage.updateLocation(req.params.id, req.body);
+    const loc = await storage.updateLocation((req.params.id as string), req.body);
     if (!loc) return res.status(404).json({ message: "Not found" });
     return res.json(loc);
   });
 
   app.delete("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteLocation(req.params.id);
+    await storage.deleteLocation((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
   // ── Services ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getServices(req.params.accountId));
+    return res.json(await storage.getServices((req.params.accountId as string)));
   });
 
   app.post("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertServiceSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertServiceSchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createService(parsed.data));
   });
 
   app.patch("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
-    const svc = await storage.updateService(req.params.id, req.body);
+    const svc = await storage.updateService((req.params.id as string), req.body);
     if (!svc) return res.status(404).json({ message: "Not found" });
     return res.json(svc);
   });
 
   app.delete("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteService(req.params.id);
+    await storage.deleteService((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
   // ── Industries ────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getIndustries(req.params.accountId));
+    return res.json(await storage.getIndustries((req.params.accountId as string)));
   });
 
   app.post("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertIndustrySchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertIndustrySchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createIndustry(parsed.data));
   });
 
   app.patch("/api/industries/:id", requireAuth, async (req: Request, res: Response) => {
-    const ind = await storage.updateIndustry(req.params.id, req.body);
+    const ind = await storage.updateIndustry((req.params.id as string), req.body);
     if (!ind) return res.status(404).json({ message: "Not found" });
     return res.json(ind);
   });
 
   app.delete("/api/industries/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteIndustry(req.params.id);
+    await storage.deleteIndustry((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
   // ── Query Clusters ────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getQueryClusters(req.params.accountId));
+    return res.json(await storage.getQueryClusters((req.params.accountId as string)));
   });
 
   app.post("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertQueryClusterSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertQueryClusterSchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createQueryCluster(parsed.data));
   });
 
   app.patch("/api/query-clusters/:id", requireAuth, async (req: Request, res: Response) => {
-    const qc = await storage.updateQueryCluster(req.params.id, req.body);
+    const qc = await storage.updateQueryCluster((req.params.id as string), req.body);
     if (!qc) return res.status(404).json({ message: "Not found" });
     return res.json(qc);
   });
@@ -389,29 +389,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Blueprints ────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getBlueprints(req.params.accountId));
+    return res.json(await storage.getBlueprints((req.params.accountId as string)));
   });
 
   app.get("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
-    const bp = await storage.getBlueprint(req.params.id);
+    const bp = await storage.getBlueprint((req.params.id as string));
     if (!bp) return res.status(404).json({ message: "Not found" });
     return res.json(bp);
   });
 
   app.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertBlueprintSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    const parsed = insertBlueprintSchema.safeParse({ ...req.body, accountId: (req.params.accountId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createBlueprint(parsed.data));
   });
 
   app.patch("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
-    const bp = await storage.updateBlueprint(req.params.id, req.body);
+    const bp = await storage.updateBlueprint((req.params.id as string), req.body);
     if (!bp) return res.status(404).json({ message: "Not found" });
     return res.json(bp);
   });
 
   app.delete("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteBlueprint(req.params.id);
+    await storage.deleteBlueprint((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
@@ -421,13 +421,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const status = req.query.status as string | undefined;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
-    const pageList = await storage.getPages(req.params.websiteId, { status, limit, offset });
-    const total = await storage.getPageCount(req.params.websiteId, status);
+    const pageList = await storage.getPages((req.params.websiteId as string), { status, limit, offset });
+    const total = await storage.getPageCount((req.params.websiteId as string), status);
     return res.json({ pages: pageList, total });
   });
 
   app.get("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
-    const page = await storage.getPage(req.params.id);
+    const page = await storage.getPage((req.params.id as string));
     if (!page) return res.status(404).json({ message: "Page not found" });
     const versions = await storage.getPageVersions(page.id);
     const activeVersion = versions.find((v) => v.isActive);
@@ -435,23 +435,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/websites/:websiteId/pages", requireAuth, async (req: Request, res: Response) => {
-    const parsed = insertPageSchema.safeParse({ ...req.body, websiteId: req.params.websiteId });
+    const parsed = insertPageSchema.safeParse({ ...req.body, websiteId: (req.params.websiteId as string) });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     return res.status(201).json(await storage.createPage(parsed.data));
   });
 
   app.patch("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
-    const page = await storage.updatePage(req.params.id, req.body);
+    const page = await storage.updatePage((req.params.id as string), req.body);
     if (!page) return res.status(404).json({ message: "Not found" });
     return res.json(page);
   });
 
   // Publish a page (admins may force-publish even if QA failed)
   app.post("/api/pages/:id/publish", requireAuth, async (req: Request, res: Response) => {
-    const page = await storage.getPage(req.params.id);
+    const page = await storage.getPage((req.params.id as string));
     if (!page) return res.status(404).json({ message: "Page not found" });
 
-    const updated = await storage.updatePage(req.params.id, {
+    const updated = await storage.updatePage((req.params.id as string), {
       status: "published",
       publishedAt: new Date(),
     });
@@ -468,7 +468,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Bulk-publish all draft/review/approved pages for a website
   app.post("/api/websites/:id/pages/publish-all", requireAuth, async (req: Request, res: Response) => {
-    const websiteId = req.params.id;
+    const websiteId = (req.params.id as string);
     const draft = await storage.getPages(websiteId, { status: "draft", limit: 100000 });
     const review = await storage.getPages(websiteId, { status: "review", limit: 100000 });
     const approved = await storage.getPages(websiteId, { status: "approved", limit: 100000 });
@@ -494,7 +494,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Prune a page
   app.post("/api/pages/:id/prune", requireAuth, async (req: Request, res: Response) => {
     const { reason } = req.body;
-    const updated = await storage.updatePage(req.params.id, {
+    const updated = await storage.updatePage((req.params.id as string), {
       status: "pruned",
       pruneReason: reason || "Manual prune",
     });
@@ -503,19 +503,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Approve page for publish queue
   app.post("/api/pages/:id/approve", requireAuth, async (req: Request, res: Response) => {
-    const updated = await storage.updatePage(req.params.id, { status: "approved" });
+    const updated = await storage.updatePage((req.params.id as string), { status: "approved" });
     return res.json(updated);
   });
 
   app.delete("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deletePage(req.params.id);
+    await storage.deletePage((req.params.id as string));
     return res.json({ message: "Deleted" });
   });
 
   // ── Generation Jobs ───────────────────────────────────────────────────────
 
   app.get("/api/websites/:websiteId/jobs", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getGenerationJobs(req.params.websiteId));
+    return res.json(await storage.getGenerationJobs((req.params.websiteId as string)));
   });
 
   app.get("/api/jobs", requireAuth, async (req: Request, res: Response) => {
@@ -523,7 +523,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/jobs/:id", requireAuth, async (req: Request, res: Response) => {
-    const job = await storage.getGenerationJob(req.params.id);
+    const job = await storage.getGenerationJob((req.params.id as string));
     if (!job) return res.status(404).json({ message: "Job not found" });
     return res.json(job);
   });
@@ -571,7 +571,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/jobs/:id/cancel", requireAuth, async (req: Request, res: Response) => {
-    const updated = await storage.updateGenerationJob(req.params.id, {
+    const updated = await storage.updateGenerationJob((req.params.id as string), {
       status: "cancelled",
       completedAt: new Date(),
     });
@@ -581,30 +581,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Sitemaps ──────────────────────────────────────────────────────────────
 
   app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getSitemaps(req.params.websiteId));
+    return res.json(await storage.getSitemaps((req.params.websiteId as string)));
   });
 
   app.post("/api/websites/:websiteId/sitemaps/generate", requireAuth, async (req: Request, res: Response) => {
-    const website = await storage.getWebsite(req.params.websiteId);
+    const website = await storage.getWebsite((req.params.websiteId as string));
     if (!website) return res.status(404).json({ message: "Website not found" });
 
-    const keys = await generateSitemapsForWebsite(req.params.websiteId, website.domain);
+    const keys = await generateSitemapsForWebsite((req.params.websiteId as string), website.domain);
     return res.json({ message: "Sitemaps generated", keys });
   });
 
   // ── SEO Routes (live page rendering) ─────────────────────────────────────
 
   app.get("/api/websites/:websiteId/sitemap.xml", async (req: Request, res: Response) => {
-    const website = await storage.getWebsite(req.params.websiteId);
+    const website = await storage.getWebsite((req.params.websiteId as string));
     if (!website) return res.status(404).send("Not found");
 
-    const sitemapList = await storage.getSitemaps(req.params.websiteId);
+    const sitemapList = await storage.getSitemaps((req.params.websiteId as string));
     const baseUrl = `https://${website.domain}`;
     const today = new Date().toISOString().split("T")[0];
 
     if (sitemapList.length === 0) {
       // Generate inline sitemap
-      const publishedPages = await storage.getPages(req.params.websiteId, { status: "published", limit: 50000 });
+      const publishedPages = await storage.getPages((req.params.websiteId as string), { status: "published", limit: 50000 });
       const urls = publishedPages.map((p) => ({
         loc: `${baseUrl}/${p.slug}`,
         lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
@@ -627,7 +627,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/websites/:websiteId/robots.txt", async (req: Request, res: Response) => {
-    const website = await storage.getWebsite(req.params.websiteId);
+    const website = await storage.getWebsite((req.params.websiteId as string));
     if (!website) return res.status(404).send("Not found");
 
     if (website.robotsTxt) {
@@ -644,10 +644,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Public Page Serving ──────────────────────────────────────────────────
   // Serves published pages at /sites/:domain/:slug as full HTML
   app.get("/sites/:domain/:slug", async (req: Request, res: Response) => {
-    const website = await storage.getWebsiteByDomain(req.params.domain);
+    const website = await storage.getWebsiteByDomain((req.params.domain as string));
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
 
-    const page = await storage.getPageBySlug(website.id, req.params.slug);
+    const page = await storage.getPageBySlug(website.id, (req.params.slug as string));
     if (!page || page.status !== "published") {
       return res.status(404).send(notFoundHtml("Page not found or not yet published"));
     }

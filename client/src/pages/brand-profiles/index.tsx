@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,12 @@ export default function BrandProfilesPage() {
     queryFn: () => selectedAccount ? api.get<any[]>(`/api/accounts/${selectedAccount}/brand-profiles`) : Promise.resolve([]),
     enabled: !!selectedAccount,
   });
+
+  useEffect(() => {
+    if ((accounts as any[]).length > 0 && !selectedAccount) {
+      setSelectedAccount((accounts as any[])[0].id);
+    }
+  }, [accounts]);
 
   const create = useMutation({
     mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/brand-profiles`, data),

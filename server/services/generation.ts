@@ -33,7 +33,7 @@ function buildPageContext(
     promptFamily: blueprint.promptFamily,
     faqEnabled: blueprint.faqEnabled,
     locationName: location?.name,
-    locationState: location?.stateName || location?.stateCode,
+    locationState: location?.stateName || location?.stateCode || undefined,
     locationSlug: location?.slug,
     serviceName: service?.name,
     serviceSlug: service?.slug,
