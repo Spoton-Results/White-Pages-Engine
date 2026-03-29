@@ -1,16 +1,509 @@
-import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import type { Express, Request, Response } from "express";
+import type { Server } from "http";
+import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
+import * as storage from "./storage";
+import { runGenerationJob } from "./services/generation";
+import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
+import { isR2Configured } from "./services/r2";
+import {
+  insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
+  insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
+  insertIndustrySchema, insertQueryClusterSchema, insertBlueprintSchema,
+  insertPageSchema, insertGenerationJobSchema,
+} from "@shared/schema";
+import { z } from "zod";
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  app.use(sessionMiddleware());
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  // ── Auth Routes ──────────────────────────────────────────────────────────
+
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password required" });
+    }
+    const user = await loginUser(req, email, password);
+    if (!user) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    const { password: _, ...safeUser } = user;
+    return res.json({ user: safeUser });
+  });
+
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.session.destroy(() => {
+      res.json({ message: "Logged out" });
+    });
+  });
+
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const user = await storage.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ message: "User not found" });
+    const { password: _, ...safeUser } = user;
+    return res.json({ user: safeUser });
+  });
+
+  // ── Dashboard ─────────────────────────────────────────────────────────────
+
+  app.get("/api/dashboard/stats", requireAuth, async (req: Request, res: Response) => {
+    const stats = await storage.getDashboardStats();
+    return res.json(stats);
+  });
+
+  app.get("/api/dashboard/activity", requireAuth, async (req: Request, res: Response) => {
+    const activity = await storage.getRecentActivity(20);
+    return res.json(activity);
+  });
+
+  // ── Accounts ──────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {
+    const all = await storage.getAccounts();
+    return res.json(all);
+  });
+
+  app.get("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    const account = await storage.getAccount(req.params.id);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+    return res.json(account);
+  });
+
+  app.post("/api/accounts", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const parsed = insertAccountSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const account = await storage.createAccount(parsed.data);
+    return res.status(201).json(account);
+  });
+
+  app.patch("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    const account = await storage.updateAccount(req.params.id, req.body);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+    return res.json(account);
+  });
+
+  app.delete("/api/accounts/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    await storage.deleteAccount(req.params.id);
+    return res.json({ message: "Account deleted" });
+  });
+
+  // ── Users ─────────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/users", requireAuth, async (req: Request, res: Response) => {
+    const users = await storage.getUsersByAccount(req.params.accountId);
+    return res.json(users.map(({ password: _, ...u }) => u));
+  });
+
+  app.post("/api/accounts/:accountId/users", requireAuth, async (req: Request, res: Response) => {
+    const { password, ...rest } = req.body;
+    const hashed = await hashPassword(password || "changeme");
+    const user = await storage.createUser({
+      ...rest,
+      accountId: req.params.accountId,
+      password: hashed,
+    });
+    const { password: _, ...safeUser } = user;
+    return res.status(201).json(safeUser);
+  });
+
+  app.get("/api/users", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const accounts = await storage.getAccounts();
+    const allUsers: any[] = [];
+    for (const acc of accounts) {
+      const users = await storage.getUsersByAccount(acc.id);
+      allUsers.push(...users.map(({ password: _, ...u }) => ({ ...u, accountName: acc.name })));
+    }
+    return res.json(allUsers);
+  });
+
+  // ── Brand Profiles ────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getBrandProfiles(req.params.accountId));
+  });
+
+  app.post("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertBrandProfileSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createBrandProfile(parsed.data));
+  });
+
+  app.get("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
+    const bp = await storage.getBrandProfile(req.params.id);
+    if (!bp) return res.status(404).json({ message: "Brand profile not found" });
+    return res.json(bp);
+  });
+
+  app.patch("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
+    const bp = await storage.updateBrandProfile(req.params.id, req.body);
+    if (!bp) return res.status(404).json({ message: "Not found" });
+    return res.json(bp);
+  });
+
+  app.delete("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteBrandProfile(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Websites ──────────────────────────────────────────────────────────────
+
+  app.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.query.accountId as string | undefined;
+    return res.json(await storage.getWebsites(accountId));
+  });
+
+  app.get("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+    return res.json(website);
+  });
+
+  app.post("/api/websites", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertWebsiteSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createWebsite(parsed.data));
+  });
+
+  app.patch("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.updateWebsite(req.params.id, req.body);
+    if (!website) return res.status(404).json({ message: "Not found" });
+    return res.json(website);
+  });
+
+  app.delete("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteWebsite(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Locations ─────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
+    const type = req.query.type as string | undefined;
+    return res.json(await storage.getLocations(req.params.accountId, type));
+  });
+
+  app.post("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertLocationSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createLocation(parsed.data));
+  });
+
+  app.patch("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
+    const loc = await storage.updateLocation(req.params.id, req.body);
+    if (!loc) return res.status(404).json({ message: "Not found" });
+    return res.json(loc);
+  });
+
+  app.delete("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteLocation(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Services ──────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getServices(req.params.accountId));
+  });
+
+  app.post("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertServiceSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createService(parsed.data));
+  });
+
+  app.patch("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
+    const svc = await storage.updateService(req.params.id, req.body);
+    if (!svc) return res.status(404).json({ message: "Not found" });
+    return res.json(svc);
+  });
+
+  app.delete("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteService(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Industries ────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getIndustries(req.params.accountId));
+  });
+
+  app.post("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertIndustrySchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createIndustry(parsed.data));
+  });
+
+  app.patch("/api/industries/:id", requireAuth, async (req: Request, res: Response) => {
+    const ind = await storage.updateIndustry(req.params.id, req.body);
+    if (!ind) return res.status(404).json({ message: "Not found" });
+    return res.json(ind);
+  });
+
+  app.delete("/api/industries/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteIndustry(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Query Clusters ────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getQueryClusters(req.params.accountId));
+  });
+
+  app.post("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertQueryClusterSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createQueryCluster(parsed.data));
+  });
+
+  app.patch("/api/query-clusters/:id", requireAuth, async (req: Request, res: Response) => {
+    const qc = await storage.updateQueryCluster(req.params.id, req.body);
+    if (!qc) return res.status(404).json({ message: "Not found" });
+    return res.json(qc);
+  });
+
+  // ── Blueprints ────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getBlueprints(req.params.accountId));
+  });
+
+  app.get("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
+    const bp = await storage.getBlueprint(req.params.id);
+    if (!bp) return res.status(404).json({ message: "Not found" });
+    return res.json(bp);
+  });
+
+  app.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertBlueprintSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createBlueprint(parsed.data));
+  });
+
+  app.patch("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
+    const bp = await storage.updateBlueprint(req.params.id, req.body);
+    if (!bp) return res.status(404).json({ message: "Not found" });
+    return res.json(bp);
+  });
+
+  app.delete("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteBlueprint(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Pages ─────────────────────────────────────────────────────────────────
+
+  app.get("/api/websites/:websiteId/pages", requireAuth, async (req: Request, res: Response) => {
+    const status = req.query.status as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const pageList = await storage.getPages(req.params.websiteId, { status, limit, offset });
+    const total = await storage.getPageCount(req.params.websiteId, status);
+    return res.json({ pages: pageList, total });
+  });
+
+  app.get("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
+    const page = await storage.getPage(req.params.id);
+    if (!page) return res.status(404).json({ message: "Page not found" });
+    const versions = await storage.getPageVersions(page.id);
+    const activeVersion = versions.find((v) => v.isActive);
+    return res.json({ page, versions, activeVersion });
+  });
+
+  app.post("/api/websites/:websiteId/pages", requireAuth, async (req: Request, res: Response) => {
+    const parsed = insertPageSchema.safeParse({ ...req.body, websiteId: req.params.websiteId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    return res.status(201).json(await storage.createPage(parsed.data));
+  });
+
+  app.patch("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
+    const page = await storage.updatePage(req.params.id, req.body);
+    if (!page) return res.status(404).json({ message: "Not found" });
+    return res.json(page);
+  });
+
+  // Publish a page
+  app.post("/api/pages/:id/publish", requireAuth, async (req: Request, res: Response) => {
+    const page = await storage.getPage(req.params.id);
+    if (!page) return res.status(404).json({ message: "Page not found" });
+    if (!page.passedQa) return res.status(400).json({ message: "Page has not passed QA" });
+
+    const updated = await storage.updatePage(req.params.id, {
+      status: "published",
+      publishedAt: new Date(),
+    });
+
+    const website = await storage.getWebsite(page.websiteId);
+    if (website) {
+      await storage.updateWebsite(page.websiteId, {
+        publishedPages: (website.publishedPages || 0) + 1,
+      } as any);
+    }
+
+    return res.json(updated);
+  });
+
+  // Prune a page
+  app.post("/api/pages/:id/prune", requireAuth, async (req: Request, res: Response) => {
+    const { reason } = req.body;
+    const updated = await storage.updatePage(req.params.id, {
+      status: "pruned",
+      pruneReason: reason || "Manual prune",
+    });
+    return res.json(updated);
+  });
+
+  // Approve page for publish queue
+  app.post("/api/pages/:id/approve", requireAuth, async (req: Request, res: Response) => {
+    const updated = await storage.updatePage(req.params.id, { status: "approved" });
+    return res.json(updated);
+  });
+
+  app.delete("/api/pages/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deletePage(req.params.id);
+    return res.json({ message: "Deleted" });
+  });
+
+  // ── Generation Jobs ───────────────────────────────────────────────────────
+
+  app.get("/api/websites/:websiteId/jobs", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getGenerationJobs(req.params.websiteId));
+  });
+
+  app.get("/api/jobs", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getGenerationJobs());
+  });
+
+  app.get("/api/jobs/:id", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    return res.json(job);
+  });
+
+  app.post("/api/jobs", requireAuth, async (req: Request, res: Response) => {
+    const {
+      accountId, websiteId, blueprintId, jobName,
+      locationIds, serviceIds, industryIds,
+    } = req.body;
+
+    if (!accountId || !websiteId || !blueprintId) {
+      return res.status(400).json({ message: "accountId, websiteId, blueprintId required" });
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    }
+
+    const job = await storage.createGenerationJob({
+      accountId,
+      websiteId,
+      blueprintId,
+      name: jobName || `Generation Job ${new Date().toISOString()}`,
+      status: "pending",
+      totalPages: 0,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+    });
+
+    // Run job async — don't await it
+    runGenerationJob(job, {
+      accountId,
+      websiteId,
+      blueprintId,
+      jobName: job.name,
+      locationIds: locationIds || [],
+      serviceIds: serviceIds || [],
+      industryIds: industryIds || [],
+    }).catch((err) => {
+      console.error("Generation job failed:", err);
+    });
+
+    return res.status(201).json(job);
+  });
+
+  app.post("/api/jobs/:id/cancel", requireAuth, async (req: Request, res: Response) => {
+    const updated = await storage.updateGenerationJob(req.params.id, {
+      status: "cancelled",
+      completedAt: new Date(),
+    });
+    return res.json(updated);
+  });
+
+  // ── Sitemaps ──────────────────────────────────────────────────────────────
+
+  app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getSitemaps(req.params.websiteId));
+  });
+
+  app.post("/api/websites/:websiteId/sitemaps/generate", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const keys = await generateSitemapsForWebsite(req.params.websiteId, website.domain);
+    return res.json({ message: "Sitemaps generated", keys });
+  });
+
+  // ── SEO Routes (live page rendering) ─────────────────────────────────────
+
+  app.get("/api/websites/:websiteId/sitemap.xml", async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.websiteId);
+    if (!website) return res.status(404).send("Not found");
+
+    const sitemapList = await storage.getSitemaps(req.params.websiteId);
+    const baseUrl = `https://${website.domain}`;
+    const today = new Date().toISOString().split("T")[0];
+
+    if (sitemapList.length === 0) {
+      // Generate inline sitemap
+      const publishedPages = await storage.getPages(req.params.websiteId, { status: "published", limit: 50000 });
+      const urls = publishedPages.map((p) => ({
+        loc: `${baseUrl}/${p.slug}`,
+        lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+        priority: "0.7",
+      }));
+      const { buildSitemapXml } = await import("./services/sitemap");
+      res.setHeader("Content-Type", "application/xml");
+      return res.send(buildSitemapXml(urls));
+    }
+
+    const { buildSitemapIndexXml } = await import("./services/sitemap");
+    const indexXml = buildSitemapIndexXml(
+      sitemapList.map((sm) => ({
+        loc: `${baseUrl}/${sm.slug}.xml`,
+        lastmod: today,
+      }))
+    );
+    res.setHeader("Content-Type", "application/xml");
+    return res.send(indexXml);
+  });
+
+  app.get("/api/websites/:websiteId/robots.txt", async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.websiteId);
+    if (!website) return res.status(404).send("Not found");
+
+    if (website.robotsTxt) {
+      res.setHeader("Content-Type", "text/plain");
+      return res.send(website.robotsTxt);
+    }
+
+    res.setHeader("Content-Type", "text/plain");
+    return res.send(generateRobotsTxt(website.domain));
+  });
+
+  // ── System Info ───────────────────────────────────────────────────────────
+
+  app.get("/api/system/status", requireAuth, async (req: Request, res: Response) => {
+    return res.json({
+      claudeConfigured: !!process.env.ANTHROPIC_API_KEY,
+      r2Configured: isR2Configured(),
+      appBaseUrl: process.env.APP_BASE_URL || null,
+    });
+  });
 
   return httpServer;
 }
