@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
-import { generateBlueprint } from "./services/claude";
+import { generateBlueprint, suggestServices } from "./services/claude";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
@@ -498,7 +498,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── System Info ───────────────────────────────────────────────────────────
 
-  // ── AI Blueprint Generation ───────────────────────────────────────────────
+  // ── AI Endpoints ─────────────────────────────────────────────────────────
+
+  app.post("/api/ai/suggest-services", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    }
+    const { businessName, websiteUrl, industry, existingServices } = req.body;
+    if (!businessName || !industry) {
+      return res.status(400).json({ message: "businessName and industry are required" });
+    }
+    try {
+      const services = await suggestServices({ businessName, websiteUrl, industry, existingServices });
+      return res.json(services);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message || "Service suggestion failed" });
+    }
+  });
+
   app.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res: Response) => {
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });

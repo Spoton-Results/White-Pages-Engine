@@ -147,6 +147,59 @@ Respond with JSON:
 }`;
 }
 
+export interface SuggestedService {
+  name: string;
+  slug: string;
+  description: string;
+  keywords: string[];
+}
+
+export async function suggestServices(opts: {
+  businessName: string;
+  websiteUrl?: string;
+  industry: string;
+  existingServices?: string[];
+}): Promise<SuggestedService[]> {
+  const { businessName, websiteUrl, industry, existingServices = [] } = opts;
+
+  const prompt = `You are an expert local SEO strategist. Suggest a complete list of services for a business.
+
+BUSINESS DETAILS:
+- Business Name: ${businessName}
+- Industry: ${industry}
+${websiteUrl ? `- Website: ${websiteUrl}` : ""}
+${existingServices.length > 0 ? `- Already has these services (do NOT repeat them): ${existingServices.join(", ")}` : ""}
+
+Generate 6-10 distinct services this business should have pages for. Think about what customers actually search for.
+
+For each service:
+- name: Clear, customer-friendly service name
+- slug: lowercase-hyphenated URL slug
+- description: 1-2 sentence description of the service
+- keywords: 4-6 SEO search terms customers use to find this service
+
+Respond ONLY with a JSON array:
+[
+  {
+    "name": "Service Name",
+    "slug": "service-name",
+    "description": "What this service is and who it's for.",
+    "keywords": ["keyword 1", "keyword 2", "keyword 3", "keyword 4"]
+  }
+]`;
+
+  const message = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const raw = message.content[0].type === "text" ? message.content[0].text : "";
+  const jsonMatch = raw.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
+  return JSON.parse(jsonMatch[0]) as SuggestedService[];
+}
+
 export interface GeneratedBlueprint {
   name: string;
   pageType: string;
