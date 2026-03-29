@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, Play, Square, Plus, RefreshCw, Zap, CheckCircle, XCircle, Clock } from "lucide-react";
+import { AlertCircle, Play, Square, Plus, RefreshCw, Zap, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -30,6 +30,15 @@ export default function JobsPage() {
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [locFilter, setLocFilter] = useState("");
   const [locTypeFilter, setLocTypeFilter] = useState<"all" | "state" | "city">("state");
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  const toggleErrors = (jobId: string) => {
+    setExpandedErrors(prev => {
+      const next = new Set(prev);
+      next.has(jobId) ? next.delete(jobId) : next.add(jobId);
+      return next;
+    });
+  };
 
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ["/api/jobs", websiteIdFilter],
@@ -233,6 +242,30 @@ export default function JobsPage() {
                       {job.createdAt && <span>Created {formatDistanceToNow(new Date(job.createdAt))} ago</span>}
                       {job.completedAt && <span>Completed {formatDistanceToNow(new Date(job.completedAt))} ago</span>}
                     </div>
+
+                    {/* Error log toggle */}
+                    {job.failedPages > 0 && job.errorLog?.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-xs text-destructive hover:underline"
+                          onClick={() => toggleErrors(job.id)}
+                        >
+                          {expandedErrors.has(job.id) ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                          {expandedErrors.has(job.id) ? "Hide" : "Show"} {job.errorLog.length} error{job.errorLog.length !== 1 ? "s" : ""}
+                        </button>
+                        {expandedErrors.has(job.id) && (
+                          <div className="mt-1.5 space-y-1 max-h-40 overflow-y-auto">
+                            {job.errorLog.map((err: any, i: number) => (
+                              <div key={i} className="text-xs bg-red-50 border border-red-100 rounded px-2 py-1.5 text-red-700">
+                                <span className="font-medium">{err.location || "—"} × {err.service || "—"}</span>
+                                <span className="block text-red-500 mt-0.5 break-all">{err.error}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {job.status === "running" && (

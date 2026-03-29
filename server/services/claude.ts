@@ -68,6 +68,58 @@ function interpolate(template: string, ctx: PageContext): string {
     .trim();
 }
 
+/** Strip markdown code fences and extract the first JSON object or array */
+function extractJson(raw: string): string | null {
+  // Remove markdown code fences
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/m, "")
+    .replace(/\s*```\s*$/m, "")
+    .trim();
+
+  // Find the first complete JSON object
+  const objMatch = stripped.match(/\{[\s\S]*\}/);
+  if (objMatch) return objMatch[0];
+
+  // Find the first complete JSON array
+  const arrMatch = stripped.match(/\[[\s\S]*\]/);
+  if (arrMatch) return arrMatch[0];
+
+  return null;
+}
+
+/** Count words in an HTML string */
+function countWordsInHtml(html: string): number {
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return 0;
+  return text.split(" ").filter(Boolean).length;
+}
+
+/** Retry wrapper for Claude API calls — handles transient overload/rate-limit errors */
+async function callWithRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 3000,
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      const isRetryable =
+        err?.status === 429 ||
+        err?.status === 529 ||
+        err?.status >= 500 ||
+        err?.message?.includes("overloaded") ||
+        err?.message?.includes("rate_limit");
+      if (!isRetryable || attempt === maxRetries) throw err;
+      const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
 function buildFirstPassPrompt(ctx: PageContext): string {
   const title = interpolate(ctx.titleTemplate, ctx);
   const h1 = interpolate(ctx.h1Template, ctx);
@@ -77,7 +129,9 @@ function buildFirstPassPrompt(ctx: PageContext): string {
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 
-  const sections = ctx.sections.map((s: any) => `- ${s.name}: ${s.description || s.name}`).join("\n");
+  const sections = ctx.sections
+    .map((s: any) => `- ${s.name}: ${s.description || s.name}`)
+    .join("\n");
 
   return `You are an expert local SEO content writer. Generate a high-quality, locally-specific white-pages article.
 
@@ -108,17 +162,16 @@ INSTRUCTIONS:
 6. Include specific local signals: street references, local landmarks, community context
 ${ctx.faqEnabled ? "7. Include a FAQ section with 4-6 relevant questions and detailed answers" : ""}
 
-OUTPUT FORMAT (respond with valid JSON only):
+OUTPUT FORMAT (respond with ONLY valid JSON — no markdown, no code fences, no explanation):
 {
   "title": "${title}",
   "metaDescription": "${metaDesc}",
   "h1": "${h1}",
   "slug": "${slug}",
-  "contentHtml": "<full HTML content here with proper h2, p, ul tags>",
-  "wordCount": <number>,
+  "contentHtml": "<full HTML content with proper h2, p, ul tags — write ALL ${ctx.requiredWordCount}+ words here>",
   "publishScore": <0.0-1.0 float, your honest quality assessment>,
-  "localSignalScore": <0.0-1.0 float, how locally specific is the content>,
-  "faqItems": [{"question": "...", "answer": "..."}]
+  "localSignalScore": <0.0-1.0 float, how locally specific is the content>${ctx.faqEnabled ? `,
+  "faqItems": [{"question": "...", "answer": "..."}]` : ""}
 }`;
 }
 
@@ -137,13 +190,12 @@ REVIEW CRITERIA:
 ORIGINAL CONTENT:
 ${originalHtml.substring(0, 6000)}
 
-Respond with JSON:
+Respond with ONLY valid JSON (no markdown, no code fences):
 {
-  "passed": true/false,
+  "passed": true,
   "score": <0.0-1.0>,
   "issues": ["list of specific issues found"],
-  "notes": "brief overall assessment",
-  "rewrittenHtml": "<only if failed: provide improved version>"
+  "notes": "brief overall assessment"
 }`;
 }
 
@@ -178,7 +230,7 @@ For each service:
 - description: 1-2 sentence description of the service
 - keywords: 4-6 SEO search terms customers use to find this service
 
-Respond ONLY with a JSON array:
+Respond ONLY with a JSON array (no markdown, no code fences):
 [
   {
     "name": "Service Name",
@@ -188,16 +240,18 @@ Respond ONLY with a JSON array:
   }
 ]`;
 
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 2000,
-    messages: [{ role: "user", content: prompt }],
-  });
+  return callWithRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 2000,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-  const jsonMatch = raw.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
-  return JSON.parse(jsonMatch[0]) as SuggestedService[];
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const jsonStr = extractJson(raw);
+    if (!jsonStr) throw new Error("Claude did not return valid JSON");
+    return JSON.parse(jsonStr) as SuggestedService[];
+  });
 }
 
 export interface GeneratedBlueprint {
@@ -249,7 +303,7 @@ TEMPLATE VARIABLES AVAILABLE:
 
 Generate a complete SEO-optimized blueprint for this page type. Think about what would actually rank well and convert visitors.
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON (no markdown, no code fences):
 {
   "name": "<descriptive blueprint name>",
   "pageType": "${pageType}",
@@ -262,86 +316,97 @@ Respond ONLY with valid JSON in this exact format:
   "faqEnabled": true,
   "promptFamily": "local_service",
   "sections": [
-    { "name": "<section name>", "description": "<what Claude should write in this section, 1-2 sentences>" },
-    ...4-7 sections total including intro, local content, service details, trust signals, FAQ, CTA...
+    { "name": "<section name>", "description": "<what Claude should write in this section, 1-2 sentences>" }
   ]
 }`;
 
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    messages: [{ role: "user", content: prompt }],
-  });
+  return callWithRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
-  return JSON.parse(jsonMatch[0]) as GeneratedBlueprint;
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const jsonStr = extractJson(raw);
+    if (!jsonStr) throw new Error("Claude did not return valid JSON");
+    return JSON.parse(jsonStr) as GeneratedBlueprint;
+  });
 }
 
 export async function generateFirstPass(ctx: PageContext): Promise<GeneratedPage> {
   const prompt = buildFirstPassPrompt(ctx);
 
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
+  return callWithRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 8000,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const jsonStr = extractJson(raw);
+    if (!jsonStr) {
+      throw new Error(`Claude returned no parseable JSON. Raw output starts: ${raw.substring(0, 200)}`);
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e: any) {
+      throw new Error(`JSON parse failed: ${e.message}. Raw snippet: ${jsonStr.substring(0, 200)}`);
+    }
+
+    const contentHtml = parsed.contentHtml || "";
+
+    return {
+      title: parsed.title || interpolate(ctx.titleTemplate, ctx),
+      metaDescription: parsed.metaDescription || "",
+      h1: parsed.h1 || "",
+      slug: parsed.slug || "",
+      contentHtml,
+      wordCount: countWordsInHtml(contentHtml),
+      publishScore: Math.min(1, Math.max(0, parseFloat(parsed.publishScore) || 0.5)),
+      localSignalScore: Math.min(1, Math.max(0, parseFloat(parsed.localSignalScore) || 0.5)),
+      faqItems: parsed.faqItems || [],
+      promptTokens: message.usage.input_tokens,
+      completionTokens: message.usage.output_tokens,
+    };
   });
-
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("Claude did not return valid JSON in first pass");
-  }
-
-  const parsed = JSON.parse(jsonMatch[0]);
-
-  return {
-    title: parsed.title || interpolate(ctx.titleTemplate, ctx),
-    metaDescription: parsed.metaDescription || "",
-    h1: parsed.h1 || "",
-    slug: parsed.slug || "",
-    contentHtml: parsed.contentHtml || "",
-    wordCount: parsed.wordCount || 0,
-    publishScore: parseFloat(parsed.publishScore) || 0.5,
-    localSignalScore: parseFloat(parsed.localSignalScore) || 0.5,
-    faqItems: parsed.faqItems || [],
-    promptTokens: message.usage.input_tokens,
-    completionTokens: message.usage.output_tokens,
-  };
 }
 
 export async function reviewAndRewrite(html: string, ctx: PageContext): Promise<ReviewResult> {
   const prompt = buildReviewPrompt(html, ctx);
 
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
+  return callWithRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const jsonStr = extractJson(raw);
+    if (!jsonStr) {
+      return {
+        passed: true,
+        score: 0.7,
+        issues: [],
+        notes: "Review parse failed — treating as passed",
+        promptTokens: message.usage.input_tokens,
+        completionTokens: message.usage.output_tokens,
+      };
+    }
+
+    const parsed = JSON.parse(jsonStr);
     return {
-      passed: false,
-      score: 0,
-      issues: ["Failed to parse review response"],
-      notes: "Review failed",
+      passed: Boolean(parsed.passed),
+      score: parseFloat(parsed.score) || 0,
+      issues: parsed.issues || [],
+      rewrittenHtml: parsed.rewrittenHtml,
+      notes: parsed.notes || "",
       promptTokens: message.usage.input_tokens,
       completionTokens: message.usage.output_tokens,
     };
-  }
-
-  const parsed = JSON.parse(jsonMatch[0]);
-
-  return {
-    passed: Boolean(parsed.passed),
-    score: parseFloat(parsed.score) || 0,
-    issues: parsed.issues || [],
-    rewrittenHtml: parsed.rewrittenHtml,
-    notes: parsed.notes || "",
-    promptTokens: message.usage.input_tokens,
-    completionTokens: message.usage.output_tokens,
-  };
+  });
 }

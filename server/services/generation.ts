@@ -263,13 +263,18 @@ export async function runGenerationJob(
 
         log(`✓ Page created: ${finalSlug} (score: ${finalScore}, qa: ${qaResult.passed})`);
 
-        // Small delay to avoid rate limits
-        await new Promise((r) => setTimeout(r, 500));
+        // Delay between requests to stay within rate limits
+        await new Promise((r) => setTimeout(r, 1200));
       } catch (err: any) {
         failed++;
         processed++;
-        errors.push({ combo: JSON.stringify(combo), error: err.message });
-        log(`✗ Failed: ${err.message}`);
+        const errDetails = {
+          location: combo.location?.name,
+          service: combo.service?.name,
+          error: err.message,
+        };
+        errors.push(errDetails);
+        log(`✗ Failed [${combo.location?.name || ""}×${combo.service?.name || ""}]: ${err.message}`);
 
         await db.updateGenerationJob(job.id, {
           processedPages: processed,
