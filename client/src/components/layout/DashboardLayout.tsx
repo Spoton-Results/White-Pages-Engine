@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Globe, FileText,
   Bell, LogOut, Building2, MapPin, Wrench, Factory,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, X
+  Map, Menu, X, BookOpen
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ const contentNav = [
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
   { name: "Users & Roles", href: "/users", icon: Users },
+  { name: "Operations Guide", href: "/guide", icon: BookOpen },
 ];
 
 function NavItem({ item, onClick }: { item: { name: string; href: string; icon: any }; onClick?: () => void }) {

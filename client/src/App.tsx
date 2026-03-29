@@ -24,6 +24,7 @@ import PublishedPagesPage from "@/pages/published";
 import JobsPage from "@/pages/jobs";
 import SitemapsPage from "@/pages/sitemaps";
 import UsersPage from "@/pages/users";
+import GuidePage from "@/pages/guide";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -125,6 +126,9 @@ function Router() {
       </Route>
       <Route path="/users">
         <AuthGuard><UsersPage /></AuthGuard>
+      </Route>
+      <Route path="/guide">
+        <AuthGuard><GuidePage /></AuthGuard>
       </Route>
       <Route>
         <NotFound />
