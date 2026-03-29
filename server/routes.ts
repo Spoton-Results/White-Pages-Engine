@@ -442,6 +442,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(updated);
   });
 
+  // Bulk-publish all review/approved pages for a website
+  app.post("/api/websites/:id/pages/publish-all", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id;
+    const review = await storage.getPages(websiteId, { status: "review", limit: 100000 });
+    const approved = await storage.getPages(websiteId, { status: "approved", limit: 100000 });
+    const toPublish = [...review, ...approved];
+
+    const now = new Date();
+    let count = 0;
+    for (const p of toPublish) {
+      await storage.updatePage(p.id, { status: "published", publishedAt: now });
+      count++;
+    }
+
+    const website = await storage.getWebsite(websiteId);
+    if (website && count > 0) {
+      await storage.updateWebsite(websiteId, {
+        publishedPages: (website.publishedPages || 0) + count,
+      } as any);
+    }
+
+    return res.json({ published: count });
+  });
+
   // Prune a page
   app.post("/api/pages/:id/prune", requireAuth, async (req: Request, res: Response) => {
     const { reason } = req.body;

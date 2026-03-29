@@ -32,6 +32,22 @@ export default function PublishedPagesPage() {
     enabled: !!selectedWebsite,
   });
 
+  const { data: reviewData } = useQuery({
+    queryKey: ["/api/pages/review", selectedWebsite],
+    queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=review&limit=1`) : Promise.resolve({ pages: [], total: 0 }),
+    enabled: !!selectedWebsite,
+  });
+
+  const publishAll = useMutation({
+    mutationFn: () => api.post<any>(`/api/websites/${selectedWebsite}/pages/publish-all`, {}),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/pages/published"] });
+      qc.invalidateQueries({ queryKey: ["/api/pages/review"] });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: `Published ${data.published} pages` });
+    },
+  });
+
   const prune = useMutation({
     mutationFn: (id: string) => api.post(`/api/pages/${id}/prune`, { reason: "Manually pruned from published view" }),
     onSuccess: () => {
@@ -58,16 +74,32 @@ export default function PublishedPagesPage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Published Pages</h1>
             <p className="text-muted-foreground text-sm mt-0.5">
-              {pagesData?.total ? `${pagesData.total} pages published` : "Manage live published pages."}
+              {pagesData?.total ? `${pagesData.total} pages live` : "Manage live published pages."}
+              {reviewData?.total > 0 && (
+                <span className="ml-2 text-amber-600 font-medium">{reviewData.total} awaiting publish</span>
+              )}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/published"] })}>
-            <RefreshCw className="size-4 mr-2" />Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {reviewData?.total > 0 && selectedWebsite && (
+              <Button
+                size="sm"
+                onClick={() => publishAll.mutate()}
+                disabled={publishAll.isPending}
+                data-testid="button-publish-all"
+              >
+                <Globe className="size-4 mr-2" />
+                {publishAll.isPending ? "Publishing…" : `Publish All (${reviewData.total})`}
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/published"] })}>
+              <RefreshCw className="size-4 mr-2" />Refresh
+            </Button>
+          </div>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">

@@ -207,7 +207,9 @@ export async function runGenerationJob(
         const existingPage = await db.getPageBySlug(task.websiteId, generated.slug);
         const finalSlug = existingPage ? `${generated.slug}-${Date.now()}` : generated.slug;
 
-        const pageStatus = qaResult.passed ? "review" : "draft";
+        // Auto-publish if QA passes, otherwise draft for manual review
+        const pageStatus = qaResult.passed ? "published" : "draft";
+        const publishedAt = qaResult.passed ? new Date() : undefined;
 
         // Create page record
         const page = await db.createPage({
@@ -223,6 +225,7 @@ export async function runGenerationJob(
           h1: generated.h1,
           canonicalUrl: `https://${website.domain}/${finalSlug}`,
           status: pageStatus,
+          publishedAt,
           publishScore: String(finalScore),
           localSignalScore: String(generated.localSignalScore),
           wordCount: generated.wordCount,
@@ -278,6 +281,16 @@ export async function runGenerationJob(
     }
 
     log(`Job completed: ${passed} passed, ${failed} failed out of ${total} total`);
+
+    // Sync published page count on the website record
+    if (passed > 0) {
+      const freshWebsite = await db.getWebsite(task.websiteId);
+      if (freshWebsite) {
+        await db.updateWebsite(task.websiteId, {
+          publishedPages: (freshWebsite.publishedPages || 0) + passed,
+        } as any);
+      }
+    }
 
     await db.updateGenerationJob(job.id, {
       status: "completed",
