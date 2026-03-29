@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Trash2, RefreshCw, Globe, Copy } from "lucide-react";
+import { Search, ExternalLink, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -20,6 +20,7 @@ export default function PublishedPagesPage() {
   const params = new URLSearchParams(search);
   const [selectedWebsite, setSelectedWebsite] = useState(params.get("websiteId") || "");
   const [searchText, setSearchText] = useState("");
+  const [showDns, setShowDns] = useState(false);
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -102,10 +103,59 @@ export default function PublishedPagesPage() {
           </div>
         </div>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-          <strong>How publishing works:</strong> Pages are served live at{" "}
-          <code className="bg-blue-100 px-1 rounded text-xs">{platformBase}/sites/yourdomain.com/slug</code>.
-          To serve them on <strong>your own domain</strong>, point a subdomain (e.g. <code className="bg-blue-100 px-1 rounded text-xs">local.spotonresults.com</code>) to this app, or configure Cloudflare R2.
+        <div className="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden text-sm">
+          <div className="flex items-start justify-between gap-3 p-3">
+            <div className="flex items-start gap-2 text-blue-800">
+              <Info className="size-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold">How pages are served: </span>
+                {currentWebsite ? (
+                  <>
+                    Pages for <strong>{currentWebsite.domain}</strong> are live at{" "}
+                    <button
+                      className="font-mono bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded text-xs transition-colors inline-flex items-center gap-1"
+                      onClick={() => { navigator.clipboard.writeText(`${platformBase}/sites/${currentWebsite.domain}/`); toast({ title: "Base URL copied" }); }}
+                    >
+                      {platformBase}/sites/{currentWebsite.domain}/…
+                      <Copy className="size-3" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Pages are served at{" "}
+                    <code className="bg-blue-100 px-1 rounded text-xs">{platformBase}/sites/yourdomain.com/slug</code>
+                  </>
+                )}
+              </div>
+            </div>
+            <button
+              className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs whitespace-nowrap shrink-0"
+              onClick={() => setShowDns(!showDns)}
+            >
+              {showDns ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+              Own domain setup
+            </button>
+          </div>
+          {showDns && (
+            <div className="border-t border-blue-200 bg-blue-100/50 px-4 py-3 space-y-2 text-blue-900">
+              <p className="font-medium text-xs">To serve pages on your client's own domain, add this DNS record at their registrar or Cloudflare:</p>
+              <div className="font-mono text-xs bg-white border border-blue-200 rounded p-2.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                <span className="text-blue-400">Type</span><span>CNAME</span>
+                <span className="text-blue-400">Name</span>
+                <span>{currentWebsite?.domain || "subdomain.clientdomain.com"}</span>
+                <span className="text-blue-400">Value</span>
+                <button
+                  className="text-left hover:underline flex items-center gap-1"
+                  onClick={() => { navigator.clipboard.writeText(platformBase.replace(/^https?:\/\//,"")); toast({ title: "CNAME value copied" }); }}
+                >
+                  {platformBase.replace(/^https?:\/\//,"")}
+                  <Copy className="size-3 text-blue-400" />
+                </button>
+                <span className="text-blue-400">TTL</span><span>300</span>
+              </div>
+              <p className="text-xs text-blue-700">Once the CNAME propagates (5–30 min), the client's domain will route to this platform and serve pages automatically. No code changes needed.</p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border flex-wrap">

@@ -262,8 +262,8 @@ const PHASES: { label: string; color: string; steps: Step[] }[] = [
               </div>
               <div className="p-3 font-mono text-xs space-y-1 bg-zinc-950 text-zinc-200">
                 <div><span className="text-zinc-400">Type:</span> CNAME</div>
-                <div><span className="text-zinc-400">Name:</span> www  <span className="text-zinc-500">(or @)</span></div>
-                <div><span className="text-zinc-400">Value:</span> {"<platform-domain>.replit.app"}</div>
+                <div><span className="text-zinc-400">Name:</span> local  <span className="text-zinc-500">(subdomain only, e.g. "local" for local.spotonresults.com)</span></div>
+                <div><span className="text-zinc-400">Value:</span> sospages.replit.app</div>
                 <div><span className="text-zinc-400">TTL:</span> 300</div>
               </div>
             </div>
