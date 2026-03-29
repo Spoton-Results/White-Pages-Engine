@@ -21,7 +21,7 @@ function notFoundHtml(msg: string): string {
   <body><div class="box"><h1>404</h1><p>${msg}</p></div></body></html>`;
 }
 
-function renderPageHtml(page: any, website: any, brand: any): string {
+function renderPageHtml(page: any, version: any, website: any, brand: any): string {
   const brandName = brand?.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || "";
@@ -97,7 +97,7 @@ function renderPageHtml(page: any, website: any, brand: any): string {
   </div>
 
   <main>
-    ${page.contentHtml || "<p>Content coming soon.</p>"}
+    ${version?.contentHtml || "<p>Content coming soon.</p>"}
   </main>
 
   <footer>
@@ -603,11 +603,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(404).send(notFoundHtml("Page not found or not yet published"));
     }
 
+    // Get active content version
+    const version = await storage.getActivePageVersion(page.id);
+
     // Get brand profile for branding
     const brandProfiles = await storage.getBrandProfiles(website.accountId);
     const brand = brandProfiles[0];
 
-    const html = renderPageHtml(page, website, brand);
+    const html = renderPageHtml(page, version, website, brand);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
