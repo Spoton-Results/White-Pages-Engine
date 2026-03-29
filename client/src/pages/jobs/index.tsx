@@ -36,6 +36,8 @@ export default function JobsPage() {
   const { data: systemStatus } = useQuery({
     queryKey: ["/api/system/status"],
     queryFn: () => api.get<any>("/api/system/status"),
+    staleTime: 0,
+    refetchOnMount: true,
   });
 
   const { data: websites = [] } = useQuery({
