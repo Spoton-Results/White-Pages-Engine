@@ -68,23 +68,18 @@ function interpolate(template: string, ctx: PageContext): string {
     .trim();
 }
 
-/** Strip markdown code fences and extract the first JSON object or array */
-function extractJson(raw: string): string | null {
-  // Remove markdown code fences
-  const stripped = raw
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```\s*$/m, "")
-    .trim();
-
-  // Find the first complete JSON object
-  const objMatch = stripped.match(/\{[\s\S]*\}/);
-  if (objMatch) return objMatch[0];
-
-  // Find the first complete JSON array
-  const arrMatch = stripped.match(/\[[\s\S]*\]/);
-  if (arrMatch) return arrMatch[0];
-
-  return null;
+/** Extract a named section from a delimited response */
+function extractSection(raw: string, name: string): string {
+  const startMarker = `====${name}====`;
+  const start = raw.indexOf(startMarker);
+  if (start === -1) return "";
+  const contentStart = start + startMarker.length;
+  // Find the next ==== marker
+  const nextMarker = raw.indexOf("====", contentStart);
+  const content = nextMarker === -1
+    ? raw.substring(contentStart)
+    : raw.substring(contentStart, nextMarker);
+  return content.trim();
 }
 
 /** Count words in an HTML string */
@@ -94,7 +89,20 @@ function countWordsInHtml(html: string): number {
   return text.split(" ").filter(Boolean).length;
 }
 
-/** Retry wrapper for Claude API calls — handles transient overload/rate-limit errors */
+/** Strip markdown code fences and extract the first JSON object or array */
+function extractJson(raw: string): string | null {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/m, "")
+    .replace(/\s*```\s*$/m, "")
+    .trim();
+  const objMatch = stripped.match(/\{[\s\S]*\}/);
+  if (objMatch) return objMatch[0];
+  const arrMatch = stripped.match(/\[[\s\S]*\]/);
+  if (arrMatch) return arrMatch[0];
+  return null;
+}
+
+/** Retry wrapper — handles transient overload / rate-limit errors */
 async function callWithRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
@@ -119,6 +127,12 @@ async function callWithRetry<T>(
   }
   throw lastError;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// First-pass prompt uses a DELIMITER format to avoid HTML-inside-JSON issues.
+// Claude's HTML will never be embedded in a JSON string, eliminating escaping
+// bugs (unescaped quotes in href/class attributes, etc.).
+// ─────────────────────────────────────────────────────────────────────────────
 
 function buildFirstPassPrompt(ctx: PageContext): string {
   const title = interpolate(ctx.titleTemplate, ctx);
@@ -162,17 +176,26 @@ INSTRUCTIONS:
 6. Include specific local signals: street references, local landmarks, community context
 ${ctx.faqEnabled ? "7. Include a FAQ section with 4-6 relevant questions and detailed answers" : ""}
 
-OUTPUT FORMAT (respond with ONLY valid JSON — no markdown, no code fences, no explanation):
-{
-  "title": "${title}",
-  "metaDescription": "${metaDesc}",
-  "h1": "${h1}",
-  "slug": "${slug}",
-  "contentHtml": "<full HTML content with proper h2, p, ul tags — write ALL ${ctx.requiredWordCount}+ words here>",
-  "publishScore": <0.0-1.0 float, your honest quality assessment>,
-  "localSignalScore": <0.0-1.0 float, how locally specific is the content>${ctx.faqEnabled ? `,
-  "faqItems": [{"question": "...", "answer": "..."}]` : ""}
-}`;
+IMPORTANT — OUTPUT FORMAT:
+Use EXACTLY these delimiters (four equals signs, name, four equals signs). Output nothing outside them.
+
+====TITLE====
+${title}
+====META====
+${metaDesc}
+====H1====
+${h1}
+====SLUG====
+${slug}
+====PUBLISH_SCORE====
+<a decimal 0.0-1.0 representing your honest quality assessment>
+====LOCAL_SIGNAL_SCORE====
+<a decimal 0.0-1.0 representing how locally specific this content is>
+====CONTENT====
+<Write the full HTML article here using <h2>, <p>, <ul>, <li> tags. Write ALL ${ctx.requiredWordCount}+ words. Use double quotes for HTML attributes.>
+${ctx.faqEnabled ? `====FAQ====
+<A JSON array of FAQ objects: [{"question":"...","answer":"..."}]>` : ""}
+====END====`;
 }
 
 function buildReviewPrompt(originalHtml: string, ctx: PageContext): string {
@@ -301,7 +324,7 @@ TEMPLATE VARIABLES AVAILABLE:
 - {brand} — business name
 - {industry} — industry name
 
-Generate a complete SEO-optimized blueprint for this page type. Think about what would actually rank well and convert visitors.
+Generate a complete SEO-optimized blueprint for this page type.
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
@@ -316,7 +339,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "faqEnabled": true,
   "promptFamily": "local_service",
   "sections": [
-    { "name": "<section name>", "description": "<what Claude should write in this section, 1-2 sentences>" }
+    { "name": "<section name>", "description": "<1-2 sentences>" }
   ]
 }`;
 
@@ -345,30 +368,46 @@ export async function generateFirstPass(ctx: PageContext): Promise<GeneratedPage
     });
 
     const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = extractJson(raw);
-    if (!jsonStr) {
-      throw new Error(`Claude returned no parseable JSON. Raw output starts: ${raw.substring(0, 200)}`);
+
+    // Parse using section delimiters — no JSON for the HTML content
+    const title = extractSection(raw, "TITLE") || interpolate(ctx.titleTemplate, ctx);
+    const metaDescription = extractSection(raw, "META") || "";
+    const h1 = extractSection(raw, "H1") || "";
+    const slug = (extractSection(raw, "SLUG") || "")
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
+    const publishScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "PUBLISH_SCORE")) || 0.5));
+    const localSignalScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "LOCAL_SIGNAL_SCORE")) || 0.5));
+    const contentHtml = extractSection(raw, "CONTENT");
+    const faqRaw = extractSection(raw, "FAQ");
+
+    if (!contentHtml) {
+      throw new Error(
+        `Claude returned no CONTENT section. Response starts: ${raw.substring(0, 300)}`
+      );
     }
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (e: any) {
-      throw new Error(`JSON parse failed: ${e.message}. Raw snippet: ${jsonStr.substring(0, 200)}`);
+    let faqItems: Array<{ question: string; answer: string }> = [];
+    if (faqRaw) {
+      try {
+        const jsonStr = extractJson(faqRaw) || faqRaw;
+        faqItems = JSON.parse(jsonStr);
+      } catch {
+        // FAQ parse failure is non-fatal
+      }
     }
-
-    const contentHtml = parsed.contentHtml || "";
 
     return {
-      title: parsed.title || interpolate(ctx.titleTemplate, ctx),
-      metaDescription: parsed.metaDescription || "",
-      h1: parsed.h1 || "",
-      slug: parsed.slug || "",
+      title,
+      metaDescription,
+      h1,
+      slug,
       contentHtml,
       wordCount: countWordsInHtml(contentHtml),
-      publishScore: Math.min(1, Math.max(0, parseFloat(parsed.publishScore) || 0.5)),
-      localSignalScore: Math.min(1, Math.max(0, parseFloat(parsed.localSignalScore) || 0.5)),
-      faqItems: parsed.faqItems || [],
+      publishScore,
+      localSignalScore,
+      faqItems,
       promptTokens: message.usage.input_tokens,
       completionTokens: message.usage.output_tokens,
     };
