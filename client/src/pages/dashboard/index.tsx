@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Users, Globe, FileText, ArrowUpRight, Activity, Zap, Building2, 
-  CheckCircle, Clock, AlertCircle, BarChart3
+  CheckCircle, AlertCircle, BarChart3
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { api } from "@/lib/api";
@@ -60,8 +60,7 @@ export default function Dashboard() {
             { label: "Accounts", value: stats?.totalAccounts, icon: Building2, color: "text-violet-500" },
             { label: "Websites", value: stats?.totalWebsites, icon: Globe, color: "text-blue-500" },
             { label: "Published", value: stats?.publishedPages, icon: CheckCircle, color: "text-emerald-500" },
-            { label: "In Review", value: stats?.reviewPages, icon: Clock, color: "text-amber-500" },
-            { label: "Drafts", value: stats?.draftPages, icon: FileText, color: "text-gray-400" },
+            { label: "Failed QA", value: stats?.draftPages, icon: AlertCircle, color: "text-amber-500" },
             { label: "Active Jobs", value: stats?.activeJobs, icon: Activity, color: "text-red-500" },
           ].map((stat) => (
             <Card key={stat.label} className="xl:col-span-1">
@@ -173,8 +172,8 @@ export default function Dashboard() {
         <div className="grid gap-3 md:grid-cols-4">
           {[
             { title: "New Generation Job", desc: "Generate pages with Claude AI", href: "/jobs", icon: Zap, color: "from-blue-500/10" },
-            { title: "Review Drafts", desc: `${stats?.reviewPages || 0} pages awaiting review`, href: "/drafts", icon: FileText, color: "from-amber-500/10" },
-            { title: "Publish Queue", desc: "Approve and publish ready pages", href: "/publish-queue", icon: CheckCircle, color: "from-emerald-500/10" },
+            { title: "Review Drafts", desc: `${stats?.draftPages || 0} failed-QA pages to review`, href: "/drafts", icon: FileText, color: "from-amber-500/10" },
+            { title: "Published Pages", desc: `${stats?.publishedPages || 0} pages live`, href: "/published", icon: CheckCircle, color: "from-emerald-500/10" },
             { title: "Manage Sitemaps", desc: "Generate & export sitemaps", href: "/sitemaps", icon: BarChart3, color: "from-violet-500/10" },
           ].map((action) => (
             <Link key={action.title} href={action.href}>

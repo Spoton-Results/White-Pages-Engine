@@ -76,6 +76,10 @@ export async function createUser(data: InsertUser): Promise<User> {
   return row;
 }
 
+export async function getSuperAdminUsers(): Promise<User[]> {
+  return db.select().from(users).where(eq(users.isSuperAdmin, true));
+}
+
 export async function updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined> {
   const [row] = await db.update(users).set(data).where(eq(users.id, id)).returning();
   return row;

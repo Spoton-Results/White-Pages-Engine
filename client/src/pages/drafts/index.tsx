@@ -7,10 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, X, Eye, FileText, RefreshCw, AlertCircle } from "lucide-react";
+import { Check, X, Eye, FileText, RefreshCw, AlertCircle, Globe } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { formatDistanceToNow } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function DraftsPage() {
@@ -26,24 +25,27 @@ export default function DraftsPage() {
   });
 
   const { data: pagesData, isLoading } = useQuery({
-    queryKey: ["/api/pages/review", selectedWebsite],
-    queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=review`) : Promise.resolve({ pages: [], total: 0 }),
+    queryKey: ["/api/pages/draft", selectedWebsite],
+    queryFn: () => selectedWebsite
+      ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=draft`)
+      : Promise.resolve({ pages: [], total: 0 }),
     enabled: !!selectedWebsite,
   });
 
-  const approve = useMutation({
-    mutationFn: (id: string) => api.post(`/api/pages/${id}/approve`, {}),
+  const publish = useMutation({
+    mutationFn: (id: string) => api.post(`/api/pages/${id}/publish`, {}),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/pages/review"] });
+      qc.invalidateQueries({ queryKey: ["/api/pages/draft"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Page approved for publish queue" });
+      toast({ title: "Page published" });
     },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
   const prune = useMutation({
     mutationFn: (id: string) => api.post(`/api/pages/${id}/prune`, { reason: "Pruned from draft review" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/pages/review"] });
+      qc.invalidateQueries({ queryKey: ["/api/pages/draft"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({ title: "Page pruned" });
     },
@@ -67,9 +69,11 @@ export default function DraftsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Draft Review</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">Review AI-generated pages before publishing.</p>
+            <p className="text-muted-foreground text-sm mt-0.5">
+              Pages that failed QA — review and publish or prune them.
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/review"] })}>
+          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/draft"] })}>
             <RefreshCw className="size-4 mr-2" />Refresh
           </Button>
         </div>
@@ -105,8 +109,10 @@ export default function DraftsPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3 border rounded-lg bg-card">
             <Check className="size-12 text-emerald-500/50" />
             <div>
-              <h3 className="font-semibold">No pages in review</h3>
-              <p className="text-muted-foreground text-sm mt-1">All caught up! Run a generation job to create new pages.</p>
+              <h3 className="font-semibold">No drafts to review</h3>
+              <p className="text-muted-foreground text-sm mt-1">
+                All pages with QA issues have been handled. Run a generation job to create new pages.
+              </p>
             </div>
           </div>
         ) : (
@@ -118,11 +124,9 @@ export default function DraftsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-medium text-sm truncate">{page.title}</h3>
-                      {!page.passedQa && (
-                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs shrink-0">
-                          <AlertCircle className="size-3 mr-1" />QA Issues
-                        </Badge>
-                      )}
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs shrink-0">
+                        <AlertCircle className="size-3 mr-1" />Failed QA
+                      </Badge>
                     </div>
                     <div className="text-xs text-muted-foreground font-mono">{page.slug}</div>
                     <div className="flex items-center gap-4 mt-2 text-xs">
@@ -152,11 +156,13 @@ export default function DraftsPage() {
                       <Eye className="size-4 mr-1" />Preview
                     </Button>
                     <Button size="sm" variant="outline" className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                      onClick={() => approve.mutate(page.id)} disabled={approve.isPending}>
-                      <Check className="size-4 mr-1" />Approve
+                      onClick={() => publish.mutate(page.id)} disabled={publish.isPending}
+                      data-testid={`button-publish-${page.id}`}>
+                      <Globe className="size-4 mr-1" />Publish
                     </Button>
                     <Button size="sm" variant="outline" className="h-8 border-red-200 text-red-700 hover:bg-red-50"
-                      onClick={() => prune.mutate(page.id)} disabled={prune.isPending}>
+                      onClick={() => prune.mutate(page.id)} disabled={prune.isPending}
+                      data-testid={`button-prune-${page.id}`}>
                       <X className="size-4 mr-1" />Prune
                     </Button>
                   </div>
@@ -230,8 +236,8 @@ export default function DraftsPage() {
           </Tabs>
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700"
-              onClick={() => { approve.mutate(previewPage.id); setPreviewPage(null); }}>
-              <Check className="size-4 mr-1" />Approve
+              onClick={() => { publish.mutate(previewPage.id); setPreviewPage(null); }}>
+              <Globe className="size-4 mr-1" />Publish
             </Button>
             <Button variant="outline" size="sm" className="border-red-200 text-red-700"
               onClick={() => { prune.mutate(previewPage.id); setPreviewPage(null); }}>

@@ -31,7 +31,6 @@ const navigation = [
 
 const contentNav = [
   { name: "Draft Review", href: "/drafts", icon: FileText },
-  { name: "Publish Queue", href: "/publish-queue", icon: Zap },
   { name: "Published Pages", href: "/published", icon: Globe },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
