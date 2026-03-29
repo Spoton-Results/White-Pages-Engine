@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Trash2, RefreshCw, Globe } from "lucide-react";
+import { Search, ExternalLink, Trash2, RefreshCw, Globe, Copy } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -46,6 +46,15 @@ export default function PublishedPagesPage() {
     !searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.slug.includes(searchText.toLowerCase())
   );
 
+  const platformBase = window.location.origin;
+  const pageUrl = (page: any) =>
+    currentWebsite ? `${platformBase}/sites/${currentWebsite.domain}/${page.slug}` : null;
+
+  const copyUrl = (page: any) => {
+    const url = pageUrl(page);
+    if (url) { navigator.clipboard.writeText(url); toast({ title: "URL copied" }); }
+  };
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
@@ -59,6 +68,12 @@ export default function PublishedPagesPage() {
           <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/published"] })}>
             <RefreshCw className="size-4 mr-2" />Refresh
           </Button>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+          <strong>How publishing works:</strong> Pages are served live at{" "}
+          <code className="bg-blue-100 px-1 rounded text-xs">{platformBase}/sites/yourdomain.com/slug</code>.
+          To serve them on <strong>your own domain</strong>, point a subdomain (e.g. <code className="bg-blue-100 px-1 rounded text-xs">local.spotonresults.com</code>) to this app, or configure Cloudflare R2.
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border flex-wrap">
@@ -115,13 +130,18 @@ export default function PublishedPagesPage() {
                   <TableRow key={page.id}>
                     <TableCell>
                       <div className="font-medium text-sm truncate max-w-[280px]">{page.title}</div>
-                      <div className="text-xs text-muted-foreground font-mono truncate max-w-[280px] flex items-center gap-1">
-                        /{page.slug}
-                        {currentWebsite && (
-                          <a href={`https://${currentWebsite.domain}/${page.slug}`} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="size-3 text-muted-foreground hover:text-primary" />
-                          </a>
-                        )}
+                      <div className="text-xs text-muted-foreground font-mono truncate max-w-[260px] flex items-center gap-1.5 mt-0.5">
+                        <span className="truncate">/{page.slug}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button type="button" onClick={() => copyUrl(page)} title="Copy URL" className="hover:text-primary">
+                            <Copy className="size-3" />
+                          </button>
+                          {pageUrl(page) && (
+                            <a href={pageUrl(page)!} target="_blank" rel="noopener noreferrer" title="Open page">
+                              <ExternalLink className="size-3 hover:text-primary" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>

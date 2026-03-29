@@ -14,6 +14,100 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 
+function notFoundHtml(msg: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title>
+  <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8f9fa;}
+  .box{text-align:center;padding:2rem;max-width:400px;}h1{color:#374151;}p{color:#6b7280;}</style></head>
+  <body><div class="box"><h1>404</h1><p>${msg}</p></div></body></html>`;
+}
+
+function renderPageHtml(page: any, website: any, brand: any): string {
+  const brandName = brand?.name || website.domain;
+  const primaryColor = brand?.primaryColor || "#2563eb";
+  const phone = brand?.phone || "";
+  const tagline = brand?.tagline || "";
+
+  // Schema markup
+  const schemaJson = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": page.title,
+    "description": page.metaDescription,
+    "url": `https://${website.domain}/${page.slug}`,
+    "publisher": { "@type": "Organization", "name": brandName },
+  });
+
+  const faqSchema = page.faqItems?.length ? JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": page.faqItems.map((f: any) => ({
+      "@type": "Question",
+      "name": f.question,
+      "acceptedAnswer": { "@type": "Answer", "text": f.answer },
+    })),
+  }) : null;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${page.title}</title>
+  <meta name="description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
+  <meta property="og:title" content="${page.title}" />
+  <meta property="og:description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
+  <meta property="og:type" content="website" />
+  <link rel="canonical" href="https://${website.domain}/${page.slug}" />
+  <script type="application/ld+json">${schemaJson}</script>
+  ${faqSchema ? `<script type="application/ld+json">${faqSchema}</script>` : ""}
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;line-height:1.6}
+    a{color:${primaryColor};text-decoration:none}
+    a:hover{text-decoration:underline}
+    header{background:${primaryColor};color:#fff;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+    header .brand{font-size:1.25rem;font-weight:700;color:#fff}
+    header .phone{font-size:1rem;font-weight:600;color:#fff;opacity:.9}
+    .hero{background:${primaryColor}10;border-bottom:1px solid ${primaryColor}20;padding:3rem 2rem 2.5rem}
+    .hero h1{font-size:2rem;font-weight:800;color:#111827;max-width:800px;line-height:1.2}
+    .hero .tagline{color:#6b7280;margin-top:.5rem;font-size:1rem}
+    main{max-width:900px;margin:2.5rem auto;padding:0 1.5rem}
+    main h2{font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid ${primaryColor}20}
+    main p{margin-bottom:1rem;color:#374151}
+    main ul,main ol{margin:.5rem 0 1rem 1.5rem}
+    main li{margin-bottom:.35rem;color:#374151}
+    main strong{color:#111827}
+    .cta-box{background:${primaryColor};color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center}
+    .cta-box h2{color:#fff;border:none;margin:.5rem 0}
+    .cta-box p{color:#fff;opacity:.9}
+    .cta-box a{display:inline-block;background:#fff;color:${primaryColor};font-weight:700;padding:.75rem 2rem;border-radius:.5rem;margin-top:1rem;font-size:1rem}
+    .cta-box a:hover{background:#f0f0f0;text-decoration:none}
+    footer{background:#f9fafb;border-top:1px solid #e5e7eb;padding:1.5rem 2rem;text-align:center;color:#9ca3af;font-size:.85rem;margin-top:3rem}
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">${brandName}</span>
+    ${phone ? `<a href="tel:${phone.replace(/\D/g, "")}" class="phone">${phone}</a>` : ""}
+  </header>
+
+  <div class="hero">
+    <h1>${page.h1 || page.title}</h1>
+    ${tagline ? `<p class="tagline">${tagline}</p>` : ""}
+  </div>
+
+  <main>
+    ${page.contentHtml || "<p>Content coming soon.</p>"}
+  </main>
+
+  <footer>
+    &copy; ${new Date().getFullYear()} ${brandName}. All rights reserved.
+    ${phone ? ` &bull; <a href="tel:${phone.replace(/\D/g, "")}">${phone}</a>` : ""}
+  </footer>
+</body>
+</html>`;
+}
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   app.use(sessionMiddleware());
 
@@ -497,6 +591,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── System Info ───────────────────────────────────────────────────────────
+
+  // ── Public Page Serving ──────────────────────────────────────────────────
+  // Serves published pages at /sites/:domain/:slug as full HTML
+  app.get("/sites/:domain/:slug", async (req: Request, res: Response) => {
+    const website = await storage.getWebsiteByDomain(req.params.domain);
+    if (!website) return res.status(404).send(notFoundHtml("Website not found"));
+
+    const page = await storage.getPageBySlug(website.id, req.params.slug);
+    if (!page || page.status !== "published") {
+      return res.status(404).send(notFoundHtml("Page not found or not yet published"));
+    }
+
+    // Get brand profile for branding
+    const brandProfiles = await storage.getBrandProfiles(website.accountId);
+    const brand = brandProfiles[0];
+
+    const html = renderPageHtml(page, website, brand);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.send(html);
+  });
 
   // ── AI Endpoints ─────────────────────────────────────────────────────────
 
