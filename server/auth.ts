@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import session from "express-session";
+import connectPg from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import * as storage from "./storage";
 
@@ -12,14 +13,22 @@ declare module "express-session" {
   }
 }
 
+const PgSession = connectPg(session);
+
 export function sessionMiddleware() {
   return session({
+    store: new PgSession({
+      conString: process.env.DATABASE_URL,
+      tableName: "session",
+      createTableIfMissing: true,
+    }),
     secret: process.env.SESSION_SECRET || "nexus-platform-secret-2025",
     resave: false,
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   });
