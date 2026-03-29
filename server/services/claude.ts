@@ -147,6 +147,85 @@ Respond with JSON:
 }`;
 }
 
+export interface GeneratedBlueprint {
+  name: string;
+  pageType: string;
+  titleTemplate: string;
+  metaDescTemplate: string;
+  h1Template: string;
+  slugTemplate: string;
+  requiredWordCount: number;
+  minPublishScore: string;
+  faqEnabled: boolean;
+  promptFamily: string;
+  sections: Array<{ name: string; description: string }>;
+}
+
+export async function generateBlueprint(opts: {
+  businessName: string;
+  industry: string;
+  serviceName?: string;
+  pageType: string;
+  extraContext?: string;
+}): Promise<GeneratedBlueprint> {
+  const { businessName, industry, serviceName, pageType, extraContext } = opts;
+
+  const pageTypeLabels: Record<string, string> = {
+    service_city: "Service + City (e.g. 'Credit Card Processing in Austin, TX')",
+    state_hub: "State Hub (e.g. 'Merchant Services in Texas')",
+    city_hub: "City Hub (e.g. 'Business Services in Houston')",
+    industry_city: "Industry + City (e.g. 'Restaurant Payment Solutions in Chicago')",
+    problem_intent: "Problem Intent (e.g. 'How to Accept Credit Cards for Small Business')",
+  };
+
+  const prompt = `You are an expert SEO strategist generating a page blueprint for a white-pages publishing platform.
+
+BUSINESS DETAILS:
+- Business Name: ${businessName}
+- Industry: ${industry}
+${serviceName ? `- Specific Service: ${serviceName}` : ""}
+- Page Type: ${pageTypeLabels[pageType] || pageType}
+${extraContext ? `- Extra Context: ${extraContext}` : ""}
+
+TEMPLATE VARIABLES AVAILABLE:
+- {service} — the service name (e.g. "Credit Card Processing")
+- {location} — city name (e.g. "Austin")
+- {state} — state name (e.g. "Texas")
+- {brand} — business name
+- {industry} — industry name
+
+Generate a complete SEO-optimized blueprint for this page type. Think about what would actually rank well and convert visitors.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "name": "<descriptive blueprint name>",
+  "pageType": "${pageType}",
+  "titleTemplate": "<SEO title using template vars, max 60 chars when rendered>",
+  "metaDescTemplate": "<compelling meta description using template vars, max 160 chars when rendered>",
+  "h1Template": "<main heading using template vars>",
+  "slugTemplate": "<URL slug using template vars, lowercase-hyphenated>",
+  "requiredWordCount": <700-1200 integer>,
+  "minPublishScore": "<0.60-0.75 as string>",
+  "faqEnabled": true,
+  "promptFamily": "local_service",
+  "sections": [
+    { "name": "<section name>", "description": "<what Claude should write in this section, 1-2 sentences>" },
+    ...4-7 sections total including intro, local content, service details, trust signals, FAQ, CTA...
+  ]
+}`;
+
+  const message = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const raw = message.content[0].type === "text" ? message.content[0].text : "";
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
+  return JSON.parse(jsonMatch[0]) as GeneratedBlueprint;
+}
+
 export async function generateFirstPass(ctx: PageContext): Promise<GeneratedPage> {
   const prompt = buildFirstPassPrompt(ctx);
 

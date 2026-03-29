@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
+import { generateBlueprint } from "./services/claude";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
@@ -496,6 +497,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── System Info ───────────────────────────────────────────────────────────
+
+  // ── AI Blueprint Generation ───────────────────────────────────────────────
+  app.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    }
+    const { businessName, industry, serviceName, pageType, extraContext } = req.body;
+    if (!businessName || !industry || !pageType) {
+      return res.status(400).json({ message: "businessName, industry, and pageType are required" });
+    }
+    try {
+      const blueprint = await generateBlueprint({ businessName, industry, serviceName, pageType, extraContext });
+      return res.json(blueprint);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message || "Blueprint generation failed" });
+    }
+  });
 
   app.get("/api/system/status", requireAuth, async (req: Request, res: Response) => {
     return res.json({
