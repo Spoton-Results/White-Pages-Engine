@@ -89,17 +89,48 @@ function countWordsInHtml(html: string): number {
   return text.split(" ").filter(Boolean).length;
 }
 
+/** Find the balanced closing bracket/brace, returning the substring from `start` inclusive */
+function extractBalanced(text: string, startChar: string): string | null {
+  const endChar = startChar === "{" ? "}" : "]";
+  const start = text.indexOf(startChar);
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === startChar) depth++;
+    else if (ch === endChar) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 /** Strip markdown code fences and extract the first JSON object or array */
 function extractJson(raw: string): string | null {
   const stripped = raw
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```\s*$/m, "")
+    .replace(/```(?:json)?\s*/g, "")
+    .replace(/```\s*/g, "")
     .trim();
-  const objMatch = stripped.match(/\{[\s\S]*\}/);
-  if (objMatch) return objMatch[0];
-  const arrMatch = stripped.match(/\[[\s\S]*\]/);
-  if (arrMatch) return arrMatch[0];
-  return null;
+  // Try object first, then array
+  const objStart = stripped.indexOf("{");
+  const arrStart = stripped.indexOf("[");
+  const tryObj = objStart !== -1 && (arrStart === -1 || objStart < arrStart);
+  if (tryObj) {
+    const obj = extractBalanced(stripped, "{");
+    if (obj) return obj;
+  }
+  const arr = extractBalanced(stripped, "[");
+  if (arr) return arr;
+  // Fallback: try object if array failed
+  const obj = extractBalanced(stripped, "{");
+  return obj;
 }
 
 /** Retry wrapper — handles transient overload / rate-limit errors */
