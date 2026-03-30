@@ -172,23 +172,21 @@ export async function runGenerationJob(
     let failed = 0;
     const errors: any[] = [];
 
-    for (const combo of combinations) {
+    // Process one page combination, returns true if passed
+    const processCombo = async (combo: typeof combinations[number]): Promise<void> => {
       try {
         const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry);
 
         log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
 
-        // First pass generation
         const generated = await generateFirstPass(ctx);
 
-        // Rule-based QA
         const qaResult = runRuleQA(generated, blueprint);
 
         let finalHtml = generated.contentHtml;
         let reviewNotes = "";
         let finalScore = generated.publishScore;
 
-        // Second pass review if first pass passed rules
         if (qaResult.passed) {
           try {
             const review = await reviewAndRewrite(generated.contentHtml, ctx);
@@ -203,19 +201,17 @@ export async function runGenerationJob(
           }
         }
 
-        // Slug uniqueness check
         const existingPage = await db.getPageBySlug(task.websiteId, generated.slug);
         if (existingPage) {
           console.warn(`Skipping duplicate slug: ${generated.slug}`);
-          continue;
+          processed++;
+          return;
         }
         const finalSlug = generated.slug;
 
-        // Auto-publish if QA passes, otherwise draft for manual review
         const pageStatus = qaResult.passed ? "published" : "draft";
         const publishedAt = qaResult.passed ? new Date() : undefined;
 
-        // Create page record
         const page = await db.createPage({
           websiteId: task.websiteId,
           blueprintId: task.blueprintId,
@@ -237,8 +233,7 @@ export async function runGenerationJob(
           qaReport: qaResult.report,
         });
 
-        // Create page version
-        const version = await db.createPageVersion({
+        await db.createPageVersion({
           pageId: page.id,
           version: 1,
           contentHtml: finalHtml,
@@ -248,7 +243,6 @@ export async function runGenerationJob(
           isActive: true,
         });
 
-        // Save to R2 if configured
         if (isR2Configured()) {
           try {
             await savePageArtifact(task.websiteId, page.id, finalHtml);
@@ -259,33 +253,32 @@ export async function runGenerationJob(
 
         passed++;
         processed++;
-        await db.updateGenerationJob(job.id, {
-          processedPages: processed,
-          passedPages: passed,
-          failedPages: failed,
-        });
-
         log(`✓ Page created: ${finalSlug} (score: ${finalScore}, qa: ${qaResult.passed})`);
-
-        // Delay between requests to stay within rate limits
-        await new Promise((r) => setTimeout(r, 1200));
       } catch (err: any) {
         failed++;
         processed++;
-        const errDetails = {
-          location: combo.location?.name,
-          service: combo.service?.name,
-          error: err.message,
-        };
-        errors.push(errDetails);
+        errors.push({ location: combo.location?.name, service: combo.service?.name, error: err.message });
         log(`✗ Failed [${combo.location?.name || ""}×${combo.service?.name || ""}]: ${err.message}`);
+      }
+    };
 
-        await db.updateGenerationJob(job.id, {
-          processedPages: processed,
-          passedPages: passed,
-          failedPages: failed,
-          errorLog: errors,
-        });
+    // Process in concurrent batches of 5 — ~5× faster than sequential
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < combinations.length; i += BATCH_SIZE) {
+      const batch = combinations.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(processCombo));
+
+      // Flush progress and errors after each batch
+      await db.updateGenerationJob(job.id, {
+        processedPages: processed,
+        passedPages: passed,
+        failedPages: failed,
+        errorLog: errors,
+      });
+
+      // Small pause between batches to respect rate limits
+      if (i + BATCH_SIZE < combinations.length) {
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
 
