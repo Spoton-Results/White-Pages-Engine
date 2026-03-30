@@ -125,7 +125,8 @@ export async function getWebsite(id: string): Promise<Website | undefined> {
 }
 
 export async function getWebsiteByDomain(domain: string): Promise<Website | undefined> {
-  const [row] = await db.select().from(websites).where(eq(websites.domain, domain));
+  const stripped = domain.startsWith("www.") ? domain.slice(4) : domain;
+  const [row] = await db.select().from(websites).where(eq(websites.domain, stripped));
   return row;
 }
 

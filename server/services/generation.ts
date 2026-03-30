@@ -205,7 +205,11 @@ export async function runGenerationJob(
 
         // Slug uniqueness check
         const existingPage = await db.getPageBySlug(task.websiteId, generated.slug);
-        const finalSlug = existingPage ? `${generated.slug}-${Date.now()}` : generated.slug;
+        if (existingPage) {
+          console.warn(`Skipping duplicate slug: ${generated.slug}`);
+          continue;
+        }
+        const finalSlug = generated.slug;
 
         // Auto-publish if QA passes, otherwise draft for manual review
         const pageStatus = qaResult.passed ? "published" : "draft";
