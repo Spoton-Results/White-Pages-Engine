@@ -735,6 +735,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
+      console.log("[domain-mw] raw host header:", req.headers.host, "path:", req.path);
       // Strip port from host header
       const host = (req.headers.host || "").split(":")[0].toLowerCase().trim();
 
