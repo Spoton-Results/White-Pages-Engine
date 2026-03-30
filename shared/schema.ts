@@ -285,6 +285,21 @@ export const stateData = pgTable("state_data", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Leads ────────────────────────────────────────────────────────────────────
+
+export const leads = pgTable("leads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").references(() => pages.id, { onDelete: "set null" }),
+  pageSlug: text("page_slug"),
+  name: text("name").notNull(),
+  businessName: text("business_name"),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  message: text("message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // ─── Insert Schemas & Types ───────────────────────────────────────────────────
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true, updatedAt: true });
@@ -337,3 +352,7 @@ export type InsertContentVariationBank = z.infer<typeof insertContentVariationBa
 export type ContentVariationBank = typeof contentVariationBanks.$inferSelect;
 export type InsertStateData = z.infer<typeof insertStateDataSchema>;
 export type StateData = typeof stateData.$inferSelect;
+
+export const insertLeadSchema = createInsertSchema(leads).omit({ id: true, createdAt: true });
+export type InsertLead = z.infer<typeof insertLeadSchema>;
+export type Lead = typeof leads.$inferSelect;

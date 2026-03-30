@@ -3,7 +3,7 @@ import { eq, and, desc, asc, ilike, sql, count, inArray, or } from "drizzle-orm"
 import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
-  generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData,
+  generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -20,6 +20,7 @@ import {
   type PageMetric, type InsertPageMetric,
   type ContentVariationBank, type InsertContentVariationBank,
   type StateData, type InsertStateData,
+  type Lead, type InsertLead,
 } from "@shared/schema";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
@@ -499,6 +500,30 @@ export async function getStateDataCount(): Promise<number> {
 export async function insertStateData(data: InsertStateData): Promise<StateData> {
   const [row] = await db.insert(stateData).values(data).returning();
   return row;
+}
+
+// ─── Leads ────────────────────────────────────────────────────────────────────
+
+export async function createLead(data: InsertLead): Promise<Lead> {
+  const [row] = await db.insert(leads).values(data).returning();
+  return row;
+}
+
+export async function getLeads(websiteId: string, limit = 50, offset = 0): Promise<Lead[]> {
+  return db.select().from(leads)
+    .where(eq(leads.websiteId, websiteId))
+    .orderBy(desc(leads.createdAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function getLeadCount(websiteId: string): Promise<number> {
+  const [{ c }] = await db.select({ c: count() }).from(leads).where(eq(leads.websiteId, websiteId));
+  return Number(c);
+}
+
+export async function getAllLeads(limit = 100, offset = 0): Promise<Lead[]> {
+  return db.select().from(leads).orderBy(desc(leads.createdAt)).limit(limit).offset(offset);
 }
 
 // Re-export IStorage interface for backwards compatibility

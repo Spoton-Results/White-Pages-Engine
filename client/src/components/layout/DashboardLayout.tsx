@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Globe, FileText,
   Bell, LogOut, Building2, MapPin, Wrench, Factory,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, X, BookOpen
+  Map, Menu, X, BookOpen, Inbox
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ const navigation = [
 const contentNav = [
   { name: "Draft Review", href: "/drafts", icon: FileText },
   { name: "Published Pages", href: "/published", icon: Globe },
+  { name: "Leads", href: "/leads", icon: Inbox },
   { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },

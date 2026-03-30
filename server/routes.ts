@@ -84,11 +84,20 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
     main ul,main ol{margin:.5rem 0 1rem 1.5rem}
     main li{margin-bottom:.35rem;color:#374151}
     main strong{color:#111827}
-    .cta-box{background:${primaryColor};color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center}
-    .cta-box h2{color:#fff;border:none;margin:.5rem 0}
-    .cta-box p{color:#fff;opacity:.9}
-    .cta-box a{display:inline-block;background:#fff;color:${primaryColor};font-weight:700;padding:.75rem 2rem;border-radius:.5rem;margin-top:1rem;font-size:1rem}
-    .cta-box a:hover{background:#f0f0f0;text-decoration:none}
+    .contact-section{background:#f8fafc;border-radius:.75rem;padding:2rem;margin:2.5rem 0;border:1px solid #e2e8f0}
+    .contact-section>h2{font-size:1.35rem;font-weight:700;color:#111827;margin-bottom:.5rem;border:none}
+    .contact-section>.sub{color:#6b7280;margin-bottom:1.25rem}
+    .cta-link{margin-bottom:1.25rem}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    @media(max-width:600px){.form-row{grid-template-columns:1fr}}
+    .form-group{margin-bottom:1rem}
+    label{display:block;font-size:.875rem;font-weight:600;color:#374151;margin-bottom:.35rem}
+    input[type=text],input[type=email],input[type=tel],textarea{width:100%;padding:.6rem .75rem;border:1px solid #d1d5db;border-radius:.5rem;font-size:.95rem;color:#1f2937;font-family:inherit;background:#fff;outline:none;transition:border-color .15s;box-sizing:border-box}
+    input:focus,textarea:focus{border-color:${primaryColor};box-shadow:0 0 0 3px ${primaryColor}33}
+    textarea{resize:vertical}
+    #submitBtn{background:${primaryColor};color:#fff;border:none;padding:.75rem 2rem;border-radius:.5rem;font-size:1rem;font-weight:700;cursor:pointer;margin-top:.5rem;width:100%}
+    #submitBtn:hover{opacity:.9}
+    #submitBtn:disabled{opacity:.6;cursor:not-allowed}
     footer{background:#f9fafb;border-top:1px solid #e5e7eb;padding:1.5rem 2rem;text-align:center;color:#9ca3af;font-size:.85rem;margin-top:3rem}
   </style>
 </head>
@@ -108,13 +117,83 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
   <main>
     ${version?.contentHtml || "<p>Content coming soon.</p>"}
 
-    ${mainWebsiteUrl ? `
-    <div class="cta-box">
+    <div class="contact-section">
       <h2>${ctaHeading}</h2>
-      <p>${ctaText}</p>
-      <a href="${mainWebsiteUrl}" target="_blank" rel="noopener">${ctaButtonLabel}</a>
-    </div>` : ""}
+      <p class="sub">${ctaText}</p>
+      ${mainWebsiteUrl ? `<p class="cta-link"><a href="${mainWebsiteUrl}" target="_blank" rel="noopener">Visit ${brandName} →</a></p>` : ""}
+      <form id="contactForm">
+        <div class="form-group">
+          <label for="cf-name">Your Name *</label>
+          <input type="text" id="cf-name" required placeholder="Jane Smith" />
+        </div>
+        <div class="form-group">
+          <label for="cf-biz">Business Name</label>
+          <input type="text" id="cf-biz" placeholder="Acme LLC" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cf-email">Email Address *</label>
+            <input type="email" id="cf-email" required placeholder="jane@example.com" />
+          </div>
+          <div class="form-group">
+            <label for="cf-phone">Phone Number</label>
+            <input type="tel" id="cf-phone" placeholder="(555) 123-4567" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="cf-msg">Message (optional)</label>
+          <textarea id="cf-msg" rows="3" placeholder="Tell us about your business..."></textarea>
+        </div>
+        <button type="submit" id="submitBtn">${ctaButtonLabel}</button>
+        <div id="formStatus" style="display:none;margin-top:1rem;padding:.75rem 1rem;border-radius:.5rem;font-weight:600;text-align:center"></div>
+      </form>
+    </div>
   </main>
+  <script>
+    document.getElementById('contactForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var btn = document.getElementById('submitBtn');
+      var status = document.getElementById('formStatus');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      fetch('/api/public/contact', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          websiteId: '${page.websiteId}',
+          pageId: '${page.id}',
+          pageSlug: '${page.slug}',
+          name: document.getElementById('cf-name').value,
+          businessName: document.getElementById('cf-biz').value,
+          email: document.getElementById('cf-email').value,
+          phone: document.getElementById('cf-phone').value,
+          message: document.getElementById('cf-msg').value
+        })
+      }).then(function(r){ return r.json(); }).then(function(data){
+        if (data.success) {
+          document.getElementById('contactForm').style.display = 'none';
+          status.style.display = 'block';
+          status.style.background = '#d1fae5';
+          status.style.color = '#065f46';
+          status.textContent = 'Thank you! We will be in touch shortly.';
+        } else {
+          status.style.display = 'block';
+          status.style.background = '#fee2e2';
+          status.style.color = '#991b1b';
+          status.textContent = data.message || 'Something went wrong. Please try again.';
+          btn.disabled = false;
+          btn.textContent = '${ctaButtonLabel}';
+        }
+      }).catch(function(){
+        status.style.display = 'block';
+        status.style.background = '#fee2e2';
+        status.style.color = '#991b1b';
+        status.textContent = 'Connection error. Please try again.';
+        btn.disabled = false;
+        btn.textContent = '${ctaButtonLabel}';
+      });
+    });
+  </script>
 
   <footer>
     &copy; ${new Date().getFullYear()} ${mainWebsiteUrl
@@ -952,6 +1031,93 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
 
     return res.json(results);
+  });
+
+  // ── Contact Form (public) ─────────────────────────────────────────────────
+
+  app.post("/api/public/contact", async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        websiteId: z.string().uuid(),
+        pageId: z.string().uuid().optional(),
+        pageSlug: z.string().optional(),
+        name: z.string().min(1).max(200),
+        businessName: z.string().max(200).optional(),
+        email: z.string().email(),
+        phone: z.string().max(50).optional(),
+        message: z.string().max(2000).optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const website = await storage.getWebsite(data.websiteId);
+      if (!website) return res.status(404).json({ success: false, message: "Unknown website" });
+
+      const lead = await storage.createLead({
+        websiteId: data.websiteId,
+        pageId: data.pageId || null,
+        pageSlug: data.pageSlug || null,
+        name: data.name,
+        businessName: data.businessName || null,
+        email: data.email,
+        phone: data.phone || null,
+        message: data.message || null,
+      });
+
+      const contactEmail = (website.settings as any)?.contactEmail;
+      if (contactEmail && process.env.SMTP_HOST) {
+        try {
+          const nodemailer = await import("nodemailer");
+          const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: parseInt(process.env.SMTP_PORT || "587"),
+            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          });
+          await transporter.sendMail({
+            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            to: contactEmail,
+            subject: `New lead from ${website.name}: ${data.name}`,
+            text: [
+              `Name: ${data.name}`,
+              `Business: ${data.businessName || "—"}`,
+              `Email: ${data.email}`,
+              `Phone: ${data.phone || "—"}`,
+              `Page: ${data.pageSlug || "—"}`,
+              `Message: ${data.message || "—"}`,
+            ].join("\n"),
+          });
+        } catch (mailErr) {
+          console.error("[contact] email send failed:", mailErr);
+        }
+      }
+
+      return res.json({ success: true, id: lead.id });
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ success: false, message: "Please fill in all required fields correctly." });
+      }
+      console.error("[contact] error:", err);
+      return res.status(500).json({ success: false, message: "Server error. Please try again." });
+    }
+  });
+
+  // ── Leads Admin ───────────────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/leads", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const limit = Math.min(parseInt((req.query.limit as string) || "50"), 200);
+    const offset = parseInt((req.query.offset as string) || "0");
+    const [items, total] = await Promise.all([
+      storage.getLeads(websiteId, limit, offset),
+      storage.getLeadCount(websiteId),
+    ]);
+    return res.json({ leads: items, total });
+  });
+
+  app.get("/api/leads", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "100"), 200);
+    const offset = parseInt((req.query.offset as string) || "0");
+    const items = await storage.getAllLeads(limit, offset);
+    return res.json({ leads: items });
   });
 
   return httpServer;
