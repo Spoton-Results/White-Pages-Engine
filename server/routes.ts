@@ -24,10 +24,14 @@ function notFoundHtml(msg: string): string {
 }
 
 function renderPageHtml(page: any, version: any, website: any, brand: any): string {
-  const brandName = brand?.name || website.domain;
+  const brandName = brand?.name || website.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
-  const phone = brand?.phone || "";
-  const tagline = brand?.tagline || "";
+  const phone = brand?.phone || (website.settings as any)?.phone || "";
+  const tagline = brand?.tagline || (website.settings as any)?.tagline || "";
+  const mainWebsiteUrl = (website.settings as any)?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const ctaHeading = (website.settings as any)?.ctaHeading || `Visit ${brandName}`;
+  const ctaText = (website.settings as any)?.ctaText || "See how we can help your business grow.";
+  const ctaButtonLabel = (website.settings as any)?.ctaButtonLabel || "Learn More";
 
   // Schema markup
   const schemaJson = JSON.stringify({
@@ -68,7 +72,8 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
     a{color:${primaryColor};text-decoration:none}
     a:hover{text-decoration:underline}
     header{background:${primaryColor};color:#fff;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
-    header .brand{font-size:1.25rem;font-weight:700;color:#fff}
+    header .brand{font-size:1.25rem;font-weight:700;color:#fff;text-decoration:none}
+    header .brand:hover{text-decoration:underline;color:#fff}
     header .phone{font-size:1rem;font-weight:600;color:#fff;opacity:.9}
     .hero{background:${primaryColor}10;border-bottom:1px solid ${primaryColor}20;padding:3rem 2rem 2.5rem}
     .hero h1{font-size:2rem;font-weight:800;color:#111827;max-width:800px;line-height:1.2}
@@ -89,7 +94,9 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
 </head>
 <body>
   <header>
-    <span class="brand">${brandName}</span>
+    ${mainWebsiteUrl
+      ? `<a href="${mainWebsiteUrl}" class="brand" target="_blank" rel="noopener">${brandName}</a>`
+      : `<span class="brand">${brandName}</span>`}
     ${phone ? `<a href="tel:${phone.replace(/\D/g, "")}" class="phone">${phone}</a>` : ""}
   </header>
 
@@ -100,11 +107,21 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
 
   <main>
     ${version?.contentHtml || "<p>Content coming soon.</p>"}
+
+    ${mainWebsiteUrl ? `
+    <div class="cta-box">
+      <h2>${ctaHeading}</h2>
+      <p>${ctaText}</p>
+      <a href="${mainWebsiteUrl}" target="_blank" rel="noopener">${ctaButtonLabel}</a>
+    </div>` : ""}
   </main>
 
   <footer>
-    &copy; ${new Date().getFullYear()} ${brandName}. All rights reserved.
-    ${phone ? ` &bull; <a href="tel:${phone.replace(/\D/g, "")}">${phone}</a>` : ""}
+    &copy; ${new Date().getFullYear()} ${mainWebsiteUrl
+      ? `<a href="${mainWebsiteUrl}" target="_blank" rel="noopener" style="color:#9ca3af">${brandName}</a>`
+      : brandName}. All rights reserved.
+    ${phone ? ` &bull; <a href="tel:${phone.replace(/\D/g, "")}" style="color:#9ca3af">${phone}</a>` : ""}
+    ${mainWebsiteUrl ? ` &bull; <a href="${mainWebsiteUrl}" target="_blank" rel="noopener" style="color:#9ca3af">${mainWebsiteUrl.replace(/^https?:\/\//, "")}</a>` : ""}
   </footer>
 </body>
 </html>`;
