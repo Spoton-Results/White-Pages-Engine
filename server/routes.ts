@@ -329,7 +329,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ message: "locations array required" });
     }
     const bulkItemSchema = insertLocationSchema.omit({ accountId: true });
-    const parsed: any[] = [];
+    type BulkItem = z.infer<typeof bulkItemSchema> & { accountId: string };
+    const parsed: BulkItem[] = [];
     for (let i = 0; i < rawItems.length; i++) {
       const result = bulkItemSchema.safeParse(rawItems[i]);
       if (!result.success) {

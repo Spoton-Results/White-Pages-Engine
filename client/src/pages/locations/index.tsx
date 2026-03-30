@@ -18,6 +18,15 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { US_STATES, US_CITIES_CLEAN, getCitiesByState } from "@/data/us-locations";
 
+interface LocationImportItem {
+  type: "state" | "city";
+  name: string;
+  slug: string;
+  stateCode: string;
+  stateName: string;
+  population: number;
+}
+
 const typeColors: Record<string, string> = {
   state: "bg-violet-500/10 text-violet-600",
   city: "bg-blue-500/10 text-blue-600",
@@ -63,9 +72,9 @@ export default function LocationsPage() {
   });
 
   const bulkImport = useMutation({
-    mutationFn: (items: any[]) =>
+    mutationFn: (items: LocationImportItem[]) =>
       api.post<{ inserted: number; skipped: number }>(`/api/accounts/${selectedAccount}/locations/bulk`, { locations: items }),
-    onSuccess: (result: any) => {
+    onSuccess: (result: { inserted: number; skipped: number }) => {
       qc.invalidateQueries({ queryKey: ["/api/locations"] });
       setShowBulk(false);
       toast({ title: `${result.inserted} location${result.inserted !== 1 ? "s" : ""} imported${result.skipped > 0 ? ` (${result.skipped} already existed)` : ""}` });
@@ -112,7 +121,7 @@ export default function LocationsPage() {
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
             <SelectContent>
-              {(accounts as any[]).map((a: any) => (
+              {accounts.map((a: any) => (
                 <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
               ))}
             </SelectContent>
@@ -123,7 +132,7 @@ export default function LocationsPage() {
               <Input placeholder="Search..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-locations" />
             </div>
           )}
-          {selectedAccount && <span className="text-sm text-muted-foreground" data-testid="text-location-count">{(locations as any[]).length} locations</span>}
+          {selectedAccount && <span className="text-sm text-muted-foreground" data-testid="text-location-count">{locations.length} locations</span>}
         </div>
 
         {!selectedAccount ? (
@@ -231,7 +240,7 @@ export default function LocationsPage() {
         <BulkImportDialog
           open={showBulk}
           onClose={() => setShowBulk(false)}
-          onImport={(items) => bulkImport.mutate(items)}
+          onImport={(items: LocationImportItem[]) => bulkImport.mutate(items)}
           isPending={bulkImport.isPending}
         />
       )}
@@ -244,7 +253,7 @@ function BulkImportDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onImport: (items: any[]) => void;
+  onImport: (items: LocationImportItem[]) => void;
   isPending: boolean;
 }) {
   const [tab, setTab] = useState<"states" | "cities">("states");
@@ -325,7 +334,7 @@ function BulkImportDialog({
   }
 
   function handleImport() {
-    const items: any[] = [];
+    const items: LocationImportItem[] = [];
     Array.from(selectedStates).forEach(code => {
       const st = US_STATES.find(s => s.code === code);
       if (st) items.push({ type: "state", name: st.name, slug: st.slug, stateCode: st.code, stateName: st.name, population: st.population });
