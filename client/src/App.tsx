@@ -67,7 +67,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!isLoading && !isAuthenticated) {
       navigate("/login");
     }
-  }, [isLoading, isAuthenticated, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, isAuthenticated]);
 
   if (isLoading) {
     return (
@@ -96,7 +97,8 @@ function LoginGuard() {
     if (!isLoading && isAuthenticated) {
       navigate("/");
     }
-  }, [isLoading, isAuthenticated, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, isAuthenticated]);
 
   if (isLoading) {
     return (
