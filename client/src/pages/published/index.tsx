@@ -65,7 +65,7 @@ export default function PublishedPagesPage() {
 
   const platformBase = window.location.origin;
   const pageUrl = (page: any) =>
-    currentWebsite ? `${platformBase}/sites/${currentWebsite.domain}/${page.slug}` : null;
+    currentWebsite ? `https://${currentWebsite.domain}/${page.slug}` : null;
 
   const copyUrl = (page: any) => {
     const url = pageUrl(page);
@@ -114,9 +114,9 @@ export default function PublishedPagesPage() {
                     Pages for <strong>{currentWebsite.domain}</strong> are live at{" "}
                     <button
                       className="font-mono bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded text-xs transition-colors inline-flex items-center gap-1"
-                      onClick={() => { navigator.clipboard.writeText(`${platformBase}/sites/${currentWebsite.domain}/`); toast({ title: "Base URL copied" }); }}
+                      onClick={() => { navigator.clipboard.writeText(`https://${currentWebsite.domain}/`); toast({ title: "Base URL copied" }); }}
                     >
-                      {platformBase}/sites/{currentWebsite.domain}/…
+                      https://{currentWebsite.domain}/…
                       <Copy className="size-3" />
                     </button>
                   </>
