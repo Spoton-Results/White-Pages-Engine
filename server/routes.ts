@@ -1046,6 +1046,26 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     const serviceSlug = body.service.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
+    // Fetch blueprint templates if one was selected
+    const blueprint = body.blueprintId ? await storage.getBlueprint(body.blueprintId) : null;
+    function applyBlueprintTemplates(vars: { service: string; location: string; state: string; stateAbbr: string; brand: string }) {
+      if (!blueprint) return null;
+      const interp = (t: string) => t
+        .replace(/\{service\}/gi, vars.service)
+        .replace(/\{location\}/gi, vars.location)
+        .replace(/\{state\}/gi, vars.state)
+        .replace(/\{brand\}/gi, vars.brand)
+        .replace(/\{keyword\}/gi, vars.service)
+        .replace(/-{2,}/g, "-").trim();
+      const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      return {
+        title: interp(blueprint.titleTemplate),
+        h1: interp(blueprint.h1Template),
+        metaDescription: interp(blueprint.metaDescTemplate),
+        slug: slugify(interp(blueprint.slugTemplate)),
+      };
+    }
+
     const allStateAbbrs = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
     const targets: Array<{ locationName: string; locationType: string; stateAbbr: string; stateName: string }> = [];
@@ -1074,7 +1094,20 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         const sd = await storage.getStateDataByAbbr(t.stateAbbr);
         const result = buildVariationPage(body.service, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd);
 
-        const existingPage = await storage.getPageBySlug(websiteId, result.slug);
+        // Apply blueprint templates if selected — they override title/H1/meta/slug
+        const bpOverride = applyBlueprintTemplates({
+          service: body.service,
+          location: t.locationName,
+          state: t.stateName,
+          stateAbbr: t.stateAbbr,
+          brand: brandName,
+        });
+        const finalSlug = bpOverride?.slug || result.slug;
+        const finalTitle = bpOverride?.title || result.title;
+        const finalH1 = bpOverride?.h1 || result.h1;
+        const finalMeta = bpOverride?.metaDescription || result.metaDescription;
+
+        const existingPage = await storage.getPageBySlug(websiteId, finalSlug);
         if (existingPage) {
           results.skipped++;
           continue;
@@ -1086,10 +1119,10 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
           serviceId: null,
           locationId: null,
           queryClusterId: null,
-          slug: result.slug,
-          title: result.title,
-          h1: result.h1,
-          metaDescription: result.metaDescription,
+          slug: finalSlug,
+          title: finalTitle,
+          h1: finalH1,
+          metaDescription: finalMeta,
           status: "published",
           pageType: t.locationType === "state" ? "state_hub" : "service_city",
           wordCount: result.wordCount,
@@ -1104,7 +1137,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         await storage.setActivePageVersion(page.id, pv.id);
 
         results.created++;
-        results.slugs.push(result.slug);
+        results.slugs.push(finalSlug);
       } catch (err) {
         results.errors++;
         console.error("[bulk-generate] error for", t.locationName, err);
@@ -1112,6 +1145,20 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
 
     return res.json(results);
+  });
+
+  // ── Content Find-and-Replace (admin) ─────────────────────────────────────
+  app.post("/api/websites/:id/content-replace", requireAuth, async (req: Request, res: Response) => {
+    const schema = z.object({
+      find: z.string().min(1),
+      replace: z.string(),
+    });
+    const { find, replace } = schema.parse(req.body);
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const updated = await storage.replacePageContent(websiteId, find, replace);
+    return res.json({ updated });
   });
 
   // ── Contact Form (public) ─────────────────────────────────────────────────

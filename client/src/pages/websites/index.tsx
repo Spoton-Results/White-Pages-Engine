@@ -26,6 +26,8 @@ export default function WebsitesPage() {
   const [searchText, setSearchText] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editWebsite, setEditWebsite] = useState<any>(null);
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<any>();
 
@@ -66,6 +68,17 @@ export default function WebsitesPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/websites"] });
       toast({ title: "Website deleted" });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const contentReplace = useMutation({
+    mutationFn: ({ id, find, replace }: { id: string; find: string; replace: string }) =>
+      api.post<{ updated: number }>(`/api/websites/${id}/content-replace`, { find, replace }),
+    onSuccess: (data) => {
+      toast({ title: `Content updated`, description: `${data.updated} page version(s) updated.` });
+      setFindText("");
+      setReplaceText("");
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
@@ -307,6 +320,31 @@ export default function WebsitesPage() {
                 <Label className="text-xs">Button Label</Label>
                 <Input {...regEdit("demoBannerButtonLabel")} placeholder="Try the Live Demo →" data-testid="input-demo-banner-button" />
               </div>
+            </div>
+
+            {/* Content Tools */}
+            <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+              <p className="text-sm font-semibold">Content Tools <span className="text-muted-foreground font-normal">(find &amp; replace text in all page content)</span></p>
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label className="text-xs">Find</Label>
+                  <Input value={findText} onChange={e => setFindText(e.target.value)} placeholder="e.g. pagessubtracker.spotonresults.com" data-testid="input-content-find" />
+                </div>
+                <div className="flex-1 space-y-1.5">
+                  <Label className="text-xs">Replace with</Label>
+                  <Input value={replaceText} onChange={e => setReplaceText(e.target.value)} placeholder="e.g. subtracker.spotonresults.com" data-testid="input-content-replace" />
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={!findText || contentReplace.isPending}
+                data-testid="button-content-replace"
+                onClick={() => contentReplace.mutate({ id: editWebsite.id, find: findText, replace: replaceText })}
+              >
+                {contentReplace.isPending ? "Replacing…" : "Replace in Pages"}
+              </Button>
             </div>
 
             <DialogFooter>

@@ -373,6 +373,18 @@ export async function setActivePageVersion(pageId: string, versionId: string): P
   await db.update(pageVersions).set({ isActive: true }).where(eq(pageVersions.id, versionId));
 }
 
+export async function replacePageContent(websiteId: string, find: string, replace: string): Promise<number> {
+  const result = await db.execute(sql`
+    UPDATE page_versions
+    SET content_html = REPLACE(content_html, ${find}, ${replace})
+    WHERE page_id IN (
+      SELECT id FROM pages WHERE website_id = ${websiteId}
+    )
+    AND content_html LIKE ${'%' + find + '%'}
+  `);
+  return (result as any).rowCount ?? 0;
+}
+
 // ─── Generation Jobs ─────────────────────────────────────────────────────────
 
 export async function getGenerationJobs(websiteId?: string): Promise<GenerationJob[]> {
