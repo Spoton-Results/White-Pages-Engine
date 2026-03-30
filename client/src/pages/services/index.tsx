@@ -18,7 +18,7 @@ import { useForm } from "react-hook-form";
 export default function ServicesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [showReview, setShowReview] = useState(false);
@@ -38,6 +38,9 @@ export default function ServicesPage() {
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
 
+  // Derived: always resolve to first account unless user explicitly picked one
+  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
+
   const { data: services = [], isLoading } = useQuery({
     queryKey: ["/api/services", selectedAccount],
     queryFn: () => api.get<any[]>(`/api/accounts/${selectedAccount}/services`),
@@ -54,13 +57,6 @@ export default function ServicesPage() {
     queryKey: ["/api/websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
   });
-
-  // Auto-select first account
-  useEffect(() => {
-    if ((accounts as any[]).length > 0 && !selectedAccount) {
-      setSelectedAccount((accounts as any[])[0].id);
-    }
-  }, [accounts]);
 
   // Pre-fill AI form from brand profile / website
   useEffect(() => {
@@ -156,7 +152,7 @@ export default function ServicesPage() {
 
         {(accounts as any[]).length > 1 && (
           <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-            <Select onValueChange={setSelectedAccount} value={selectedAccount}>
+            <Select onValueChange={setOverrideAccount} value={selectedAccount}>
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Select account" />
               </SelectTrigger>

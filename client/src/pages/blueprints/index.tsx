@@ -34,7 +34,7 @@ const pageTypeColors: Record<string, string> = {
 export default function BlueprintsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [generatedBlueprint, setGeneratedBlueprint] = useState<any>(null);
@@ -53,6 +53,9 @@ export default function BlueprintsPage() {
     queryKey: ["/api/accounts"],
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
+
+  // Derived: always resolve to first account unless user explicitly picked one
+  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
 
   const { data: blueprints = [], isLoading } = useQuery({
     queryKey: ["/api/blueprints", selectedAccount],
@@ -76,13 +79,6 @@ export default function BlueprintsPage() {
     queryFn: () => api.get<any[]>(`/api/accounts/${selectedAccount}/services`),
     enabled: !!selectedAccount,
   });
-
-  // Auto-select first account
-  useEffect(() => {
-    if (accounts.length > 0 && !selectedAccount) {
-      setSelectedAccount(accounts[0].id);
-    }
-  }, [accounts]);
 
   // Pre-fill AI form from brand profile
   useEffect(() => {
@@ -154,7 +150,7 @@ export default function BlueprintsPage() {
         {/* Account selector — hidden if only one account */}
         {accounts.length > 1 && (
           <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-            <Select onValueChange={setSelectedAccount} value={selectedAccount}>
+            <Select onValueChange={setOverrideAccount} value={selectedAccount}>
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Select account" />
               </SelectTrigger>

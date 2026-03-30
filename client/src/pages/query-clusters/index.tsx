@@ -17,7 +17,7 @@ import { useForm } from "react-hook-form";
 export default function QueryClustersPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
 
@@ -26,17 +26,13 @@ export default function QueryClustersPage() {
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
 
+  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
+
   const { data: clusters = [], isLoading } = useQuery({
     queryKey: ["/api/query-clusters", selectedAccount],
     queryFn: () => selectedAccount ? api.get<any[]>(`/api/accounts/${selectedAccount}/query-clusters`) : Promise.resolve([]),
     enabled: !!selectedAccount,
   });
-
-  useEffect(() => {
-    if ((accounts as any[]).length > 0 && !selectedAccount) {
-      setSelectedAccount((accounts as any[])[0].id);
-    }
-  }, [accounts]);
 
   const { data: services = [] } = useQuery({
     queryKey: ["/api/services", selectedAccount],
@@ -88,7 +84,7 @@ export default function QueryClustersPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-          <Select onValueChange={setSelectedAccount} value={selectedAccount}>
+          <Select onValueChange={setOverrideAccount} value={selectedAccount}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
