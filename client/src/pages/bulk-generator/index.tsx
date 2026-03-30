@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Zap, BookOpen, Play, CheckCircle2, Loader2, ChevronDown, ChevronUp, Info, Search } from "lucide-react";
+import { Zap, BookOpen, Play, CheckCircle2, Loader2, ChevronDown, ChevronUp, Info, Search, FileText } from "lucide-react";
 import { api } from "@/lib/api";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -27,6 +27,7 @@ export default function BulkGeneratorPage() {
   const qc = useQueryClient();
 
   const [websiteId, setWebsiteId] = useState<string>("");
+  const [blueprintId, setBlueprintId] = useState<string>("");
   const [newService, setNewService] = useState("");
   const [selectedService, setSelectedService] = useState<string>("");
   const [mode, setMode] = useState<"all_states" | "specific_states" | "specific_cities">("all_states");
@@ -55,8 +56,18 @@ export default function BulkGeneratorPage() {
   });
 
   const websites = websitesQ.data ?? [];
+  const selectedWebsite = websites.find((w: any) => w.id === websiteId);
+  const accountId = selectedWebsite?.accountId || "";
+
+  const blueprintsQ = useQuery<any[]>({
+    queryKey: ["/api/accounts", accountId, "blueprints"],
+    queryFn: () => api.get<any[]>(`/api/accounts/${accountId}/blueprints`),
+    enabled: !!accountId,
+  });
+
   const services = servicesQ.data ?? [];
   const allLocations = locationsQ.data ?? [];
+  const blueprints = blueprintsQ.data ?? [];
 
   // Deduplicate by slug so cities imported twice don't appear twice
   const dbStates = useMemo(() => {
@@ -121,6 +132,8 @@ export default function BulkGeneratorPage() {
         }).filter(Boolean);
         payload.cities = cityObjs;
       }
+
+      if (blueprintId) payload.blueprintId = blueprintId;
 
       return apiFetch(`/api/websites/${websiteId}/bulk-generate`, {
         method: "POST",
@@ -192,7 +205,7 @@ export default function BulkGeneratorPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedService(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); }}>
+            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedService(""); setBlueprintId(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); }}>
               <SelectTrigger data-testid="select-website" className="w-full max-w-md">
                 <SelectValue placeholder="Choose a website..." />
               </SelectTrigger>
@@ -207,12 +220,58 @@ export default function BulkGeneratorPage() {
           </CardContent>
         </Card>
 
-        {/* Step 2 — Variation Banks */}
+        {/* Step 2 — Blueprint (optional) */}
         {websiteId && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">2</span>
+                Select Blueprint
+                <span className="text-xs font-normal text-muted-foreground ml-1">(optional)</span>
+              </CardTitle>
+              <CardDescription>
+                Attach a blueprint to tag generated pages for filtering and reporting. Pages use the variation engine regardless.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {blueprintsQ.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading blueprints...</p>
+              ) : blueprints.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No blueprints found for this account. You can still generate pages without one.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                  {blueprints.map((bp: any) => (
+                    <button
+                      key={bp.id}
+                      onClick={() => setBlueprintId(prev => prev === bp.id ? "" : bp.id)}
+                      className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${blueprintId === bp.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}
+                      data-testid={`button-blueprint-${bp.id}`}
+                    >
+                      <FileText className={`size-4 mt-0.5 shrink-0 ${blueprintId === bp.id ? "text-primary" : "text-muted-foreground"}`} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{bp.name}</p>
+                        {bp.pageType && <p className="text-xs text-muted-foreground capitalize">{bp.pageType.replace(/_/g, " ")}</p>}
+                      </div>
+                      {blueprintId === bp.id && <CheckCircle2 className="size-4 text-primary ml-auto shrink-0 mt-0.5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {blueprintId && (
+                <Button variant="ghost" size="sm" className="mt-2 text-xs text-muted-foreground" onClick={() => setBlueprintId("")}>
+                  Clear selection
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 3 — Variation Banks */}
+        {websiteId && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">3</span>
                 Variation Banks
               </CardTitle>
               <CardDescription>
@@ -277,7 +336,7 @@ export default function BulkGeneratorPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">3</span>
+                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">4</span>
                 Configure Generation
               </CardTitle>
             </CardHeader>
@@ -422,7 +481,7 @@ export default function BulkGeneratorPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">4</span>
+                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">5</span>
                 Generate Pages
               </CardTitle>
               <CardDescription>

@@ -1031,6 +1031,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       mode: z.enum(["all_states", "specific_states", "specific_cities"]),
       states: z.array(z.string()).optional(),
       cities: z.array(z.object({ name: z.string(), stateAbbr: z.string() })).optional(),
+      blueprintId: z.string().uuid().optional(),
     });
     const body = schema.parse(req.body);
     const websiteId = req.params.id as string;
@@ -1081,6 +1082,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
         const page = await storage.createPage({
           websiteId,
+          blueprintId: body.blueprintId || null,
           serviceId: null,
           locationId: null,
           queryClusterId: null,
