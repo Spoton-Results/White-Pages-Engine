@@ -2,13 +2,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -21,7 +22,9 @@ export default function AccountsPage() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [editAccount, setEditAccount] = useState<any>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
+  const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue } = useForm<any>();
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ["/api/accounts"],
@@ -40,6 +43,17 @@ export default function AccountsPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const update = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/api/accounts/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setEditAccount(null);
+      resetEdit();
+      toast({ title: "Account updated" });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/accounts/${id}`),
     onSuccess: () => {
@@ -48,6 +62,35 @@ export default function AccountsPage() {
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
+
+  const openEdit = (account: any) => {
+    const s = account.settings ?? {};
+    setEditAccount(account);
+    resetEdit();
+    setEditValue("name", account.name);
+    setEditValue("slug", account.slug);
+    setEditValue("plan", account.plan);
+    setEditValue("status", account.status);
+    setEditValue("ownerName", s.ownerName ?? "");
+    setEditValue("email", s.email ?? "");
+    setEditValue("phone", s.phone ?? "");
+    setEditValue("anthropicApiKey", s.anthropicApiKey ?? "");
+    setEditValue("notes", s.notes ?? "");
+  };
+
+  const onEditSubmit = (d: any) => {
+    const { name, slug, plan, status, ownerName, email, phone, anthropicApiKey, notes } = d;
+    update.mutate({
+      id: editAccount.id,
+      data: {
+        name,
+        slug,
+        plan,
+        status,
+        settings: { ownerName, email, phone, anthropicApiKey, notes },
+      },
+    });
+  };
 
   const filtered = accounts.filter((a: any) =>
     a.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -132,6 +175,13 @@ export default function AccountsPage() {
                           <DropdownMenuItem className="gap-2 cursor-pointer"><Eye className="size-4" />View Websites</DropdownMenuItem>
                         </Link>
                         <DropdownMenuItem
+                          className="gap-2 cursor-pointer"
+                          onClick={() => openEdit(account)}
+                          data-testid={`button-edit-account-${account.id}`}
+                        >
+                          <Pencil className="size-4" />Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           className="gap-2 text-destructive cursor-pointer"
                           onClick={() => confirm("Delete this account?") && remove.mutate(account.id)}
                         >
@@ -147,6 +197,7 @@ export default function AccountsPage() {
         </div>
       </div>
 
+      {/* Create Account Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
           <DialogHeader><DialogTitle>Create Account</DialogTitle></DialogHeader>
@@ -173,6 +224,89 @@ export default function AccountsPage() {
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
               <Button type="submit" disabled={create.isPending}>Create</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Account Dialog */}
+      <Dialog open={!!editAccount} onOpenChange={open => { if (!open) { setEditAccount(null); resetEdit(); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Edit Account</DialogTitle></DialogHeader>
+          <form onSubmit={handleEdit(onEditSubmit)} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Account Name</Label>
+                <Input placeholder="Acme Corp" {...regEdit("name", { required: true })} data-testid="input-edit-name" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Slug</Label>
+                <Input placeholder="acme-corp" {...regEdit("slug", { required: true })} data-testid="input-edit-slug" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Owner Name</Label>
+                <Input placeholder="Jane Smith" {...regEdit("ownerName")} data-testid="input-edit-owner-name" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input type="email" placeholder="jane@acme.com" {...regEdit("email")} data-testid="input-edit-email" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Phone</Label>
+                <Input placeholder="+1 555 000 0000" {...regEdit("phone")} data-testid="input-edit-phone" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Anthropic API Key</Label>
+                <Input type="password" placeholder="sk-ant-…" {...regEdit("anthropicApiKey")} data-testid="input-edit-api-key" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Plan</Label>
+                <Select
+                  defaultValue={editAccount?.plan ?? "starter"}
+                  onValueChange={v => setEditValue("plan", v)}
+                >
+                  <SelectTrigger data-testid="select-edit-plan"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="starter">Starter</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                    <SelectItem value="enterprise">Enterprise</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select
+                  defaultValue={editAccount?.status ?? "active"}
+                  onValueChange={v => setEditValue("status", v)}
+                >
+                  <SelectTrigger data-testid="select-edit-status"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notes</Label>
+              <Textarea
+                placeholder="Internal notes about this account…"
+                rows={3}
+                {...regEdit("notes")}
+                data-testid="input-edit-notes"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { setEditAccount(null); resetEdit(); }}>Cancel</Button>
+              <Button type="submit" disabled={update.isPending} data-testid="button-save-account">
+                {update.isPending ? "Saving…" : "Save Changes"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

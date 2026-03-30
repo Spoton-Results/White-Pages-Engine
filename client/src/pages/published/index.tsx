@@ -6,12 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
 import { formatDistanceToNow } from "date-fns";
+
+const SLUG_RE = /^[a-z]+(-[a-z]+)*$/;
 
 export default function PublishedPagesPage() {
   const qc = useQueryClient();
@@ -21,6 +25,9 @@ export default function PublishedPagesPage() {
   const [selectedWebsite, setSelectedWebsite] = useState(params.get("websiteId") || "");
   const [searchText, setSearchText] = useState("");
   const [showDns, setShowDns] = useState(false);
+  const [editSlugPage, setEditSlugPage] = useState<any>(null);
+  const [slugInput, setSlugInput] = useState("");
+  const [slugError, setSlugError] = useState("");
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -57,6 +64,36 @@ export default function PublishedPagesPage() {
       toast({ title: "Page pruned" });
     },
   });
+
+  const slugMut = useMutation({
+    mutationFn: ({ id, slug }: { id: string; slug: string }) =>
+      api.put(`/api/pages/${id}/slug`, { slug }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/pages/published", selectedWebsite] });
+      setEditSlugPage(null);
+      setSlugInput("");
+      setSlugError("");
+      toast({ title: "Slug updated" });
+    },
+    onError: (err: any) => setSlugError(err.message ?? "Failed to update slug"),
+  });
+
+  const openSlugEdit = (page: any) => {
+    setEditSlugPage(page);
+    setSlugInput(page.slug);
+    setSlugError("");
+  };
+
+  const validateAndSaveSlug = () => {
+    const trimmed = slugInput.trim();
+    if (!trimmed) { setSlugError("Slug cannot be empty."); return; }
+    if (!SLUG_RE.test(trimmed)) {
+      setSlugError("Slug must be lowercase letters and hyphens only — no numbers, spaces, or special characters.");
+      return;
+    }
+    if (trimmed === editSlugPage.slug) { setEditSlugPage(null); return; }
+    slugMut.mutate({ id: editSlugPage.id, slug: trimmed });
+  };
 
   const currentWebsite = websites.find((w: any) => w.id === selectedWebsite);
   const pages = (pagesData?.pages || []).filter((p: any) =>
@@ -191,7 +228,7 @@ export default function PublishedPagesPage() {
                   <TableHead className="text-right">Score</TableHead>
                   <TableHead className="text-right">Words</TableHead>
                   <TableHead>Published</TableHead>
-                  <TableHead className="w-[100px]"></TableHead>
+                  <TableHead className="w-[140px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -253,14 +290,27 @@ export default function PublishedPagesPage() {
                       {page.publishedAt ? formatDistanceToNow(new Date(page.publishedAt)) + " ago" : "—"}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => confirm("Prune this page?") && prune.mutate(page.id)}
-                      >
-                        <Trash2 className="size-3.5 mr-1" />Prune
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-muted-foreground hover:text-foreground"
+                          onClick={() => openSlugEdit(page)}
+                          title="Edit slug"
+                          data-testid={`button-edit-slug-${page.id}`}
+                        >
+                          <Pencil className="size-3.5 mr-1" />Slug
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => confirm("Prune this page?") && prune.mutate(page.id)}
+                          data-testid={`button-prune-${page.id}`}
+                        >
+                          <Trash2 className="size-3.5 mr-1" />Prune
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -269,6 +319,54 @@ export default function PublishedPagesPage() {
           </div>
         )}
       </div>
+
+      {/* Edit Slug Dialog */}
+      <Dialog open={!!editSlugPage} onOpenChange={open => { if (!open) { setEditSlugPage(null); setSlugInput(""); setSlugError(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit Slug</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>Slug</Label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground text-sm">/</span>
+                <Input
+                  value={slugInput}
+                  onChange={e => { setSlugInput(e.target.value); setSlugError(""); }}
+                  onKeyDown={e => e.key === "Enter" && validateAndSaveSlug()}
+                  placeholder="my-page-slug"
+                  className="font-mono text-sm"
+                  data-testid="input-slug-edit"
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Lowercase letters and hyphens only. No numbers, spaces, or special characters.</p>
+              {slugError && (
+                <p className="text-xs text-destructive font-medium" data-testid="text-slug-error">{slugError}</p>
+              )}
+            </div>
+            {editSlugPage && (
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                <span className="font-medium">Current:</span>{" "}
+                <span className="font-mono">/{editSlugPage.slug}</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setEditSlugPage(null); setSlugInput(""); setSlugError(""); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={validateAndSaveSlug}
+              disabled={slugMut.isPending}
+              data-testid="button-save-slug"
+            >
+              {slugMut.isPending ? "Saving…" : "Save Slug"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

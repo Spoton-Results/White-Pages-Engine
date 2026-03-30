@@ -182,6 +182,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(account);
   });
 
+  app.put("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    const current = await storage.getAccount(req.params.id as string);
+    if (!current) return res.status(404).json({ message: "Account not found" });
+    const { name, slug, plan, status, settings } = req.body;
+    const mergedSettings = { ...(current.settings as Record<string, any> ?? {}), ...(settings ?? {}) };
+    const payload: Record<string, any> = { settings: mergedSettings };
+    if (name !== undefined) payload.name = name;
+    if (slug !== undefined) payload.slug = slug;
+    if (plan !== undefined) payload.plan = plan;
+    if (status !== undefined) payload.status = status;
+    const updated = await storage.updateAccount(req.params.id as string, payload as any);
+    return res.json(updated);
+  });
+
   app.delete("/api/accounts/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     await storage.deleteAccount((req.params.id as string));
     return res.json({ message: "Account deleted" });
@@ -514,6 +528,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Prune a page
+  app.put("/api/pages/:id/slug", requireAuth, async (req: Request, res: Response) => {
+    const { slug } = z.object({ slug: z.string().min(1) }).parse(req.body);
+    const page = await storage.getPage(req.params.id as string);
+    if (!page) return res.status(404).json({ message: "Page not found" });
+    const existing = await storage.getPageBySlug(page.websiteId, slug);
+    if (existing && existing.id !== page.id) return res.status(409).json({ message: "A page with that slug already exists for this website." });
+    const updated = await storage.updatePage(req.params.id as string, { slug });
+    return res.json(updated);
+  });
+
   app.post("/api/pages/:id/prune", requireAuth, async (req: Request, res: Response) => {
     const { reason } = req.body;
     const updated = await storage.updatePage((req.params.id as string), {
