@@ -33,7 +33,7 @@ export default function ServicesPage() {
 
   const { register, handleSubmit, reset, setValue } = useForm<any>();
 
-  const { data: accounts = [] } = useQuery({
+  const { data: accounts = [], isLoading: accountsLoading } = useQuery({
     queryKey: ["/api/accounts"],
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
@@ -55,9 +55,9 @@ export default function ServicesPage() {
     queryFn: () => api.get<any[]>("/api/websites"),
   });
 
-  // Auto-select single account
+  // Auto-select first account
   useEffect(() => {
-    if ((accounts as any[]).length === 1 && !selectedAccount) {
+    if ((accounts as any[]).length > 0 && !selectedAccount) {
       setSelectedAccount((accounts as any[])[0].id);
     }
   }, [accounts]);
@@ -172,8 +172,17 @@ export default function ServicesPage() {
 
         {!selectedAccount ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-            <Wrench className="size-12 text-muted-foreground/30" />
-            <p className="text-muted-foreground">Select an account to manage services</p>
+            {accountsLoading ? (
+              <>
+                <Skeleton className="size-12 rounded-full" />
+                <Skeleton className="h-4 w-48" />
+              </>
+            ) : (
+              <>
+                <Wrench className="size-12 text-muted-foreground/30" />
+                <p className="text-muted-foreground">Select an account to manage services</p>
+              </>
+            )}
           </div>
         ) : (services as any[]).length === 0 && !isLoading ? (
           <div className="flex flex-col items-center justify-center py-16 border rounded-lg bg-card text-center gap-4">

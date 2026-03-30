@@ -77,9 +77,9 @@ export default function BlueprintsPage() {
     enabled: !!selectedAccount,
   });
 
-  // Auto-select account if only one
+  // Auto-select first account
   useEffect(() => {
-    if (accounts.length === 1 && !selectedAccount) {
+    if (accounts.length > 0 && !selectedAccount) {
       setSelectedAccount(accounts[0].id);
     }
   }, [accounts]);
