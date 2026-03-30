@@ -16,7 +16,10 @@ import { Plus, MapPin, Trash2, Search, Download } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
-import { US_STATES, US_CITIES_CLEAN, getCitiesByState } from "@/data/us-locations";
+import {
+  US_STATES, US_CITIES_CLEAN, US_REGIONS, US_METROS,
+  getCitiesByState, getCitiesByRegion, getCitiesByMetro,
+} from "@/data/us-locations";
 
 interface LocationImportItem {
   type: "state" | "city";
@@ -256,7 +259,7 @@ function BulkImportDialog({
   onImport: (items: LocationImportItem[]) => void;
   isPending: boolean;
 }) {
-  const [tab, setTab] = useState<"states" | "cities">("states");
+  const [tab, setTab] = useState<"states" | "cities" | "region" | "metro">("states");
   const [stateSearch, setStateSearch] = useState("");
   const [citySearch, setCitySearch] = useState("");
   const [cityStateFilter, setCityStateFilter] = useState("ALL");
@@ -280,57 +283,72 @@ function BulkImportDialog({
     return codes.map(code => ({ code, name: US_STATES.find(s => s.code === code)?.name || code }));
   }, []);
 
-  const totalSelected = selectedStates.size + selectedCities.size;
+  const regionCounts = useMemo(() =>
+    US_REGIONS.map(r => {
+      const cities = getCitiesByRegion(r);
+      const selected = cities.filter(c => selectedCities.has(c.slug)).length;
+      return { region: r, total: cities.length, selected };
+    }), [selectedCities]);
 
+  const metroCounts = useMemo(() =>
+    US_METROS.map(m => {
+      const cities = getCitiesByMetro(m);
+      const selected = cities.filter(c => selectedCities.has(c.slug)).length;
+      return { metro: m, total: cities.length, selected };
+    }).filter(m => m.total > 0), [selectedCities]);
+
+  const totalSelected = selectedStates.size + selectedCities.size;
   const allStatesSelected = filteredStates.length > 0 && filteredStates.every(s => selectedStates.has(s.code));
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every(c => selectedCities.has(c.slug));
 
   function toggleState(code: string) {
-    setSelectedStates(prev => {
-      const next = new Set(prev);
-      next.has(code) ? next.delete(code) : next.add(code);
-      return next;
-    });
+    setSelectedStates(prev => { const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n; });
   }
-
   function toggleCity(slug: string) {
-    setSelectedCities(prev => {
-      const next = new Set(prev);
-      next.has(slug) ? next.delete(slug) : next.add(slug);
-      return next;
+    setSelectedCities(prev => { const n = new Set(prev); n.has(slug) ? n.delete(slug) : n.add(slug); return n; });
+  }
+  function selectAllStates() {
+    setSelectedStates(prev => {
+      const n = new Set(prev);
+      if (allStatesSelected) filteredStates.forEach(s => n.delete(s.code));
+      else filteredStates.forEach(s => n.add(s.code));
+      return n;
     });
   }
-
-  function selectAllStates() {
-    if (allStatesSelected) {
-      setSelectedStates(prev => {
-        const next = new Set(prev);
-        filteredStates.forEach(s => next.delete(s.code));
-        return next;
-      });
-    } else {
-      setSelectedStates(prev => {
-        const next = new Set(prev);
-        filteredStates.forEach(s => next.add(s.code));
-        return next;
-      });
-    }
-  }
-
   function selectAllCities() {
-    if (allCitiesSelected) {
-      setSelectedCities(prev => {
-        const next = new Set(prev);
-        filteredCities.forEach(c => next.delete(c.slug));
-        return next;
-      });
-    } else {
-      setSelectedCities(prev => {
-        const next = new Set(prev);
-        filteredCities.forEach(c => next.add(c.slug));
-        return next;
-      });
-    }
+    setSelectedCities(prev => {
+      const n = new Set(prev);
+      if (allCitiesSelected) filteredCities.forEach(c => n.delete(c.slug));
+      else filteredCities.forEach(c => n.add(c.slug));
+      return n;
+    });
+  }
+  function toggleRegion(region: string) {
+    const cities = getCitiesByRegion(region);
+    const allSelected = cities.every(c => selectedCities.has(c.slug));
+    setSelectedCities(prev => {
+      const n = new Set(prev);
+      if (allSelected) cities.forEach(c => n.delete(c.slug));
+      else cities.forEach(c => n.add(c.slug));
+      return n;
+    });
+  }
+  function toggleMetro(metro: string) {
+    const cities = getCitiesByMetro(metro);
+    const allSelected = cities.every(c => selectedCities.has(c.slug));
+    setSelectedCities(prev => {
+      const n = new Set(prev);
+      if (allSelected) cities.forEach(c => n.delete(c.slug));
+      else cities.forEach(c => n.add(c.slug));
+      return n;
+    });
+  }
+  function selectAllRegions() {
+    setSelectedCities(prev => {
+      const n = new Set(prev);
+      US_CITIES_CLEAN.forEach(c => n.add(c.slug));
+      return n;
+    });
   }
 
   function handleImport() {
@@ -346,6 +364,14 @@ function BulkImportDialog({
     onImport(items);
   }
 
+  const REGION_COLORS: Record<string, string> = {
+    "Northeast": "bg-blue-500/10 text-blue-700 border-blue-200",
+    "Southeast": "bg-emerald-500/10 text-emerald-700 border-emerald-200",
+    "Midwest": "bg-amber-500/10 text-amber-700 border-amber-200",
+    "Southwest": "bg-orange-500/10 text-orange-700 border-orange-200",
+    "West": "bg-violet-500/10 text-violet-700 border-violet-200",
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col" data-testid="dialog-bulk-import">
@@ -358,17 +384,19 @@ function BulkImportDialog({
               </Badge>
             )}
           </div>
-          <p className="text-sm text-muted-foreground">Select any combination of states and cities to import at once. Duplicates are skipped automatically.</p>
+          <p className="text-sm text-muted-foreground">Select states, individual cities, or click a region/metro to grab all cities at once.</p>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v: string) => { if (v === "states" || v === "cities") setTab(v); }} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="w-full grid grid-cols-2">
+        <Tabs value={tab} onValueChange={(v: any) => setTab(v)} className="flex-1 flex flex-col min-h-0">
+          <TabsList className="w-full grid grid-cols-4">
             <TabsTrigger value="states" data-testid="tab-states">
-              States {selectedStates.size > 0 && <Badge variant="secondary" className="ml-2 text-xs">{selectedStates.size}</Badge>}
+              States {selectedStates.size > 0 && <Badge variant="secondary" className="ml-1.5 text-xs">{selectedStates.size}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="cities" data-testid="tab-cities">
-              Cities {selectedCities.size > 0 && <Badge variant="secondary" className="ml-2 text-xs">{selectedCities.size}</Badge>}
+              Cities {selectedCities.size > 0 && <Badge variant="secondary" className="ml-1.5 text-xs">{selectedCities.size}</Badge>}
             </TabsTrigger>
+            <TabsTrigger value="region" data-testid="tab-region">By Region</TabsTrigger>
+            <TabsTrigger value="metro" data-testid="tab-metro">By Metro</TabsTrigger>
           </TabsList>
 
           {/* ── States Tab ── */}
@@ -386,23 +414,13 @@ function BulkImportDialog({
             <ScrollArea className="flex-1 h-72 border rounded-md p-2">
               <div className="grid grid-cols-2 gap-1">
                 {filteredStates.map(state => (
-                  <label
-                    key={state.code}
-                    className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer"
-                    data-testid={`label-state-${state.code}`}
-                  >
-                    <Checkbox
-                      checked={selectedStates.has(state.code)}
-                      onCheckedChange={() => toggleState(state.code)}
-                      data-testid={`checkbox-state-${state.code}`}
-                    />
+                  <label key={state.code} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-state-${state.code}`}>
+                    <Checkbox checked={selectedStates.has(state.code)} onCheckedChange={() => toggleState(state.code)} data-testid={`checkbox-state-${state.code}`} />
                     <span className="text-sm font-medium">{state.name}</span>
                     <span className="text-xs text-muted-foreground ml-auto">{state.code}</span>
                   </label>
                 ))}
-                {filteredStates.length === 0 && (
-                  <p className="col-span-2 text-center py-6 text-muted-foreground text-sm">No states match.</p>
-                )}
+                {filteredStates.length === 0 && <p className="col-span-2 text-center py-6 text-muted-foreground text-sm">No states match.</p>}
               </div>
             </ScrollArea>
             <p className="text-xs text-muted-foreground">{filteredStates.length} of 50 states shown</p>
@@ -412,20 +430,15 @@ function BulkImportDialog({
           <TabsContent value="cities" className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               <Select value={cityStateFilter} onValueChange={setCityStateFilter} data-testid="select-city-state-filter">
-                <SelectTrigger className="w-44">
-                  <SelectValue placeholder="All states" />
-                </SelectTrigger>
+                <SelectTrigger className="w-44"><SelectValue placeholder="All states" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All states</SelectItem>
-                  {stateCodesInCities.map(s => (
-                    <SelectItem key={s.code} value={s.code}>{s.name}</SelectItem>
-                  ))}
+                  {stateCodesInCities.map(s => <SelectItem key={s.code} value={s.code}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <div className="relative flex-1 min-w-[140px]">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Filter cities..." className="pl-9 h-9" value={citySearch}
-                  onChange={e => setCitySearch(e.target.value)} data-testid="input-filter-cities" />
+                <Input placeholder="Filter cities..." className="pl-9 h-9" value={citySearch} onChange={e => setCitySearch(e.target.value)} data-testid="input-filter-cities" />
               </div>
               <Button variant="outline" size="sm" onClick={selectAllCities} data-testid="button-select-all-cities">
                 {allCitiesSelected ? "Deselect All" : "Select All"}
@@ -434,27 +447,97 @@ function BulkImportDialog({
             <ScrollArea className="flex-1 h-64 border rounded-md p-2">
               <div className="space-y-0.5">
                 {filteredCities.map(city => (
-                  <label
-                    key={city.slug}
-                    className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer"
-                    data-testid={`label-city-${city.slug}`}
-                  >
-                    <Checkbox
-                      checked={selectedCities.has(city.slug)}
-                      onCheckedChange={() => toggleCity(city.slug)}
-                      data-testid={`checkbox-city-${city.slug}`}
-                    />
+                  <label key={city.slug} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-city-${city.slug}`}>
+                    <Checkbox checked={selectedCities.has(city.slug)} onCheckedChange={() => toggleCity(city.slug)} data-testid={`checkbox-city-${city.slug}`} />
                     <span className="text-sm font-medium">{city.name}</span>
                     <span className="text-xs text-muted-foreground">{city.stateCode}</span>
                     <span className="text-xs text-muted-foreground ml-auto">{city.population?.toLocaleString()}</span>
                   </label>
                 ))}
-                {filteredCities.length === 0 && (
-                  <p className="text-center py-6 text-muted-foreground text-sm">No cities match.</p>
-                )}
+                {filteredCities.length === 0 && <p className="text-center py-6 text-muted-foreground text-sm">No cities match.</p>}
               </div>
             </ScrollArea>
-            <p className="text-xs text-muted-foreground">{filteredCities.length} cities shown</p>
+            <p className="text-xs text-muted-foreground">{filteredCities.length} cities shown ({US_CITIES_CLEAN.length} total)</p>
+          </TabsContent>
+
+          {/* ── By Region Tab ── */}
+          <TabsContent value="region" className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Click a region to select/deselect all its cities at once.</p>
+              <Button variant="outline" size="sm" onClick={selectAllRegions} data-testid="button-select-all-regions">
+                Select All Cities
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              {regionCounts.map(({ region, total, selected }) => {
+                const allSel = selected === total;
+                const someSel = selected > 0 && !allSel;
+                return (
+                  <button
+                    key={region}
+                    onClick={() => toggleRegion(region)}
+                    data-testid={`button-region-${region.toLowerCase().replace(/\s+/g, "-")}`}
+                    className={`flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition-colors ${
+                      allSel
+                        ? "border-primary bg-primary/5"
+                        : someSel
+                        ? "border-primary/50 bg-primary/3"
+                        : "border-border hover:border-primary/30 hover:bg-muted"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full border-2 ${allSel ? "bg-primary border-primary" : someSel ? "bg-primary/50 border-primary/50" : "border-muted-foreground"}`} />
+                      <div>
+                        <span className={`font-semibold ${REGION_COLORS[region]?.split(" ")[1] || ""}`}>{region}</span>
+                        <span className="text-xs text-muted-foreground ml-2">{total} cities</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {selected > 0 && (
+                        <Badge variant="secondary" className="text-xs">{selected} / {total} selected</Badge>
+                      )}
+                      {selected === 0 && (
+                        <span className="text-xs text-muted-foreground">Click to select all</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </TabsContent>
+
+          {/* ── By Metro Tab ── */}
+          <TabsContent value="metro" className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
+            <p className="text-sm text-muted-foreground">Click a metro area to select/deselect all cities within it.</p>
+            <ScrollArea className="flex-1 h-80 border rounded-md p-2">
+              <div className="space-y-1">
+                {metroCounts.map(({ metro, total, selected }) => {
+                  const allSel = selected === total;
+                  return (
+                    <button
+                      key={metro}
+                      onClick={() => toggleMetro(metro)}
+                      data-testid={`button-metro-${metro.toLowerCase().replace(/[\s,./]+/g, "-")}`}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-left transition-colors ${
+                        allSel ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${allSel ? "bg-primary" : selected > 0 ? "bg-primary/50" : "bg-muted-foreground/30"}`} />
+                        <span className="text-sm font-medium">{metro}</span>
+                        <span className="text-xs text-muted-foreground">({total} cities)</span>
+                      </div>
+                      {selected > 0 && (
+                        <Badge variant={allSel ? "default" : "secondary"} className="text-xs ml-auto">
+                          {allSel ? "All selected" : `${selected}/${total}`}
+                        </Badge>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+            <p className="text-xs text-muted-foreground">{metroCounts.length} metro areas</p>
           </TabsContent>
         </Tabs>
 
