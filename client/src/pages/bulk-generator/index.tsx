@@ -58,8 +58,23 @@ export default function BulkGeneratorPage() {
   const services = servicesQ.data ?? [];
   const allLocations = locationsQ.data ?? [];
 
-  const dbStates = useMemo(() => allLocations.filter((l: any) => l.type === "state"), [allLocations]);
-  const dbCities = useMemo(() => allLocations.filter((l: any) => l.type === "city"), [allLocations]);
+  // Deduplicate by slug so cities imported twice don't appear twice
+  const dbStates = useMemo(() => {
+    const seen = new Set<string>();
+    return allLocations.filter((l: any) => {
+      if (l.type !== "state") return false;
+      if (seen.has(l.slug)) return false;
+      seen.add(l.slug); return true;
+    });
+  }, [allLocations]);
+  const dbCities = useMemo(() => {
+    const seen = new Set<string>();
+    return allLocations.filter((l: any) => {
+      if (l.type !== "city") return false;
+      if (seen.has(l.slug)) return false;
+      seen.add(l.slug); return true;
+    });
+  }, [allLocations]);
 
   const filteredStates = useMemo(() =>
     dbStates.filter((l: any) => !stateSearch || l.name.toLowerCase().includes(stateSearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(stateSearch.toLowerCase())),
