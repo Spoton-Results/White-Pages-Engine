@@ -23,7 +23,32 @@ function notFoundHtml(msg: string): string {
   <body><div class="box"><h1>404</h1><p>${msg}</p></div></body></html>`;
 }
 
-function renderPageHtml(page: any, version: any, website: any, brand: any): string {
+interface NavData {
+  statePages: { displayName: string; slug: string }[];
+  cityPages: { displayName: string; slug: string }[];
+  stateDisplayName?: string;
+}
+
+async function resolveNavData(page: any, websiteId: string): Promise<[NavData["statePages"], NavData["cityPages"], string]> {
+  const statePages = await storage.getStateNavPages(websiteId);
+  let cityPages: NavData["cityPages"] = [];
+  let stateDisplayName = "";
+
+  if (page.pageType === "state_hub") {
+    const match = page.title.match(/\bin\s+(.+?)(\s*\|.*)?$/i);
+    if (match) {
+      stateDisplayName = match[1].trim();
+      const stateEntry = await storage.getStateDataByName(stateDisplayName);
+      if (stateEntry?.stateAbbr) {
+        cityPages = await storage.getCityPagesForState(websiteId, stateEntry.stateAbbr);
+      }
+    }
+  }
+
+  return [statePages, cityPages, stateDisplayName];
+}
+
+function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [] }): string {
   const brandName = brand?.name || website.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || (website.settings as any)?.phone || "";
@@ -98,6 +123,13 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
     #submitBtn{background:${primaryColor};color:#fff;border:none;padding:.75rem 2rem;border-radius:.5rem;font-size:1rem;font-weight:700;cursor:pointer;margin-top:.5rem;width:100%}
     #submitBtn:hover{opacity:.9}
     #submitBtn:disabled{opacity:.6;cursor:not-allowed}
+    .loc-nav{border-top:2px solid #e5e7eb;padding:2rem 0;margin-top:2rem}
+    .loc-nav-title{font-size:1rem;font-weight:700;color:#374151;margin-bottom:1rem;text-transform:uppercase;letter-spacing:.05em;font-size:.85rem}
+    .loc-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem}
+    @media(max-width:768px){.loc-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:480px){.loc-grid{grid-template-columns:repeat(2,1fr)}}
+    .loc-grid a{display:block;padding:.4rem .6rem;font-size:.85rem;color:#4b5563;border:1px solid #e5e7eb;border-radius:.375rem;text-decoration:none;transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .loc-grid a:hover{background:${primaryColor}10;border-color:${primaryColor}40;color:${primaryColor};text-decoration:none}
     footer{background:#f9fafb;border-top:1px solid #e5e7eb;padding:1.5rem 2rem;text-align:center;color:#9ca3af;font-size:.85rem;margin-top:3rem}
   </style>
 </head>
@@ -194,6 +226,26 @@ function renderPageHtml(page: any, version: any, website: any, brand: any): stri
       });
     });
   </script>
+
+  ${navData.cityPages.length > 0 ? `
+  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
+    <div class="loc-nav">
+      <div class="loc-nav-title">Cities in ${navData.stateDisplayName || "this state"}</div>
+      <div class="loc-grid">
+        ${navData.cityPages.map(p => `<a href="/${p.slug}">${p.displayName}</a>`).join("\n        ")}
+      </div>
+    </div>
+  </div>` : ""}
+
+  ${navData.statePages.length > 0 ? `
+  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
+    <div class="loc-nav">
+      <div class="loc-nav-title">Explore All Locations</div>
+      <div class="loc-grid">
+        ${navData.statePages.map(p => `<a href="/${p.slug}">${p.displayName}</a>`).join("\n        ")}
+      </div>
+    </div>
+  </div>` : ""}
 
   <footer>
     &copy; ${new Date().getFullYear()} ${mainWebsiteUrl
@@ -801,7 +853,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const brandProfiles = await storage.getBrandProfiles(website.accountId);
     const brand = brandProfiles[0];
 
-    const html = renderPageHtml(page, version, website, brand);
+    const [statePages, cityPages, stateDisplayName] = await resolveNavData(page, website.id);
+    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName });
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
@@ -919,7 +972,8 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const version = await storage.getActivePageVersion(page.id);
       const brandProfiles = await storage.getBrandProfiles(website.accountId);
       const brand = brandProfiles[0];
-      const html = renderPageHtml(page, version, website, brand);
+      const [statePages, cityPages, stateDisplayName] = await resolveNavData(page, website.id);
+      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=3600");
       return res.send(html);
@@ -959,7 +1013,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found" });
     const brand = await storage.getBrandProfile(website.brandProfileId as string);
-    const brandName = brand?.brandName ?? website.domain;
+    const brandName = brand?.name ?? website.domain;
 
     const banks = await storage.getVariationBanks(websiteId, body.service);
     if (banks.length === 0) return res.status(400).json({ error: "No variation banks found for this service. Please write variations first." });

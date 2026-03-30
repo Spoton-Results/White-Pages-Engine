@@ -17,19 +17,17 @@ function formatDate(iso: string) {
 export default function LeadsPage() {
   const [selectedWebsite, setSelectedWebsite] = useState<string>("all");
 
-  const { data: websites } = useQuery({
+  const { data: websites } = useQuery<any[]>({
     queryKey: ["websites"],
-    queryFn: () => api.get("/api/websites").then(r => r.json()),
+    queryFn: () => api.get<any[]>("/api/websites"),
   });
 
-  const { data: leadsData, isLoading } = useQuery({
+  const { data: leadsData, isLoading } = useQuery<any>({
     queryKey: ["leads", selectedWebsite],
-    queryFn: async () => {
-      if (selectedWebsite === "all") {
-        return api.get("/api/leads").then(r => r.json());
-      }
-      return api.get(`/api/websites/${selectedWebsite}/leads`).then(r => r.json());
-    },
+    queryFn: () =>
+      selectedWebsite === "all"
+        ? api.get<any>("/api/leads")
+        : api.get<any>(`/api/websites/${selectedWebsite}/leads`),
   });
 
   const leads = leadsData?.leads ?? [];

@@ -502,6 +502,49 @@ export async function insertStateData(data: InsertStateData): Promise<StateData>
   return row;
 }
 
+// ─── Page Navigation (states/cities footer grid) ─────────────────────────────
+
+export async function getStateNavPages(websiteId: string): Promise<{displayName: string, slug: string}[]> {
+  const [hubPages, states] = await Promise.all([
+    db.select({ title: pages.title, slug: pages.slug })
+      .from(pages)
+      .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), eq(pages.pageType, "state_hub")))
+      .orderBy(asc(pages.title)),
+    db.select({ stateName: stateData.stateName, stateAbbr: stateData.stateAbbr })
+      .from(stateData)
+      .orderBy(asc(stateData.stateName)),
+  ]);
+  const seen = new Set<string>();
+  const result: {displayName: string, slug: string}[] = [];
+  for (const state of states) {
+    for (const p of hubPages) {
+      if (!seen.has(state.stateName) && p.title.toLowerCase().includes(`in ${state.stateName.toLowerCase()}`)) {
+        seen.add(state.stateName);
+        result.push({ displayName: state.stateName, slug: p.slug });
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+export async function getCityPagesForState(websiteId: string, stateCode: string): Promise<{displayName: string, slug: string}[]> {
+  const rows = await db.select({ title: pages.title, slug: pages.slug })
+    .from(pages)
+    .innerJoin(locations, eq(pages.locationId, locations.id))
+    .where(and(
+      eq(pages.websiteId, websiteId),
+      eq(pages.status, "published"),
+      eq(locations.stateCode, stateCode),
+      sql`${pages.pageType} != 'state_hub'`,
+    ))
+    .orderBy(asc(pages.title));
+  return rows.map(r => {
+    const afterIn = r.title.match(/\bin\s+(.+?)(?:,|\s*\|)/i);
+    return { displayName: afterIn ? afterIn[1].trim() : r.title, slug: r.slug };
+  });
+}
+
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
 export async function createLead(data: InsertLead): Promise<Lead> {
