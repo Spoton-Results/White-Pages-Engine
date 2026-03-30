@@ -73,10 +73,15 @@ export default function WebsitesPage() {
   // Pre-fill edit form when a website is selected for editing
   useEffect(() => {
     if (editWebsite) {
+      const s = editWebsite.settings || {};
       resetEdit({
         name: editWebsite.name,
         domain: editWebsite.domain,
         status: editWebsite.status,
+        demoBannerUrl: s.demoBannerUrl || "",
+        demoBannerHeading: s.demoBannerHeading || "",
+        demoBannerSubtext: s.demoBannerSubtext || "",
+        demoBannerButtonLabel: s.demoBannerButtonLabel || "",
       });
     }
   }, [editWebsite, resetEdit]);
@@ -240,9 +245,25 @@ export default function WebsitesPage() {
 
       {/* ── Edit Dialog ── */}
       <Dialog open={!!editWebsite} onOpenChange={open => !open && setEditWebsite(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
-          <form onSubmit={handleEdit(d => update.mutate({ id: editWebsite.id, data: d }))} className="space-y-4">
+          <form onSubmit={handleEdit(d => {
+            const { demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, ...rest } = d;
+            const existingSettings = editWebsite?.settings || {};
+            update.mutate({
+              id: editWebsite.id,
+              data: {
+                ...rest,
+                settings: {
+                  ...existingSettings,
+                  demoBannerUrl: demoBannerUrl || "",
+                  demoBannerHeading: demoBannerHeading || "",
+                  demoBannerSubtext: demoBannerSubtext || "",
+                  demoBannerButtonLabel: demoBannerButtonLabel || "",
+                },
+              },
+            });
+          })} className="space-y-4">
             <div className="space-y-1.5">
               <Label>Website Name</Label>
               <Input {...regEdit("name", { required: true })} data-testid="input-edit-website-name" />
@@ -266,6 +287,28 @@ export default function WebsitesPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Demo Banner */}
+            <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+              <p className="text-sm font-semibold">Demo Banner <span className="text-muted-foreground font-normal">(appears at top of every page)</span></p>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Demo URL <span className="text-muted-foreground">(leave blank to hide banner)</span></Label>
+                <Input {...regEdit("demoBannerUrl")} placeholder="https://sospages.replit.app" data-testid="input-demo-banner-url" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Heading</Label>
+                <Input {...regEdit("demoBannerHeading")} placeholder="See This Platform in Action" data-testid="input-demo-banner-heading" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Subtext</Label>
+                <Input {...regEdit("demoBannerSubtext")} placeholder="This page was generated automatically..." data-testid="input-demo-banner-subtext" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Button Label</Label>
+                <Input {...regEdit("demoBannerButtonLabel")} placeholder="Try the Live Demo →" data-testid="input-demo-banner-button" />
+              </div>
+            </div>
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditWebsite(null)}>Cancel</Button>
               <Button type="submit" disabled={update.isPending} data-testid="button-submit-edit-website">Save</Button>

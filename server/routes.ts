@@ -57,6 +57,10 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const ctaHeading = (website.settings as any)?.ctaHeading || `Visit ${brandName}`;
   const ctaText = (website.settings as any)?.ctaText || "See how we can help your business grow.";
   const ctaButtonLabel = (website.settings as any)?.ctaButtonLabel || "Learn More";
+  const demoBannerUrl = (website.settings as any)?.demoBannerUrl || "";
+  const demoBannerHeading = (website.settings as any)?.demoBannerHeading || "See This Platform in Action";
+  const demoBannerSubtext = (website.settings as any)?.demoBannerSubtext || "This page was generated automatically. Want 100,000+ pages like it for your business?";
+  const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
   // Schema markup
   const schemaJson = JSON.stringify({
@@ -131,6 +135,12 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     .loc-grid a{display:block;padding:.4rem .6rem;font-size:.85rem;color:#4b5563;border:1px solid #e5e7eb;border-radius:.375rem;text-decoration:none;transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .loc-grid a:hover{background:${primaryColor}10;border-color:${primaryColor}40;color:${primaryColor};text-decoration:none}
     footer{background:#f9fafb;border-top:1px solid #e5e7eb;padding:1.5rem 2rem;text-align:center;color:#9ca3af;font-size:.85rem;margin-top:3rem}
+    .demo-banner{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#fff;padding:2.5rem 2rem;text-align:center;border-bottom:4px solid ${primaryColor}}
+    .demo-banner h2{font-size:1.6rem;font-weight:800;margin-bottom:.6rem;color:#fff}
+    .demo-banner p{color:#cbd5e1;font-size:1rem;margin-bottom:1.5rem;max-width:600px;margin-left:auto;margin-right:auto}
+    .demo-banner a.demo-btn{display:inline-block;background:${primaryColor};color:#fff;font-weight:700;font-size:1.1rem;padding:.9rem 2.5rem;border-radius:.6rem;text-decoration:none;letter-spacing:.02em;transition:opacity .15s;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+    .demo-banner a.demo-btn:hover{opacity:.88;text-decoration:none}
+    .demo-banner .badge{display:inline-block;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#e2e8f0;font-size:.75rem;font-weight:600;padding:.25rem .75rem;border-radius:999px;margin-bottom:1rem;letter-spacing:.04em;text-transform:uppercase}
   </style>
 </head>
 <body>
@@ -140,6 +150,14 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       : `<span class="brand">${brandName}</span>`}
     ${phone ? `<a href="tel:${phone.replace(/\D/g, "")}" class="phone">${phone}</a>` : ""}
   </header>
+
+  ${demoBannerUrl ? `
+  <div class="demo-banner">
+    <div class="badge">Powered by Nexus Pages</div>
+    <h2>${demoBannerHeading}</h2>
+    <p>${demoBannerSubtext}</p>
+    <a href="${demoBannerUrl}" class="demo-btn" target="_blank" rel="noopener">${demoBannerButtonLabel}</a>
+  </div>` : ""}
 
   <div class="hero">
     <h1>${page.h1 || page.title}</h1>
