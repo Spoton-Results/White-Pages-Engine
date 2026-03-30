@@ -128,21 +128,26 @@ export async function getWebsite(id: string): Promise<Website | undefined> {
 }
 
 export async function getWebsiteByDomain(domain: string): Promise<Website | undefined> {
-  const stripped = domain.startsWith("www.") ? domain.slice(4) : domain;
+  const stripped = domain.toLowerCase().replace(/^www\./, "");
   const withWww = `www.${stripped}`;
   const [row] = await db.select().from(websites).where(
-    or(eq(websites.domain, stripped), eq(websites.domain, withWww))
+    or(
+      eq(sql`lower(${websites.domain})`, stripped),
+      eq(sql`lower(${websites.domain})`, withWww),
+    )
   );
   return row;
 }
 
 export async function createWebsite(data: InsertWebsite): Promise<Website> {
-  const [row] = await db.insert(websites).values(data).returning();
+  const normalized = data.domain ? { ...data, domain: data.domain.toLowerCase().trim() } : data;
+  const [row] = await db.insert(websites).values(normalized).returning();
   return row;
 }
 
 export async function updateWebsite(id: string, data: Partial<InsertWebsite>): Promise<Website | undefined> {
-  const [row] = await db.update(websites).set({ ...data, updatedAt: new Date() }).where(eq(websites.id, id)).returning();
+  const normalized = data.domain ? { ...data, domain: data.domain.toLowerCase().trim() } : data;
+  const [row] = await db.update(websites).set({ ...normalized, updatedAt: new Date() }).where(eq(websites.id, id)).returning();
   return row;
 }
 
