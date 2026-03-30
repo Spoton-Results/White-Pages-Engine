@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -119,6 +119,7 @@ export default function PublishedPagesPage() {
                       https://{currentWebsite.domain}/…
                       <Copy className="size-3" />
                     </button>
+                    {" "}— use <Eye className="size-3 inline" /> to preview via this platform, <ExternalLink className="size-3 inline" /> for the live customer URL.
                   </>
                 ) : (
                   <>
@@ -218,8 +219,19 @@ export default function PublishedPagesPage() {
                           <button type="button" onClick={() => copyUrl(page)} title="Copy URL" className="hover:text-primary">
                             <Copy className="size-3" />
                           </button>
+                          {currentWebsite && (
+                            <a
+                              href={`${platformBase}/sites/${currentWebsite.domain}/${page.slug}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Preview page (platform)"
+                              className="hover:text-primary"
+                            >
+                              <Eye className="size-3" />
+                            </a>
+                          )}
                           {pageUrl(page) && (
-                            <a href={pageUrl(page)!} target="_blank" rel="noopener noreferrer" title="Open page">
+                            <a href={pageUrl(page)!} target="_blank" rel="noopener noreferrer" title="Open live customer URL">
                               <ExternalLink className="size-3 hover:text-primary" />
                             </a>
                           )}
