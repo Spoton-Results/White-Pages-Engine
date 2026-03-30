@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 export default function DraftsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedWebsite, setSelectedWebsite] = useState<string>("");
+  const [overrideWebsite, setOverrideWebsite] = useState<string>("");
   const [previewPage, setPreviewPage] = useState<any>(null);
   const [previewContent, setPreviewContent] = useState<any>(null);
 
@@ -23,6 +23,8 @@ export default function DraftsPage() {
     queryKey: ["/api/websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
   });
+
+  const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
   const { data: pagesData, isLoading } = useQuery({
     queryKey: ["/api/pages/draft", selectedWebsite],
@@ -79,7 +81,7 @@ export default function DraftsPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-          <Select onValueChange={setSelectedWebsite} value={selectedWebsite}>
+          <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select website to review" />
             </SelectTrigger>

@@ -14,12 +14,14 @@ import { formatDistanceToNow } from "date-fns";
 export default function SitemapsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedWebsite, setSelectedWebsite] = useState<string>("");
+  const [overrideWebsite, setOverrideWebsite] = useState<string>("");
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
   });
+
+  const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
   const { data: sitemaps = [], isLoading } = useQuery({
     queryKey: ["/api/sitemaps", selectedWebsite],
@@ -49,7 +51,7 @@ export default function SitemapsPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-          <Select onValueChange={setSelectedWebsite} value={selectedWebsite}>
+          <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select website" />
             </SelectTrigger>

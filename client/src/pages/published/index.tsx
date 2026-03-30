@@ -22,7 +22,7 @@ export default function PublishedPagesPage() {
   const { toast } = useToast();
   const search = useSearch();
   const params = new URLSearchParams(search);
-  const [selectedWebsite, setSelectedWebsite] = useState(params.get("websiteId") || "");
+  const [overrideWebsite, setOverrideWebsite] = useState(params.get("websiteId") || "");
   const [searchText, setSearchText] = useState("");
   const [showDns, setShowDns] = useState(false);
   const [editSlugPage, setEditSlugPage] = useState<any>(null);
@@ -33,6 +33,8 @@ export default function PublishedPagesPage() {
     queryKey: ["/api/websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
   });
+
+  const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
   const { data: pagesData, isLoading } = useQuery({
     queryKey: ["/api/pages/published", selectedWebsite],
@@ -197,7 +199,7 @@ export default function PublishedPagesPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border flex-wrap">
-          <Select onValueChange={setSelectedWebsite} value={selectedWebsite}>
+          <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
             <SelectTrigger className="w-52">
               <SelectValue placeholder="Select website" />
             </SelectTrigger>
