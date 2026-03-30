@@ -152,6 +152,12 @@ export async function updateWebsite(id: string, data: Partial<InsertWebsite>): P
 }
 
 export async function deleteWebsite(id: string): Promise<void> {
+  // Manually clean up tables that lack onDelete: "cascade" on websiteId
+  await db.delete(pageMetrics).where(eq(pageMetrics.websiteId, id));
+  await db.delete(generationJobs).where(eq(generationJobs.websiteId, id));
+  await db.delete(blueprints).where(eq(blueprints.websiteId, id));
+  // internalLinks can have cross-page FK refs; delete by websiteId explicitly too
+  await db.delete(internalLinks).where(eq(internalLinks.websiteId, id));
   await db.delete(websites).where(eq(websites.id, id));
 }
 

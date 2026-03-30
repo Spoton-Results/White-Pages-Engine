@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ExternalLink, Settings, RefreshCw, Trash, Globe, MoreHorizontal } from "lucide-react";
+import { Plus, Search, ExternalLink, Settings, RefreshCw, Trash, Globe, MoreHorizontal, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -25,7 +25,9 @@ export default function WebsitesPage() {
 
   const [searchText, setSearchText] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [editWebsite, setEditWebsite] = useState<any>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
+  const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<any>();
 
   const { data: websites = [], isLoading } = useQuery({
     queryKey: ["/api/websites", accountIdFilter],
@@ -49,13 +51,35 @@ export default function WebsitesPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const update = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.patch(`/api/websites/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/websites"] });
+      setEditWebsite(null);
+      toast({ title: "Website updated" });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/websites/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/websites"] });
       toast({ title: "Website deleted" });
     },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
+
+  // Pre-fill edit form when a website is selected for editing
+  useEffect(() => {
+    if (editWebsite) {
+      resetEdit({
+        name: editWebsite.name,
+        domain: editWebsite.domain,
+        status: editWebsite.status,
+      });
+    }
+  }, [editWebsite, resetEdit]);
 
   const filtered = websites.filter((w: any) =>
     w.domain.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -70,7 +94,7 @@ export default function WebsitesPage() {
             <h1 className="text-2xl font-bold tracking-tight">Websites</h1>
             <p className="text-muted-foreground text-sm mt-0.5">Manage target domains and deployment settings.</p>
           </div>
-          <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)}>
+          <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-add-website">
             <Plus className="size-4" />Add Website
           </Button>
         </div>
@@ -78,9 +102,9 @@ export default function WebsitesPage() {
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search domains..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} />
+            <Input placeholder="Search domains..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-websites" />
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/websites"] })}>
+          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/websites"] })} data-testid="button-refresh-websites">
             <RefreshCw className="size-4" />
           </Button>
         </div>
@@ -137,11 +161,14 @@ export default function WebsitesPage() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="h-8 w-8 p-0">
+                        <Button variant="ghost" className="h-8 w-8 p-0" data-testid={`button-menu-website-${w.id}`}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => setEditWebsite(w)} data-testid={`button-edit-website-${w.id}`}>
+                          <Pencil className="size-4" />Edit
+                        </DropdownMenuItem>
                         <Link href={`/published?websiteId=${w.id}`}>
                           <DropdownMenuItem className="gap-2 cursor-pointer"><Globe className="size-4" />View Pages</DropdownMenuItem>
                         </Link>
@@ -154,7 +181,8 @@ export default function WebsitesPage() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="gap-2 text-destructive cursor-pointer"
-                          onClick={() => confirm("Delete website?") && remove.mutate(w.id)}
+                          onClick={() => confirm("Delete website and all its pages? This cannot be undone.") && remove.mutate(w.id)}
+                          data-testid={`button-delete-website-${w.id}`}
                         >
                           <Trash className="size-4" />Delete
                         </DropdownMenuItem>
@@ -168,6 +196,7 @@ export default function WebsitesPage() {
         </div>
       </div>
 
+      {/* ── Create Dialog ── */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Website</DialogTitle></DialogHeader>
@@ -185,11 +214,11 @@ export default function WebsitesPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Website Name</Label>
-              <Input placeholder="My Plumbing Site" {...register("name", { required: true })} />
+              <Input placeholder="My Plumbing Site" {...register("name", { required: true })} data-testid="input-website-name" />
             </div>
             <div className="space-y-1.5">
               <Label>Domain</Label>
-              <Input placeholder="mysite.com" {...register("domain", { required: true })} />
+              <Input placeholder="mysite.com" {...register("domain", { required: true })} data-testid="input-website-domain" />
             </div>
             <div className="space-y-1.5">
               <Label>Status</Label>
@@ -203,7 +232,43 @@ export default function WebsitesPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={create.isPending}>Create</Button>
+              <Button type="submit" disabled={create.isPending} data-testid="button-submit-create-website">Create</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Dialog ── */}
+      <Dialog open={!!editWebsite} onOpenChange={open => !open && setEditWebsite(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
+          <form onSubmit={handleEdit(d => update.mutate({ id: editWebsite.id, data: d }))} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Website Name</Label>
+              <Input {...regEdit("name", { required: true })} data-testid="input-edit-website-name" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Domain</Label>
+              <Input {...regEdit("domain", { required: true })} data-testid="input-edit-website-domain" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <Select
+                value={watchEdit("status") || editWebsite?.status || "paused"}
+                onValueChange={v => setEditValue("status", v)}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="paused">Paused</SelectItem>
+                  <SelectItem value="live">Live</SelectItem>
+                  <SelectItem value="syncing">Syncing</SelectItem>
+                  <SelectItem value="error">Error</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditWebsite(null)}>Cancel</Button>
+              <Button type="submit" disabled={update.isPending} data-testid="button-submit-edit-website">Save</Button>
             </DialogFooter>
           </form>
         </DialogContent>
