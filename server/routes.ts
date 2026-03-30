@@ -462,6 +462,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ message: "Deleted" });
   });
 
+  // Convenience: get all locations for a website's account
+  app.get("/api/websites/:id/locations", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ message: "Not found" });
+    return res.json(await storage.getLocations(website.accountId));
+  });
+
   // ── Locations ─────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
