@@ -322,6 +322,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ message: "Deleted" });
   });
 
+  app.post("/api/accounts/:accountId/locations/bulk", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const { locations: rawItems } = req.body as { locations: any[] };
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      return res.status(400).json({ message: "locations array required" });
+    }
+    const items = rawItems.map((loc: any) => ({
+      accountId,
+      type: loc.type,
+      name: loc.name,
+      slug: loc.slug,
+      stateCode: loc.stateCode ?? null,
+      stateName: loc.stateName ?? null,
+      population: loc.population ?? null,
+    }));
+    const { inserted } = await storage.bulkCreateLocations(accountId, items);
+    return res.json({ inserted, skipped: rawItems.length - inserted });
+  });
+
   // ── Services ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {

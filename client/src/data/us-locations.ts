@@ -297,4 +297,4 @@ export const getCitiesByState = (stateCode: string) =>
   US_CITIES_CLEAN.filter(c => c.stateCode === stateCode);
 
 export const getStateCodes = () =>
-  [...new Set(US_CITIES_CLEAN.map(c => c.stateCode))].sort();
+  Array.from(new Set(US_CITIES_CLEAN.map(c => c.stateCode))).sort();

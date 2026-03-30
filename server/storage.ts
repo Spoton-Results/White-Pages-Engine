@@ -171,6 +171,22 @@ export async function deleteLocation(id: string): Promise<void> {
   await db.delete(locations).where(eq(locations.id, id));
 }
 
+export async function bulkCreateLocations(accountId: string, items: InsertLocation[]): Promise<{ inserted: number }> {
+  if (!items.length) return { inserted: 0 };
+  const existing = await db.select({ slug: locations.slug }).from(locations).where(eq(locations.accountId, accountId));
+  const existingSlugs = new Set(existing.map(r => r.slug));
+  const toInsert = items.filter(loc => !existingSlugs.has(loc.slug));
+  if (!toInsert.length) return { inserted: 0 };
+  const CHUNK = 100;
+  let inserted = 0;
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const chunk = toInsert.slice(i, i + CHUNK);
+    await db.insert(locations).values(chunk);
+    inserted += chunk.length;
+  }
+  return { inserted };
+}
+
 // ─── Services ─────────────────────────────────────────────────────────────────
 
 export async function getServices(accountId: string): Promise<Service[]> {
