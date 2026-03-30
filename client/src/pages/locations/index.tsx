@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,7 @@ const typeColors: Record<string, string> = {
 export default function LocationsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -51,17 +51,13 @@ export default function LocationsPage() {
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
 
+  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
+
   const { data: locations = [], isLoading } = useQuery({
     queryKey: ["/api/locations", selectedAccount],
-    queryFn: () => selectedAccount ? api.get<any[]>(`/api/accounts/${selectedAccount}/locations`) : Promise.resolve([]),
+    queryFn: () => api.get<any[]>(`/api/accounts/${selectedAccount}/locations`),
     enabled: !!selectedAccount,
   });
-
-  useEffect(() => {
-    if ((accounts as any[]).length > 0 && !selectedAccount) {
-      setSelectedAccount((accounts as any[])[0].id);
-    }
-  }, [accounts]);
 
   const create = useMutation({
     mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/locations`, data),
@@ -119,7 +115,7 @@ export default function LocationsPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border flex-wrap">
-          <Select onValueChange={setSelectedAccount} value={selectedAccount} data-testid="select-account">
+          <Select onValueChange={setOverrideAccount} value={selectedAccount} data-testid="select-account">
             <SelectTrigger className="w-52">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>

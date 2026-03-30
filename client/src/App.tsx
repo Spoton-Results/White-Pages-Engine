@@ -3,9 +3,40 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect } from "react";
+import { useEffect, Component, ReactNode } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-8">
+          <div className="max-w-md w-full space-y-4 text-center">
+            <h1 className="text-xl font-semibold text-destructive">Something went wrong</h1>
+            <p className="text-sm text-muted-foreground font-mono bg-muted px-3 py-2 rounded text-left break-all">
+              {this.state.error.message}
+            </p>
+            <button
+              className="text-sm text-primary underline"
+              onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+            >
+              Reload page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Pages
 import Login from "@/pages/login";
@@ -150,7 +181,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <ErrorBoundary>
+          <Router />
+        </ErrorBoundary>
       </TooltipProvider>
     </QueryClientProvider>
   );
