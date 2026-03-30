@@ -175,14 +175,19 @@ export async function bulkCreateLocations(accountId: string, items: InsertLocati
   if (!items.length) return { inserted: 0 };
   const existing = await db.select({ slug: locations.slug }).from(locations).where(eq(locations.accountId, accountId));
   const existingSlugs = new Set(existing.map(r => r.slug));
-  const toInsert = items.filter(loc => !existingSlugs.has(loc.slug));
+  const seenInPayload = new Set<string>();
+  const toInsert = items.filter(loc => {
+    if (existingSlugs.has(loc.slug) || seenInPayload.has(loc.slug)) return false;
+    seenInPayload.add(loc.slug);
+    return true;
+  });
   if (!toInsert.length) return { inserted: 0 };
   const CHUNK = 100;
   let inserted = 0;
   for (let i = 0; i < toInsert.length; i += CHUNK) {
     const chunk = toInsert.slice(i, i + CHUNK);
-    await db.insert(locations).values(chunk);
-    inserted += chunk.length;
+    const rows = await db.insert(locations).values(chunk).returning({ id: locations.id });
+    inserted += rows.length;
   }
   return { inserted };
 }

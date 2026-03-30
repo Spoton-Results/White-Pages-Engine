@@ -324,20 +324,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/accounts/:accountId/locations/bulk", requireAuth, async (req: Request, res: Response) => {
     const accountId = req.params.accountId as string;
-    const { locations: rawItems } = req.body as { locations: any[] };
+    const rawItems = req.body?.locations;
     if (!Array.isArray(rawItems) || rawItems.length === 0) {
       return res.status(400).json({ message: "locations array required" });
     }
-    const items = rawItems.map((loc: any) => ({
-      accountId,
-      type: loc.type,
-      name: loc.name,
-      slug: loc.slug,
-      stateCode: loc.stateCode ?? null,
-      stateName: loc.stateName ?? null,
-      population: loc.population ?? null,
-    }));
-    const { inserted } = await storage.bulkCreateLocations(accountId, items);
+    const bulkItemSchema = insertLocationSchema.omit({ accountId: true });
+    const parsed: any[] = [];
+    for (let i = 0; i < rawItems.length; i++) {
+      const result = bulkItemSchema.safeParse(rawItems[i]);
+      if (!result.success) {
+        return res.status(400).json({ message: `Item ${i}: ${result.error.issues[0]?.message ?? "invalid"}` });
+      }
+      parsed.push({ ...result.data, accountId });
+    }
+    const { inserted } = await storage.bulkCreateLocations(accountId, parsed);
     return res.json({ inserted, skipped: rawItems.length - inserted });
   });
 

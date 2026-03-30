@@ -352,7 +352,7 @@ function BulkImportDialog({
           <p className="text-sm text-muted-foreground">Select any combination of states and cities to import at once. Duplicates are skipped automatically.</p>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={v => setTab(v as any)} className="flex-1 flex flex-col min-h-0">
+        <Tabs value={tab} onValueChange={(v: string) => { if (v === "states" || v === "cities") setTab(v); }} className="flex-1 flex flex-col min-h-0">
           <TabsList className="w-full grid grid-cols-2">
             <TabsTrigger value="states" data-testid="tab-states">
               States {selectedStates.size > 0 && <Badge variant="secondary" className="ml-2 text-xs">{selectedStates.size}</Badge>}
