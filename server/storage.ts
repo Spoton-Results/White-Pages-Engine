@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, asc, ilike, sql, count, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, ilike, sql, count, inArray, or } from "drizzle-orm";
 import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
@@ -128,7 +128,10 @@ export async function getWebsite(id: string): Promise<Website | undefined> {
 
 export async function getWebsiteByDomain(domain: string): Promise<Website | undefined> {
   const stripped = domain.startsWith("www.") ? domain.slice(4) : domain;
-  const [row] = await db.select().from(websites).where(eq(websites.domain, stripped));
+  const withWww = `www.${stripped}`;
+  const [row] = await db.select().from(websites).where(
+    or(eq(websites.domain, stripped), eq(websites.domain, withWww))
+  );
   return row;
 }
 
