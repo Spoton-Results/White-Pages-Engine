@@ -65,9 +65,16 @@ export default function BulkGeneratorPage() {
     enabled: !!accountId,
   });
 
+  const contextQ = useQuery<any>({
+    queryKey: ["/api/websites", websiteId, "context"],
+    queryFn: () => api.get<any>(`/api/websites/${websiteId}/context`),
+    enabled: !!websiteId,
+  });
+
   const services = servicesQ.data ?? [];
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
+  const siteContext = contextQ.data ?? null;
 
   // Deduplicate by slug so cities imported twice don't appear twice
   const dbStates = useMemo(() => {
@@ -102,8 +109,12 @@ export default function BulkGeneratorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service }),
       }),
-    onSuccess: (_, { service }) => {
-      toast({ title: "Variations written", description: `Content bank ready for "${service}"` });
+    onSuccess: (data: any, { service }) => {
+      const ctx = data?.context;
+      const desc = ctx?.brand || ctx?.industry
+        ? `Written using ${[ctx.brand, ctx.industry].filter(Boolean).join(" · ")} context`
+        : `Content bank ready for "${service}"`;
+      toast({ title: `Variations written for "${service}"`, description: desc });
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "variation-services"] });
     },
     onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
@@ -275,10 +286,31 @@ export default function BulkGeneratorPage() {
                 Variation Banks
               </CardTitle>
               <CardDescription>
-                Each service needs a content bank (5 Claude calls once). After writing, pages generate instantly at zero cost.
+                Each service needs a content bank (5 Claude Haiku calls, paid once). Pages then generate instantly at zero cost.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Brand + Industry context indicator */}
+              {siteContext && (siteContext.brand || siteContext.industry) ? (
+                <div className="flex flex-wrap gap-2 items-center p-2.5 rounded-md bg-blue-50 border border-blue-200 text-xs">
+                  <span className="text-blue-700 font-medium">AI context:</span>
+                  {siteContext.brand?.name && (
+                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{siteContext.brand.name}</span>
+                  )}
+                  {siteContext.industry?.name && (
+                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{siteContext.industry.name}</span>
+                  )}
+                  {siteContext.brand?.voiceAndTone && (
+                    <span className="text-blue-600 italic truncate max-w-[200px]">{siteContext.brand.voiceAndTone}</span>
+                  )}
+                </div>
+              ) : websiteId ? (
+                <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                  <Info className="size-3.5 shrink-0" />
+                  No brand profile or industry set — content will be generic. Add them in Brand Profiles &amp; Industries for better results.
+                </div>
+              ) : null}
+
               {services.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium">Existing banks</p>

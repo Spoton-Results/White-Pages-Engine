@@ -5,7 +5,7 @@ import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices } from "./services/claude";
 import { buildVariationPage } from "./services/variation-engine";
-import { writeVariationsForService } from "./services/variation-writer";
+import { writeVariationsForService, BrandContext } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
@@ -1014,15 +1014,42 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json(services);
   });
 
+  app.get("/api/websites/:id/context", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const [brand, industries] = await Promise.all([
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    return res.json({
+      brand: brand ? { name: brand.name, description: brand.description, voiceAndTone: brand.voiceAndTone } : null,
+      industry: industries[0] ? { name: industries[0].name, description: industries[0].description } : null,
+    });
+  });
+
   app.post("/api/websites/:id/variation-banks/write", requireAuth, async (req: Request, res: Response) => {
     const { service } = z.object({ service: z.string().min(1) }).parse(req.body);
     const websiteId = req.params.id as string;
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found" });
 
+    // Fetch brand + industry context to enrich AI prompts
+    const [brand, industries] = await Promise.all([
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    const industry = industries[0];
+    const ctx: BrandContext = {
+      brandName: brand?.name,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: industry?.description ?? undefined,
+    };
+
     await storage.deleteVariationBanks(websiteId, service);
-    await writeVariationsForService(service, website.accountId, websiteId);
-    return res.json({ ok: true });
+    await writeVariationsForService(service, website.accountId, websiteId, ctx);
+    return res.json({ ok: true, context: { brand: ctx.brandName, industry: ctx.industryName } });
   });
 
   app.post("/api/websites/:id/bulk-generate", requireAuth, async (req: Request, res: Response) => {
