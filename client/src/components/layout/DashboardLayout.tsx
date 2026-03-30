@@ -1,8 +1,8 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, Users, Globe, FileText,
-  Bell, LogOut, Building2, MapPin, Wrench, Factory,
+  LayoutDashboard, Users, Globe,
+  Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
   Map, Menu, X, BookOpen, Inbox
 } from "lucide-react";
@@ -24,13 +24,11 @@ const navigation = [
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
   { name: "Locations", href: "/locations", icon: MapPin },
   { name: "Services", href: "/services", icon: Wrench },
-  { name: "Industries", href: "/industries", icon: Factory },
   { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
   { name: "Blueprints", href: "/blueprints", icon: Layers },
 ];
 
 const contentNav = [
-  { name: "Draft Review", href: "/drafts", icon: FileText },
   { name: "Published Pages", href: "/published", icon: Globe },
   { name: "Leads", href: "/leads", icon: Inbox },
   { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },

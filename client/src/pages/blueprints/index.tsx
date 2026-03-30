@@ -293,10 +293,13 @@ export default function BlueprintsPage() {
             <div className="space-y-1.5">
               <Label>Specific Service <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
               {services.length > 0 ? (
-                <Select value={aiForm.serviceName} onValueChange={v => setAiForm(p => ({ ...p, serviceName: v }))}>
+                <Select
+                  value={aiForm.serviceName || "__all__"}
+                  onValueChange={v => setAiForm(p => ({ ...p, serviceName: v === "__all__" ? "" : v }))}
+                >
                   <SelectTrigger><SelectValue placeholder="Pick a service or leave blank for general" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All services (general)</SelectItem>
+                    <SelectItem value="__all__">All services (general)</SelectItem>
                     {services.map((s: any) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
