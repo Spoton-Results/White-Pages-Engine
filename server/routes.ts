@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
 import * as storage from "./storage";
@@ -705,6 +705,85 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       r2Configured: isR2Configured(),
       appBaseUrl: process.env.APP_BASE_URL || null,
     });
+  });
+
+  // ── Custom Domain Handler ─────────────────────────────────────────────────
+  // When a request arrives with a Host header matching a registered website
+  // domain (e.g. local.spotonresults.com), serve white-pages directly at /{slug}
+  // instead of requiring the /sites/{domain}/{slug} path.
+  const PLATFORM_SUFFIXES = [".replit.app", ".replit.dev", ".repl.co", ".worf.replit.dev", ".janeway.replit.dev"];
+
+  app.use(async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // Strip port from host header
+      const host = (req.headers.host || "").split(":")[0].toLowerCase().trim();
+
+      // Skip Replit platform domains, localhost, and internal asset paths
+      if (!host
+        || host === "localhost"
+        || host === "0.0.0.0"
+        || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
+        || req.path.startsWith("/api/")
+        || req.path.startsWith("/sites/")
+        || req.path.startsWith("/@")
+        || req.path.startsWith("/src/")
+        || req.path.startsWith("/__")
+        || req.path.startsWith("/node_modules/")
+      ) {
+        return next();
+      }
+
+      // Look up website by the incoming domain
+      const website = await storage.getWebsiteByDomain(host);
+      if (!website) return next(); // unknown domain — fall through to admin app
+
+      const rawSlug = req.path.replace(/^\//, "").replace(/\/$/, "");
+
+      // Sitemap
+      if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
+        return res.redirect(301, `/api/websites/${website.id}/sitemap.xml`);
+      }
+
+      // Robots.txt
+      if (rawSlug === "robots.txt") {
+        return res.redirect(301, `/api/websites/${website.id}/robots.txt`);
+      }
+
+      // Root — show a simple page index for the domain
+      if (!rawSlug) {
+        const pages = await storage.getPages(website.id, { status: "published", limit: 50 });
+        const total = await storage.getPageCount(website.id, "published");
+        const brand = (await storage.getBrandProfiles(website.accountId))[0];
+        const brandName = brand?.name || website.domain;
+        const primaryColor = brand?.primaryColor || "#2563eb";
+        const listHtml = (pages as any[]).map((p: any) =>
+          `<li><a href="/${p.slug}">${p.title}</a></li>`
+        ).join("\n");
+        const moreNote = total > 50 ? `<p style="color:#6b7280;font-size:.85rem">${total - 50} more pages available.</p>` : "";
+        return res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
+<title>${brandName}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1.5rem;color:#1f2937}
+h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head>
+<body><h1>${brandName}</h1><p>Published pages on this domain:</p><ul>${listHtml}</ul>${moreNote}</body></html>`);
+      }
+
+      // Serve a specific page by slug
+      const page = await storage.getPageBySlug(website.id, rawSlug);
+      if (!page || page.status !== "published") {
+        return res.status(404).send(notFoundHtml("Page not found or not yet published"));
+      }
+
+      const version = await storage.getActivePageVersion(page.id);
+      const brandProfiles = await storage.getBrandProfiles(website.accountId);
+      const brand = brandProfiles[0];
+      const html = renderPageHtml(page, version, website, brand);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(html);
+    } catch (err) {
+      return next(err);
+    }
   });
 
   return httpServer;
