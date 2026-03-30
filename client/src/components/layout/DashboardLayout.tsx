@@ -32,6 +32,7 @@ const navigation = [
 const contentNav = [
   { name: "Draft Review", href: "/drafts", icon: FileText },
   { name: "Published Pages", href: "/published", icon: Globe },
+  { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
   { name: "Users & Roles", href: "/users", icon: Users },

@@ -3,7 +3,7 @@ import { eq, and, desc, asc, ilike, sql, count, inArray } from "drizzle-orm";
 import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
-  generationJobs, sitemaps, pageMetrics,
+  generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -18,6 +18,8 @@ import {
   type GenerationJob, type InsertGenerationJob,
   type Sitemap, type InsertSitemap,
   type PageMetric, type InsertPageMetric,
+  type ContentVariationBank, type InsertContentVariationBank,
+  type StateData, type InsertStateData,
 } from "@shared/schema";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
@@ -448,6 +450,52 @@ export async function getRecentActivity(limit = 20) {
   const recentJobs = await db.select().from(generationJobs).orderBy(desc(generationJobs.createdAt)).limit(limit);
   const recentPages = await db.select().from(pages).orderBy(desc(pages.updatedAt)).limit(limit);
   return { recentJobs, recentPages };
+}
+
+// ─── Variation Banks ──────────────────────────────────────────────────────────
+
+export async function getVariationBanks(websiteId: string, service: string): Promise<ContentVariationBank[]> {
+  return db.select().from(contentVariationBanks)
+    .where(and(eq(contentVariationBanks.websiteId, websiteId), eq(contentVariationBanks.service, service)));
+}
+
+export async function getVariationBankServices(websiteId: string): Promise<string[]> {
+  const rows = await db.selectDistinct({ service: contentVariationBanks.service })
+    .from(contentVariationBanks)
+    .where(eq(contentVariationBanks.websiteId, websiteId));
+  return rows.map(r => r.service);
+}
+
+export async function createVariationBank(data: InsertContentVariationBank): Promise<ContentVariationBank> {
+  const [row] = await db.insert(contentVariationBanks).values(data).returning();
+  return row;
+}
+
+export async function deleteVariationBanks(websiteId: string, service: string): Promise<void> {
+  await db.delete(contentVariationBanks)
+    .where(and(eq(contentVariationBanks.websiteId, websiteId), eq(contentVariationBanks.service, service)));
+}
+
+// ─── State Data ───────────────────────────────────────────────────────────────
+
+export async function getStateDataByAbbr(abbr: string): Promise<StateData | undefined> {
+  const [row] = await db.select().from(stateData).where(eq(stateData.stateAbbr, abbr.toUpperCase()));
+  return row;
+}
+
+export async function getStateDataByName(name: string): Promise<StateData | undefined> {
+  const [row] = await db.select().from(stateData).where(ilike(stateData.stateName, name));
+  return row;
+}
+
+export async function getStateDataCount(): Promise<number> {
+  const [{ c }] = await db.select({ c: count() }).from(stateData);
+  return Number(c);
+}
+
+export async function insertStateData(data: InsertStateData): Promise<StateData> {
+  const [row] = await db.insert(stateData).values(data).returning();
+  return row;
 }
 
 // Re-export IStorage interface for backwards compatibility

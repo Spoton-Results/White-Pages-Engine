@@ -25,6 +25,7 @@ import JobsPage from "@/pages/jobs";
 import SitemapsPage from "@/pages/sitemaps";
 import UsersPage from "@/pages/users";
 import GuidePage from "@/pages/guide";
+import BulkGeneratorPage from "@/pages/bulk-generator";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -129,6 +130,9 @@ function Router() {
       </Route>
       <Route path="/guide">
         <AuthGuard><GuidePage /></AuthGuard>
+      </Route>
+      <Route path="/bulk-generator">
+        <AuthGuard><BulkGeneratorPage /></AuthGuard>
       </Route>
       <Route>
         <NotFound />

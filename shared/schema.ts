@@ -260,6 +260,31 @@ export const pageMetrics = pgTable("page_metrics", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Variation Banks (hybrid template system) ────────────────────────────────
+
+export const contentVariationBanks = pgTable("content_variation_banks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  service: text("service").notNull(),
+  sectionName: text("section_name").notNull(),
+  variations: jsonb("variations").notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const stateData = pgTable("state_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateName: text("state_name").notNull(),
+  stateAbbr: text("state_abbr").notNull().unique(),
+  population: integer("population").notNull(),
+  businessCount: integer("business_count").notNull(),
+  majorCities: jsonb("major_cities").notNull().default([]),
+  landmarks: jsonb("landmarks").notNull().default([]),
+  businessCulture: text("business_culture").notNull(),
+  paymentRegulations: text("payment_regulations").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // ─── Insert Schemas & Types ───────────────────────────────────────────────────
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true, updatedAt: true });
@@ -305,3 +330,10 @@ export type InsertSitemap = z.infer<typeof insertSitemapSchema>;
 export type Sitemap = typeof sitemaps.$inferSelect;
 export type InsertPageMetric = z.infer<typeof insertPageMetricSchema>;
 export type PageMetric = typeof pageMetrics.$inferSelect;
+
+export const insertContentVariationBankSchema = createInsertSchema(contentVariationBanks).omit({ id: true, createdAt: true });
+export const insertStateDataSchema = createInsertSchema(stateData).omit({ id: true, createdAt: true });
+export type InsertContentVariationBank = z.infer<typeof insertContentVariationBankSchema>;
+export type ContentVariationBank = typeof contentVariationBanks.$inferSelect;
+export type InsertStateData = z.infer<typeof insertStateDataSchema>;
+export type StateData = typeof stateData.$inferSelect;

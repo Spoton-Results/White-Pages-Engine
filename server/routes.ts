@@ -4,6 +4,8 @@ import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassw
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices } from "./services/claude";
+import { buildVariationPage } from "./services/variation-engine";
+import { writeVariationsForService } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
@@ -804,6 +806,111 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     } catch (err) {
       return next(err);
     }
+  });
+
+  // ── Variation Banks ───────────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/variation-services", requireAuth, async (req: Request, res: Response) => {
+    const services = await storage.getVariationBankServices(req.params.id as string);
+    return res.json(services);
+  });
+
+  app.post("/api/websites/:id/variation-banks/write", requireAuth, async (req: Request, res: Response) => {
+    const { service } = z.object({ service: z.string().min(1) }).parse(req.body);
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    await storage.deleteVariationBanks(websiteId, service);
+    await writeVariationsForService(service, website.accountId, websiteId);
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/websites/:id/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+    const schema = z.object({
+      service: z.string().min(1),
+      mode: z.enum(["all_states", "specific_states", "specific_cities"]),
+      states: z.array(z.string()).optional(),
+      cities: z.array(z.object({ name: z.string(), stateAbbr: z.string() })).optional(),
+    });
+    const body = schema.parse(req.body);
+    const websiteId = req.params.id as string;
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const brand = await storage.getBrandProfile(website.brandProfileId as string);
+    const brandName = brand?.brandName ?? website.domain;
+
+    const banks = await storage.getVariationBanks(websiteId, body.service);
+    if (banks.length === 0) return res.status(400).json({ error: "No variation banks found for this service. Please write variations first." });
+
+    const serviceSlug = body.service.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+    const allStateAbbrs = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+
+    const targets: Array<{ locationName: string; locationType: string; stateAbbr: string; stateName: string }> = [];
+
+    if (body.mode === "all_states") {
+      for (const abbr of allStateAbbrs) {
+        const sd = await storage.getStateDataByAbbr(abbr);
+        if (sd) targets.push({ locationName: sd.stateName, locationType: "state", stateAbbr: abbr, stateName: sd.stateName });
+      }
+    } else if (body.mode === "specific_states" && body.states) {
+      for (const abbr of body.states) {
+        const sd = await storage.getStateDataByAbbr(abbr);
+        if (sd) targets.push({ locationName: sd.stateName, locationType: "state", stateAbbr: abbr, stateName: sd.stateName });
+      }
+    } else if (body.mode === "specific_cities" && body.cities) {
+      for (const c of body.cities) {
+        const sd = await storage.getStateDataByAbbr(c.stateAbbr);
+        targets.push({ locationName: c.name, locationType: "city", stateAbbr: c.stateAbbr, stateName: sd?.stateName ?? c.stateAbbr });
+      }
+    }
+
+    const results = { created: 0, skipped: 0, errors: 0, slugs: [] as string[] };
+
+    for (const t of targets) {
+      try {
+        const sd = await storage.getStateDataByAbbr(t.stateAbbr);
+        const result = buildVariationPage(body.service, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd);
+
+        const existingPage = await storage.getPageBySlug(websiteId, result.slug);
+        if (existingPage) {
+          results.skipped++;
+          continue;
+        }
+
+        const page = await storage.createPage({
+          websiteId,
+          serviceId: null,
+          locationId: null,
+          queryClusterId: null,
+          slug: result.slug,
+          title: result.title,
+          h1: result.h1,
+          metaDescription: result.metaDescription,
+          status: "published",
+          pageType: t.locationType === "state" ? "state_hub" : "service_city",
+          wordCount: result.wordCount,
+        });
+
+        const pv = await storage.createPageVersion({
+          pageId: page.id,
+          version: 1,
+          contentHtml: result.contentHtml,
+          isActive: true,
+        });
+        await storage.setActivePageVersion(page.id, pv.id);
+
+        results.created++;
+        results.slugs.push(result.slug);
+      } catch (err) {
+        results.errors++;
+        console.error("[bulk-generate] error for", t.locationName, err);
+      }
+    }
+
+    return res.json(results);
   });
 
   return httpServer;
