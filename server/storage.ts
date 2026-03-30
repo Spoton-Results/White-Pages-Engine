@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, asc, ilike, sql, count, inArray, or } from "drizzle-orm";
+import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte } from "drizzle-orm";
 import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
@@ -546,6 +546,15 @@ export async function getCityPagesForState(websiteId: string, stateCode: string)
 }
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
+
+export async function findRecentLeadByEmail(websiteId: string, email: string, withinMs = 86_400_000): Promise<Lead | undefined> {
+  const since = new Date(Date.now() - withinMs);
+  const [row] = await db.select().from(leads)
+    .where(and(eq(leads.websiteId, websiteId), eq(leads.email, email), gte(leads.createdAt, since)))
+    .orderBy(desc(leads.createdAt))
+    .limit(1);
+  return row;
+}
 
 export async function createLead(data: InsertLead): Promise<Lead> {
   const [row] = await db.insert(leads).values(data).returning();

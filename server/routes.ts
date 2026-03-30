@@ -1106,6 +1106,11 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const website = await storage.getWebsite(data.websiteId);
       if (!website) return res.status(404).json({ success: false, message: "Unknown website" });
 
+      const existing = await storage.findRecentLeadByEmail(data.websiteId, data.email);
+      if (existing) {
+        return res.json({ success: true, id: existing.id, duplicate: true });
+      }
+
       const lead = await storage.createLead({
         websiteId: data.websiteId,
         pageId: data.pageId || null,
