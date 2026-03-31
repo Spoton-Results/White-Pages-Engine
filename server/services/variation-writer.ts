@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 30_000, maxRetries: 0 });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 90_000, maxRetries: 0 });
 
 const SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 type Section = typeof SECTIONS[number];
@@ -190,28 +190,30 @@ export async function writeVariationsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<void> {
-  for (const section of SECTIONS) {
-    const prompt = SECTION_PROMPTS[section](serviceName, ctx);
+  await Promise.all(
+    SECTIONS.map(async (section) => {
+      const prompt = SECTION_PROMPTS[section](serviceName, ctx);
 
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: 3000,
-      messages: [{ role: "user", content: prompt }],
-    });
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 3000,
+        messages: [{ role: "user", content: prompt }],
+      });
 
-    const raw = (message.content[0] as any).text as string;
-    const variations = parseVariations(raw);
+      const raw = (message.content[0] as any).text as string;
+      const variations = parseVariations(raw);
 
-    if (variations.length === 0) {
-      throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
-    }
+      if (variations.length === 0) {
+        throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
+      }
 
-    await db.createVariationBank({
-      accountId,
-      websiteId,
-      service: serviceName,
-      sectionName: section,
-      variations,
-    });
-  }
+      await db.createVariationBank({
+        accountId,
+        websiteId,
+        service: serviceName,
+        sectionName: section,
+        variations,
+      });
+    })
+  );
 }
