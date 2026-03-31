@@ -125,7 +125,7 @@ export default function BulkGeneratorPage() {
   function buildLocationPayload() {
     if (mode === "all_states") {
       if (dbStates.length > 0) {
-        const uniqueCodes = [...new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean))];
+        const uniqueCodes = Array.from(new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)));
         return { mode: "specific_states", states: uniqueCodes };
       }
       return { mode: "all_states" };
