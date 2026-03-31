@@ -58,17 +58,15 @@ export default function ServicesPage() {
     queryFn: () => api.get<any[]>("/api/websites"),
   });
 
+  // Stable primitives — avoids infinite loop when brandProfiles/websites return new [] refs each render
+  const firstBrandName = (brandProfiles as any[])[0]?.name ?? "";
+  const accountDomain = (websites as any[]).find((w: any) => w.accountId === selectedAccount)?.domain ?? "";
+
   // Pre-fill AI form from brand profile / website
   useEffect(() => {
-    if ((brandProfiles as any[]).length > 0) {
-      const bp = (brandProfiles as any[])[0];
-      setAiForm(p => ({ ...p, businessName: bp.name || p.businessName }));
-    }
-    const accountWebsite = (websites as any[]).find((w: any) => w.accountId === selectedAccount);
-    if (accountWebsite?.domain) {
-      setAiForm(p => ({ ...p, websiteUrl: `https://${accountWebsite.domain}` }));
-    }
-  }, [brandProfiles, websites, selectedAccount]);
+    if (firstBrandName) setAiForm(p => ({ ...p, businessName: firstBrandName || p.businessName }));
+    if (accountDomain) setAiForm(p => ({ ...p, websiteUrl: `https://${accountDomain}` }));
+  }, [firstBrandName, accountDomain, selectedAccount]);
 
   const suggestMutation = useMutation({
     mutationFn: () => api.post<any[]>("/api/ai/suggest-services", {

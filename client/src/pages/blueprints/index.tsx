@@ -80,16 +80,13 @@ export default function BlueprintsPage() {
     enabled: !!selectedAccount,
   });
 
+  // Stable primitive dep — avoids infinite loop from new [] refs on every render
+  const firstBrandName = (brandProfiles as any[])[0]?.name ?? "";
+
   // Pre-fill AI form from brand profile
   useEffect(() => {
-    if (brandProfiles.length > 0) {
-      const bp = brandProfiles[0];
-      setAiForm(p => ({
-        ...p,
-        businessName: bp.name || p.businessName,
-      }));
-    }
-  }, [brandProfiles]);
+    if (firstBrandName) setAiForm(p => ({ ...p, businessName: firstBrandName || p.businessName }));
+  }, [firstBrandName]);
 
   useEffect(() => {
     if (accounts.length > 0 && selectedAccount) {
