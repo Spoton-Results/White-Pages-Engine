@@ -1010,8 +1010,18 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
   // ── Variation Banks ───────────────────────────────────────────────────────
 
   app.get("/api/websites/:id/variation-services", requireAuth, async (req: Request, res: Response) => {
-    const services = await storage.getVariationBankServices(req.params.id as string);
-    return res.json(services);
+    const websiteId = req.params.id as string;
+    const [bankServices, website] = await Promise.all([
+      storage.getVariationBankServices(websiteId),
+      storage.getWebsite(websiteId),
+    ]);
+    // Also include services from the account's services table so newly-created services appear
+    const accountServices = website
+      ? (await storage.getServices(website.accountId)).map((s: any) => s.name)
+      : [];
+    // Merge: bank services first (preserve order), then any account services not yet in banks
+    const merged = Array.from(new Set([...bankServices, ...accountServices]));
+    return res.json(merged);
   });
 
   app.get("/api/websites/:id/context", requireAuth, async (req: Request, res: Response) => {
