@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Zap, BookOpen, Play, CheckCircle2, Loader2, Info, Search, FileText, XCircle, AlertCircle } from "lucide-react";
+import { Zap, Play, CheckCircle2, Loader2, Search, FileText, XCircle, AlertCircle } from "lucide-react";
 import { api } from "@/lib/api";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -27,7 +27,6 @@ export default function BulkGeneratorPage() {
 
   const [websiteId, setWebsiteId] = useState<string>("");
   const [blueprintId, setBlueprintId] = useState<string>("");
-  const [newService, setNewService] = useState("");
   const [mode, setMode] = useState<"all_states" | "specific_states" | "specific_cities">("all_states");
   const [selectedStateCodes, setSelectedStateCodes] = useState<Set<string>>(new Set());
   const [selectedCitySlugs, setSelectedCitySlugs] = useState<Set<string>>(new Set());
@@ -73,19 +72,10 @@ export default function BulkGeneratorPage() {
     enabled: !!accountId,
   });
 
-  const contextQ = useQuery<any>({
-    queryKey: ["/api/websites", websiteId, "context"],
-    queryFn: () => api.get<any>(`/api/websites/${websiteId}/context`),
-    enabled: !!websiteId,
-  });
-
   const services = servicesQ.data ?? [];
   const bankServicesSet = new Set<string>(bankServicesQ.data ?? []);
-  const bankedServices = services.filter(s => bankServicesSet.has(s));
-  const unbankedServices = services.filter(s => !bankServicesSet.has(s));
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
-  const siteContext = contextQ.data ?? null;
 
   // Deduplicate by slug so cities imported twice don't appear twice
   const dbStates = useMemo(() => {
@@ -112,26 +102,6 @@ export default function BulkGeneratorPage() {
   const filteredCities = useMemo(() =>
     dbCities.filter((l: any) => !citySearch || l.name.toLowerCase().includes(citySearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(citySearch.toLowerCase())),
     [dbCities, citySearch]);
-
-  const writeMut = useMutation({
-    mutationFn: ({ service }: { service: string }) =>
-      apiFetch(`/api/websites/${websiteId}/variation-banks/write`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service }),
-      }),
-    onSuccess: (data: any, { service }) => {
-      const ctx = data?.context;
-      const desc = ctx?.brand || ctx?.industry
-        ? `Written using ${[ctx.brand, ctx.industry].filter(Boolean).join(" · ")} context`
-        : `Content bank ready for "${service}"`;
-      toast({ title: `Variations written for "${service}"`, description: desc });
-      setNewService("");
-      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "variation-services"] });
-      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-services"] });
-    },
-    onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
-  });
 
   function buildLocationPayload() {
     if (mode === "all_states") {
@@ -318,126 +288,12 @@ export default function BulkGeneratorPage() {
           </Card>
         )}
 
-        {/* Step 3 — Variation Banks */}
-        {websiteId && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">3</span>
-                Variation Banks
-              </CardTitle>
-              <CardDescription>
-                Each service needs a content bank (5 Claude Haiku calls, paid once). Pages then generate instantly at zero cost.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Brand + Industry context indicator */}
-              {contextQ.isLoading ? null : siteContext && (siteContext.brand || siteContext.industry) ? (
-                <div className="flex flex-wrap gap-2 items-center p-2.5 rounded-md bg-blue-50 border border-blue-200 text-xs">
-                  <span className="text-blue-700 font-medium">AI context:</span>
-                  {siteContext.brand?.name && (
-                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{siteContext.brand.name}</span>
-                  )}
-                  {siteContext.industry?.name && (
-                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{siteContext.industry.name}</span>
-                  )}
-                  {siteContext.brand?.voiceAndTone && (
-                    <span className="text-blue-600 italic truncate max-w-[200px]">{siteContext.brand.voiceAndTone}</span>
-                  )}
-                </div>
-              ) : websiteId ? (
-                <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-700">
-                  <Info className="size-3.5 shrink-0" />
-                  No brand profile or industry set — content will be generic. Add them in Brand Profiles &amp; Industries for better results.
-                </div>
-              ) : null}
-
-              {/* Banked services — ready to generate */}
-              {bankedServices.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Ready to generate</p>
-                  <div className="flex flex-wrap gap-2">
-                    {bankedServices.map(svc => (
-                      <div key={svc} className="flex items-center gap-1.5 bg-green-50 border border-green-200 rounded-md px-3 py-1.5" data-testid={`badge-service-${svc}`}>
-                        <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
-                        <span className="text-sm font-medium text-green-800">{svc}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 px-1.5 text-xs text-green-700 hover:text-green-900"
-                          onClick={() => writeMut.mutate({ service: svc })}
-                          disabled={writeMut.isPending}
-                          data-testid={`button-rewrite-${svc}`}
-                        >
-                          {writeMut.isPending && writeMut.variables?.service === svc ? <Loader2 className="size-3 animate-spin" /> : "Rewrite"}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Unbanked services — need banks written before they can generate */}
-              {unbankedServices.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium flex items-center gap-1.5">
-                    <AlertCircle className="size-3.5 text-amber-500" />
-                    Needs banks written ({unbankedServices.length})
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {unbankedServices.map(svc => (
-                      <div key={svc} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5" data-testid={`badge-unbanked-${svc}`}>
-                        <span className="text-sm font-medium text-amber-800">{svc}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 px-1.5 text-xs text-amber-700 hover:text-amber-900"
-                          onClick={() => writeMut.mutate({ service: svc })}
-                          disabled={writeMut.isPending}
-                          data-testid={`button-write-${svc}`}
-                        >
-                          {writeMut.isPending && writeMut.variables?.service === svc ? <Loader2 className="size-3 animate-spin" /> : "Write Bank"}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Write new bank</p>
-                <div className="flex gap-2 max-w-md">
-                  <Input
-                    placeholder="e.g. Credit Card Processing"
-                    value={newService}
-                    onChange={e => setNewService(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && newService.trim() && writeMut.mutate({ service: newService.trim() })}
-                    data-testid="input-new-service"
-                  />
-                  <Button
-                    onClick={() => writeMut.mutate({ service: newService.trim() })}
-                    disabled={!newService.trim() || writeMut.isPending}
-                    data-testid="button-write-bank"
-                  >
-                    {writeMut.isPending && writeMut.variables?.service === newService.trim()
-                      ? <><Loader2 className="size-4 mr-2 animate-spin" /> Writing...</>
-                      : <><BookOpen className="size-4 mr-2" /> Write Bank</>}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Info className="size-3" />
-                  Makes 5 Claude API calls. Works with <code className="bg-muted px-1 rounded">claude-haiku-4-5-20251001</code>.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 3 — Service + Location scope */}
+        {/* Step 3 — Configure Generation */}
         {websiteId && services.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">4</span>
+                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">3</span>
                 Configure Generation
               </CardTitle>
             </CardHeader>
@@ -598,12 +454,12 @@ export default function BulkGeneratorPage() {
           </Card>
         )}
 
-        {/* Step 5 — Generate */}
+        {/* Step 4 — Generate */}
         {websiteId && selectedServices.size > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">5</span>
+                <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">4</span>
                 Generate Pages
               </CardTitle>
               <CardDescription>

@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Wrench, Trash2, Sparkles, Globe, Check, X } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Plus, Wrench, Trash2, Sparkles, Globe, Check, X, BookOpen, CheckCircle2, Loader2, AlertCircle, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -67,6 +68,62 @@ export default function ServicesPage() {
     if (firstBrandName) setAiForm(p => ({ ...p, businessName: firstBrandName || p.businessName }));
     if (accountDomain) setAiForm(p => ({ ...p, websiteUrl: `https://${accountDomain}` }));
   }, [firstBrandName, accountDomain, selectedAccount]);
+
+  // ── Variation Banks tab ──────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"services" | "variation-banks">("services");
+  const [bankWebsiteId, setBankWebsiteId] = useState<string>("");
+
+  const accountWebsites = (websites as any[]).filter((w: any) => w.accountId === selectedAccount);
+
+  // Auto-select the first account website when switching accounts
+  const firstWebsiteId = accountWebsites[0]?.id ?? "";
+  useEffect(() => {
+    if (firstWebsiteId) setBankWebsiteId(firstWebsiteId);
+  }, [firstWebsiteId]);
+
+  const bankServicesQ = useQuery<string[]>({
+    queryKey: ["/api/websites", bankWebsiteId, "bank-services"],
+    queryFn: () => api.get<string[]>(`/api/websites/${bankWebsiteId}/bank-services`),
+    enabled: !!bankWebsiteId,
+  });
+
+  const bankContextQ = useQuery<any>({
+    queryKey: ["/api/websites", bankWebsiteId, "context"],
+    queryFn: () => api.get<any>(`/api/websites/${bankWebsiteId}/context`),
+    enabled: !!bankWebsiteId,
+  });
+
+  const bankSet = new Set<string>(bankServicesQ.data ?? []);
+
+  const writeBankMut = useMutation({
+    mutationFn: ({ service }: { service: string }) =>
+      api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service }),
+    onSuccess: (data: any, { service }) => {
+      const ctx = data?.context;
+      const desc = ctx?.brand || ctx?.industry
+        ? `Written using ${[ctx.brand, ctx.industry].filter(Boolean).join(" · ")} context`
+        : `Bank ready for "${service}"`;
+      toast({ title: `Bank written for "${service}"`, description: desc });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+    },
+    onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
+  });
+
+  const writeAllUnbankedMut = useMutation({
+    mutationFn: async () => {
+      const unbanked = (services as any[]).filter((s: any) => !bankSet.has(s.name));
+      for (const svc of unbanked) {
+        await api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service: svc.name });
+      }
+    },
+    onSuccess: () => {
+      toast({ title: "All banks written!", description: "All services now have variation banks." });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+    },
+    onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
+  });
 
   const suggestMutation = useMutation({
     mutationFn: () => api.post<any[]>("/api/ai/suggest-services", {
@@ -134,23 +191,13 @@ export default function ServicesPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Services</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">Manage service offerings used in page generation.</p>
+            <p className="text-muted-foreground text-sm mt-0.5">Manage service offerings and their content banks for page generation.</p>
           </div>
-          {selectedAccount && (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowAI(true)} data-testid="button-suggest-services">
-                <Sparkles className="size-4" />Suggest with AI
-              </Button>
-              <Button size="sm" className="gap-2" onClick={() => setShowCreate(true)} data-testid="button-add-service">
-                <Plus className="size-4" />Add Service
-              </Button>
-            </div>
-          )}
         </div>
 
         {(accounts as any[]).length > 1 && (
           <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-            <Select onValueChange={setOverrideAccount} value={selectedAccount}>
+            <Select onValueChange={v => { setOverrideAccount(v); }} value={selectedAccount}>
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Select account" />
               </SelectTrigger>
@@ -164,80 +211,231 @@ export default function ServicesPage() {
           </div>
         )}
 
-        {!selectedAccount ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-            {accountsLoading ? (
-              <>
-                <Skeleton className="size-12 rounded-full" />
-                <Skeleton className="h-4 w-48" />
-              </>
-            ) : (
-              <>
-                <Wrench className="size-12 text-muted-foreground/30" />
-                <p className="text-muted-foreground">Select an account to manage services</p>
-              </>
+        <Tabs value={activeTab} onValueChange={v => setActiveTab(v as "services" | "variation-banks")} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <TabsList>
+              <TabsTrigger value="services" data-testid="tab-services">Services</TabsTrigger>
+              <TabsTrigger value="variation-banks" data-testid="tab-variation-banks">Variation Banks</TabsTrigger>
+            </TabsList>
+            {activeTab === "services" && selectedAccount && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowAI(true)} data-testid="button-suggest-services">
+                  <Sparkles className="size-4" />Suggest with AI
+                </Button>
+                <Button size="sm" className="gap-2" onClick={() => setShowCreate(true)} data-testid="button-add-service">
+                  <Plus className="size-4" />Add Service
+                </Button>
+              </div>
             )}
           </div>
-        ) : (services as any[]).length === 0 && !isLoading ? (
-          <div className="flex flex-col items-center justify-center py-16 border rounded-lg bg-card text-center gap-4">
-            <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center">
-              <Sparkles className="size-8 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-semibold">No services yet</h3>
-              <p className="text-muted-foreground text-sm mt-1 max-w-xs">
-                Let AI suggest all your services at once based on your website or industry.
-              </p>
-            </div>
-            <Button onClick={() => setShowAI(true)} className="gap-2">
-              <Sparkles className="size-4" />Suggest with AI
-            </Button>
-          </div>
-        ) : (
-          <div className="bg-card rounded-lg border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Service Name</TableHead>
-                  <TableHead className="hidden sm:table-cell">Slug</TableHead>
-                  <TableHead className="hidden md:table-cell">Keywords</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i}>
-                      {Array.from({ length: 4 }).map((_, j) => (
-                        <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                      ))}
+
+          {/* ── Services Tab ────────────────────────────────────────────────── */}
+          <TabsContent value="services" className="space-y-4 mt-0">
+            {!selectedAccount ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+                {accountsLoading ? (
+                  <>
+                    <Skeleton className="size-12 rounded-full" />
+                    <Skeleton className="h-4 w-48" />
+                  </>
+                ) : (
+                  <>
+                    <Wrench className="size-12 text-muted-foreground/30" />
+                    <p className="text-muted-foreground">Select an account to manage services</p>
+                  </>
+                )}
+              </div>
+            ) : (services as any[]).length === 0 && !isLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 border rounded-lg bg-card text-center gap-4">
+                <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Sparkles className="size-8 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">No services yet</h3>
+                  <p className="text-muted-foreground text-sm mt-1 max-w-xs">
+                    Let AI suggest all your services at once based on your website or industry.
+                  </p>
+                </div>
+                <Button onClick={() => setShowAI(true)} className="gap-2">
+                  <Sparkles className="size-4" />Suggest with AI
+                </Button>
+              </div>
+            ) : (
+              <div className="bg-card rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Service Name</TableHead>
+                      <TableHead className="hidden sm:table-cell">Slug</TableHead>
+                      <TableHead className="hidden md:table-cell">Keywords</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
-                  ))
-                ) : (services as any[]).map((svc: any) => (
-                  <TableRow key={svc.id}>
-                    <TableCell className="font-medium">
-                      <div>{svc.name}</div>
-                      <div className="text-xs text-muted-foreground sm:hidden font-mono">{svc.slug}</div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground hidden sm:table-cell">{svc.slug}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground hidden md:table-cell">
-                      {svc.keywords?.slice(0, 3).join(", ")}{svc.keywords?.length > 3 ? ` +${svc.keywords.length - 3}` : ""}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => confirm("Delete service?") && remove.mutate(svc.id)}
-                        data-testid={`button-delete-service-${svc.id}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <TableRow key={i}>
+                          {Array.from({ length: 4 }).map((_, j) => (
+                            <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    ) : (services as any[]).map((svc: any) => (
+                      <TableRow key={svc.id}>
+                        <TableCell className="font-medium">
+                          <div>{svc.name}</div>
+                          <div className="text-xs text-muted-foreground sm:hidden font-mono">{svc.slug}</div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground hidden sm:table-cell">{svc.slug}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground hidden md:table-cell">
+                          {svc.keywords?.slice(0, 3).join(", ")}{svc.keywords?.length > 3 ? ` +${svc.keywords.length - 3}` : ""}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => confirm("Delete service?") && remove.mutate(svc.id)}
+                            data-testid={`button-delete-service-${svc.id}`}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Variation Banks Tab ─────────────────────────────────────────── */}
+          <TabsContent value="variation-banks" className="space-y-4 mt-0">
+            {!selectedAccount ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+                <Wrench className="size-12 text-muted-foreground/30" />
+                <p className="text-muted-foreground">Select an account to manage variation banks</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Website selector */}
+                {accountWebsites.length > 1 && (
+                  <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
+                    <Select onValueChange={setBankWebsiteId} value={bankWebsiteId}>
+                      <SelectTrigger className="w-64" data-testid="select-bank-website">
+                        <SelectValue placeholder="Select website" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accountWebsites.map((w: any) => (
+                          <SelectItem key={w.id} value={w.id}>{w.domain}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-muted-foreground">
+                      {bankServicesQ.data?.length ?? 0} of {(services as any[]).length} services banked
+                    </span>
+                  </div>
+                )}
+
+                {!bankWebsiteId ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+                    <Wrench className="size-10 text-muted-foreground/30" />
+                    <p className="text-muted-foreground text-sm">No website found for this account</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* AI context indicator */}
+                    {bankContextQ.data?.brand || bankContextQ.data?.industry ? (
+                      <div className="flex flex-wrap gap-2 items-center p-2.5 rounded-md bg-blue-50 border border-blue-200 text-xs">
+                        <span className="text-blue-700 font-medium">AI context:</span>
+                        {bankContextQ.data?.brand?.name && (
+                          <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{bankContextQ.data.brand.name}</span>
+                        )}
+                        {bankContextQ.data?.industry?.name && (
+                          <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">{bankContextQ.data.industry.name}</span>
+                        )}
+                        {bankContextQ.data?.brand?.voiceAndTone && (
+                          <span className="text-blue-600 italic truncate max-w-[220px]">{bankContextQ.data.brand.voiceAndTone}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                        <Info className="size-3.5 shrink-0" />
+                        No brand profile or industry set — content will be generic. Add them for better results.
+                      </div>
+                    )}
+
+                    {/* Write All Unbanked button */}
+                    {(services as any[]).some((s: any) => !bankSet.has(s.name)) && (
+                      <div className="flex items-center gap-3">
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => writeAllUnbankedMut.mutate()}
+                          disabled={writeAllUnbankedMut.isPending || writeBankMut.isPending}
+                          data-testid="button-write-all-banks"
+                        >
+                          {writeAllUnbankedMut.isPending
+                            ? <><Loader2 className="size-4 animate-spin" /> Writing all...</>
+                            : <><BookOpen className="size-4" /> Write All Unbanked</>}
+                        </Button>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Info className="size-3" />
+                          5 Claude API calls per service (paid once, generates instantly after)
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Service bank list */}
+                    {(services as any[]).length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg">
+                        No services yet — add services in the Services tab first.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {(services as any[]).map((svc: any) => {
+                          const hasBanks = bankSet.has(svc.name);
+                          const isWriting = (writeBankMut.isPending || writeAllUnbankedMut.isPending) && writeBankMut.variables?.service === svc.name;
+                          return (
+                            <div
+                              key={svc.id}
+                              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${hasBanks ? "bg-green-50 border-green-200" : "bg-card"}`}
+                              data-testid={`row-bank-${svc.id}`}
+                            >
+                              <div className="shrink-0">
+                                {hasBanks
+                                  ? <CheckCircle2 className="size-5 text-green-600" />
+                                  : <AlertCircle className="size-5 text-amber-400" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium truncate ${hasBanks ? "text-green-800" : ""}`}>{svc.name}</p>
+                                <p className={`text-xs ${hasBanks ? "text-green-600" : "text-muted-foreground"}`}>
+                                  {hasBanks ? "Banks ready — will generate instantly" : "Needs bank written before generating"}
+                                </p>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={hasBanks ? "ghost" : "default"}
+                                className={`shrink-0 gap-1.5 h-7 text-xs ${hasBanks ? "text-green-700 hover:text-green-900" : ""}`}
+                                onClick={() => writeBankMut.mutate({ service: svc.name })}
+                                disabled={writeBankMut.isPending || writeAllUnbankedMut.isPending}
+                                data-testid={`button-bank-${svc.id}`}
+                              >
+                                {isWriting
+                                  ? <><Loader2 className="size-3 animate-spin" /> Writing...</>
+                                  : hasBanks
+                                    ? "Rewrite"
+                                    : <><BookOpen className="size-3" /> Write Bank</>}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* AI Suggest Dialog */}
