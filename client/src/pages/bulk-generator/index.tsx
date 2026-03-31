@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Zap, BookOpen, Play, CheckCircle2, Loader2, Info, Search, FileText, XCircle } from "lucide-react";
+import { Zap, BookOpen, Play, CheckCircle2, Loader2, Info, Search, FileText, XCircle, AlertCircle } from "lucide-react";
 import { api } from "@/lib/api";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -37,7 +37,7 @@ export default function BulkGeneratorPage() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
-  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error"; created: number; skipped: number }>>([]);
+  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; skipped: number }>>([]);
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -47,6 +47,13 @@ export default function BulkGeneratorPage() {
   const servicesQ = useQuery<string[]>({
     queryKey: ["/api/websites", websiteId, "variation-services"],
     queryFn: () => apiFetch(`/api/websites/${websiteId}/variation-services`),
+    enabled: !!websiteId,
+  });
+
+  // Only services that already have variation banks written
+  const bankServicesQ = useQuery<string[]>({
+    queryKey: ["/api/websites", websiteId, "bank-services"],
+    queryFn: () => apiFetch(`/api/websites/${websiteId}/bank-services`),
     enabled: !!websiteId,
   });
 
@@ -73,6 +80,9 @@ export default function BulkGeneratorPage() {
   });
 
   const services = servicesQ.data ?? [];
+  const bankServicesSet = new Set<string>(bankServicesQ.data ?? []);
+  const bankedServices = services.filter(s => bankServicesSet.has(s));
+  const unbankedServices = services.filter(s => !bankServicesSet.has(s));
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
   const siteContext = contextQ.data ?? null;
@@ -118,6 +128,7 @@ export default function BulkGeneratorPage() {
       toast({ title: `Variations written for "${service}"`, description: desc });
       setNewService("");
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "variation-services"] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-services"] });
     },
     onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
   });
@@ -153,6 +164,11 @@ export default function BulkGeneratorPage() {
     for (let i = 0; i < svcs.length; i++) {
       if (cancelRequested) break;
       const svc = svcs[i];
+      // Skip services that don't have variation banks written yet
+      if (!bankServicesSet.has(svc)) {
+        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "no-bank" } : p));
+        continue;
+      }
       setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "running" } : p));
       try {
         const payload: any = { service: svc, ...buildLocationPayload() };
@@ -336,11 +352,12 @@ export default function BulkGeneratorPage() {
                 </div>
               ) : null}
 
-              {services.length > 0 && (
+              {/* Banked services — ready to generate */}
+              {bankedServices.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">Existing banks</p>
+                  <p className="text-sm font-medium">Ready to generate</p>
                   <div className="flex flex-wrap gap-2">
-                    {services.map(svc => (
+                    {bankedServices.map(svc => (
                       <div key={svc} className="flex items-center gap-1.5 bg-green-50 border border-green-200 rounded-md px-3 py-1.5" data-testid={`badge-service-${svc}`}>
                         <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
                         <span className="text-sm font-medium text-green-800">{svc}</span>
@@ -353,6 +370,33 @@ export default function BulkGeneratorPage() {
                           data-testid={`button-rewrite-${svc}`}
                         >
                           {writeMut.isPending && writeMut.variables?.service === svc ? <Loader2 className="size-3 animate-spin" /> : "Rewrite"}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Unbanked services — need banks written before they can generate */}
+              {unbankedServices.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 text-amber-500" />
+                    Needs banks written ({unbankedServices.length})
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {unbankedServices.map(svc => (
+                      <div key={svc} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5" data-testid={`badge-unbanked-${svc}`}>
+                        <span className="text-sm font-medium text-amber-800">{svc}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 px-1.5 text-xs text-amber-700 hover:text-amber-900"
+                          onClick={() => writeMut.mutate({ service: svc })}
+                          disabled={writeMut.isPending}
+                          data-testid={`button-write-${svc}`}
+                        >
+                          {writeMut.isPending && writeMut.variables?.service === svc ? <Loader2 className="size-3 animate-spin" /> : "Write Bank"}
                         </Button>
                       </div>
                     ))}
@@ -411,20 +455,26 @@ export default function BulkGeneratorPage() {
                   </Button>
                 </div>
                 <div className="space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
-                  {services.map(svc => (
-                    <label key={svc} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-service-${svc}`}>
-                      <Checkbox
-                        checked={selectedServices.has(svc)}
-                        onCheckedChange={checked => setSelectedServices(prev => {
-                          const n = new Set(prev);
-                          checked ? n.add(svc) : n.delete(svc);
-                          return n;
-                        })}
-                        data-testid={`checkbox-service-${svc}`}
-                      />
-                      <span className="text-sm">{svc}</span>
-                    </label>
-                  ))}
+                  {services.map(svc => {
+                    const hasBank = bankServicesSet.has(svc);
+                    return (
+                      <label key={svc} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-service-${svc}`}>
+                        <Checkbox
+                          checked={selectedServices.has(svc)}
+                          onCheckedChange={checked => setSelectedServices(prev => {
+                            const n = new Set(prev);
+                            checked ? n.add(svc) : n.delete(svc);
+                            return n;
+                          })}
+                          data-testid={`checkbox-service-${svc}`}
+                        />
+                        <span className="text-sm flex-1">{svc}</span>
+                        {!hasBank && (
+                          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">No banks</span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -590,6 +640,7 @@ export default function BulkGeneratorPage() {
                         {p.status === "running" && <Loader2 className="size-4 animate-spin text-primary" />}
                         {p.status === "done" && <CheckCircle2 className="size-4 text-green-600" />}
                         {p.status === "error" && <XCircle className="size-4 text-red-500" />}
+                        {p.status === "no-bank" && <AlertCircle className="size-4 text-amber-500" />}
                       </div>
                       <span className={`flex-1 font-medium ${p.status === "pending" ? "text-muted-foreground" : ""}`}>{p.service}</span>
                       {p.status === "done" && (
@@ -599,6 +650,7 @@ export default function BulkGeneratorPage() {
                         </span>
                       )}
                       {p.status === "running" && <span className="text-xs text-primary">Generating...</span>}
+                      {p.status === "no-bank" && <span className="text-xs text-amber-600">Write banks first</span>}
                     </div>
                   ))}
                 </div>

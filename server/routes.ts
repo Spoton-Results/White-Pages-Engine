@@ -1009,6 +1009,10 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
   // ── Variation Banks ───────────────────────────────────────────────────────
 
+  app.get("/api/websites/:id/bank-services", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getVariationBankServices(req.params.id as string));
+  });
+
   app.get("/api/websites/:id/variation-services", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
     const [bankServices, website] = await Promise.all([
