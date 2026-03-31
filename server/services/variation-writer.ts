@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 30_000, maxRetries: 0 });
 
 const SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 type Section = typeof SECTIONS[number];

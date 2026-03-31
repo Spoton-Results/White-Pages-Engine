@@ -1062,7 +1062,13 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     };
 
     await storage.deleteVariationBanks(websiteId, service);
-    await writeVariationsForService(service, website.accountId, websiteId, ctx);
+    try {
+      await writeVariationsForService(service, website.accountId, websiteId, ctx);
+    } catch (err: any) {
+      const status = err?.status ?? err?.statusCode ?? 500;
+      const msg = err?.error?.error?.message ?? err?.message ?? "Claude API error";
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ error: msg });
+    }
     return res.json({ ok: true, context: { brand: ctx.brandName, industry: ctx.industryName } });
   });
 
