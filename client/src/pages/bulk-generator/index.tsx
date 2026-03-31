@@ -37,7 +37,7 @@ export default function BulkGeneratorPage() {
   const [overwrite, setOverwrite] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
-  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number }>>([]);
+  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -134,7 +134,7 @@ export default function BulkGeneratorPage() {
     setIsRunningAll(true);
     setCancelRequested(false);
     setLastResult(null);
-    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0 })));
+    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
 
     let totalCreated = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
 
@@ -162,7 +162,7 @@ export default function BulkGeneratorPage() {
         if (data.warning) {
           toast({ title: "Blueprint template warning", description: data.warning, variant: "destructive" });
         }
-        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0 } : p));
+        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0, errors: data.errors ?? 0 } : p));
       } catch (err: any) {
         totalErrors++;
         setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "error" } : p));
@@ -550,11 +550,15 @@ export default function BulkGeneratorPage() {
                       </div>
                       <span className={`flex-1 font-medium ${p.status === "pending" ? "text-muted-foreground" : ""}`}>{p.service}</span>
                       {p.status === "done" && (
-                        <span className="text-xs text-muted-foreground">
-                          {p.created > 0 && <span className="text-green-700 font-semibold">+{p.created}</span>}
-                          {p.updated > 0 && <span className={`text-blue-700 font-semibold${p.created > 0 ? " ml-1.5" : ""}`}>↻{p.updated} updated</span>}
-                          {p.skipped > 0 && <span className="ml-1.5">⊘{p.skipped} skipped</span>}
-                          {p.created === 0 && p.updated === 0 && p.skipped === 0 && <span>done</span>}
+                        <span className="text-xs flex items-center gap-1.5">
+                          {(p.created + p.updated) > 0
+                            ? <span className="text-green-700 font-semibold">{p.created + p.updated} pages</span>
+                            : p.skipped > 0
+                              ? <span className="text-muted-foreground">{p.skipped} skipped</span>
+                              : <span className="text-muted-foreground">0 pages</span>
+                          }
+                          {p.skipped > 0 && (p.created + p.updated) > 0 && <span className="text-muted-foreground">· {p.skipped} skipped</span>}
+                          {p.errors > 0 && <span className="text-red-500">· {p.errors} errors</span>}
                         </span>
                       )}
                       {p.status === "running" && <span className="text-xs text-primary">Generating...</span>}
@@ -568,9 +572,9 @@ export default function BulkGeneratorPage() {
               {lastResult && !isRunningAll && (
                 <div className="rounded-lg border bg-muted/30 p-4 space-y-1" data-testid="div-results">
                   <p className="font-medium text-sm">Run complete</p>
-                  <div className="flex gap-4 text-sm">
-                    <span className="text-green-700 font-semibold" data-testid="text-created">✓ {lastResult.created} created</span>
-                    <span className="text-muted-foreground" data-testid="text-skipped">⊘ {lastResult.skipped} skipped</span>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <span className="text-green-700 font-semibold" data-testid="text-created">✓ {lastResult.created} pages generated</span>
+                    {lastResult.skipped > 0 && <span className="text-muted-foreground" data-testid="text-skipped">⊘ {lastResult.skipped} skipped</span>}
                     {lastResult.errors > 0 && <span className="text-red-600" data-testid="text-errors">✗ {lastResult.errors} errors</span>}
                   </div>
                 </div>
