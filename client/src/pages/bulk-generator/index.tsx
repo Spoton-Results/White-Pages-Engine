@@ -5,12 +5,11 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Zap, BookOpen, Play, CheckCircle2, Loader2, ChevronDown, ChevronUp, Info, Search, FileText } from "lucide-react";
+import { Zap, BookOpen, Play, CheckCircle2, Loader2, Info, Search, FileText, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -29,14 +28,16 @@ export default function BulkGeneratorPage() {
   const [websiteId, setWebsiteId] = useState<string>("");
   const [blueprintId, setBlueprintId] = useState<string>("");
   const [newService, setNewService] = useState("");
-  const [selectedService, setSelectedService] = useState<string>("");
   const [mode, setMode] = useState<"all_states" | "specific_states" | "specific_cities">("all_states");
   const [selectedStateCodes, setSelectedStateCodes] = useState<Set<string>>(new Set());
   const [selectedCitySlugs, setSelectedCitySlugs] = useState<Set<string>>(new Set());
   const [stateSearch, setStateSearch] = useState("");
   const [citySearch, setCitySearch] = useState("");
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[] } | null>(null);
-  const [showSlugs, setShowSlugs] = useState(false);
+  const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  const [isRunningAll, setIsRunningAll] = useState(false);
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error"; created: number; skipped: number }>>([]);
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -121,45 +122,62 @@ export default function BulkGeneratorPage() {
     onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
   });
 
-  const generateMut = useMutation({
-    mutationFn: () => {
-      let payload: any = { service: selectedService };
-
-      if (mode === "all_states") {
-        if (dbStates.length > 0) {
-          // Use actual imported states
-          payload.mode = "specific_states";
-          payload.states = dbStates.map((l: any) => l.stateCode).filter(Boolean);
-        } else {
-          payload.mode = "all_states";
-        }
-      } else if (mode === "specific_states") {
-        payload.mode = "specific_states";
-        payload.states = Array.from(selectedStateCodes);
-      } else {
-        payload.mode = "specific_cities";
-        const cityObjs = Array.from(selectedCitySlugs).map(slug => {
-          const loc = dbCities.find((l: any) => l.slug === slug);
-          return loc ? { name: loc.name, stateAbbr: loc.stateCode } : null;
-        }).filter(Boolean);
-        payload.cities = cityObjs;
+  function buildLocationPayload() {
+    if (mode === "all_states") {
+      if (dbStates.length > 0) {
+        const uniqueCodes = [...new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean))];
+        return { mode: "specific_states", states: uniqueCodes };
       }
+      return { mode: "all_states" };
+    } else if (mode === "specific_states") {
+      return { mode: "specific_states", states: Array.from(selectedStateCodes) };
+    } else {
+      const cityObjs = Array.from(selectedCitySlugs).map(slug => {
+        const loc = dbCities.find((l: any) => l.slug === slug);
+        return loc ? { name: loc.name, stateAbbr: loc.stateCode } : null;
+      }).filter(Boolean);
+      return { mode: "specific_cities", cities: cityObjs };
+    }
+  }
 
-      if (blueprintId) payload.blueprintId = blueprintId;
+  async function runAllServices() {
+    const svcs = Array.from(selectedServices);
+    if (svcs.length === 0) return;
+    setIsRunningAll(true);
+    setCancelRequested(false);
+    setLastResult(null);
+    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, skipped: 0 })));
 
-      return apiFetch(`/api/websites/${websiteId}/bulk-generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    },
-    onSuccess: (data) => {
-      setLastResult(data);
-      toast({ title: `Generated ${data.created} pages`, description: `${data.skipped} skipped (already exist), ${data.errors} errors` });
-      qc.invalidateQueries({ queryKey: ["/api/pages"] });
-    },
-    onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
-  });
+    let totalCreated = 0, totalSkipped = 0, totalErrors = 0;
+
+    for (let i = 0; i < svcs.length; i++) {
+      if (cancelRequested) break;
+      const svc = svcs[i];
+      setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "running" } : p));
+      try {
+        const payload: any = { service: svc, ...buildLocationPayload() };
+        if (blueprintId) payload.blueprintId = blueprintId;
+        const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        totalCreated += data.created ?? 0;
+        totalSkipped += data.skipped ?? 0;
+        totalErrors += data.errors ?? 0;
+        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created, skipped: data.skipped } : p));
+      } catch (err: any) {
+        totalErrors++;
+        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "error" } : p));
+        toast({ title: `Error on "${svc}"`, description: err.message, variant: "destructive" });
+      }
+    }
+
+    setIsRunningAll(false);
+    setLastResult({ created: totalCreated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
+    toast({ title: `Done! ${totalCreated} pages created`, description: `${totalSkipped} skipped, ${totalErrors} errors across ${svcs.length} service(s)` });
+    qc.invalidateQueries({ queryKey: ["/api/pages"] });
+  }
 
   const allStatesPayloadCount = useMemo(() => {
     if (dbStates.length === 0) return 50;
@@ -223,7 +241,7 @@ export default function BulkGeneratorPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedService(""); setBlueprintId(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); }}>
+            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedServices(new Set()); setBlueprintId(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); setServiceProgress([]); setLastResult(null); }}>
               <SelectTrigger data-testid="select-website" className="w-full max-w-md">
                 <SelectValue placeholder="Choose a website..." />
               </SelectTrigger>
@@ -380,19 +398,34 @@ export default function BulkGeneratorPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
-              {/* Service */}
-              <div className="space-y-1.5">
-                <Label>Service</Label>
-                <Select value={selectedService} onValueChange={setSelectedService}>
-                  <SelectTrigger data-testid="select-service" className="w-full max-w-md">
-                    <SelectValue placeholder="Choose a service with a bank..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {services.map(svc => (
-                      <SelectItem key={svc} value={svc} data-testid={`option-service-${svc}`}>{svc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Service multi-select */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Services <span className="text-muted-foreground font-normal text-xs">({selectedServices.size} of {services.length} selected)</span></Label>
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-7 text-xs"
+                    onClick={() => setSelectedServices(selectedServices.size === services.length ? new Set() : new Set(services))}
+                    data-testid="button-select-all-services"
+                  >
+                    {selectedServices.size === services.length ? "Deselect All" : "Select All"}
+                  </Button>
+                </div>
+                <div className="space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
+                  {services.map(svc => (
+                    <label key={svc} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-service-${svc}`}>
+                      <Checkbox
+                        checked={selectedServices.has(svc)}
+                        onCheckedChange={checked => setSelectedServices(prev => {
+                          const n = new Set(prev);
+                          checked ? n.add(svc) : n.delete(svc);
+                          return n;
+                        })}
+                        data-testid={`checkbox-service-${svc}`}
+                      />
+                      <span className="text-sm">{svc}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {/* Mode */}
@@ -515,8 +548,8 @@ export default function BulkGeneratorPage() {
           </Card>
         )}
 
-        {/* Step 4 — Generate */}
-        {websiteId && selectedService && (
+        {/* Step 5 — Generate */}
+        {websiteId && selectedServices.size > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -524,47 +557,62 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Ready to generate <strong>{targetCount}</strong> page(s) for <strong>{selectedService}</strong> — zero API calls, instant results.
+                Will generate up to <strong>{selectedServices.size * targetCount}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button
-                size="lg"
-                onClick={() => generateMut.mutate()}
-                disabled={generateMut.isPending || targetCount === 0}
-                data-testid="button-generate"
-                className="gap-2"
-              >
-                {generateMut.isPending
-                  ? <><Loader2 className="size-4 animate-spin" /> Generating {targetCount} pages...</>
-                  : <><Play className="size-4" /> Generate {targetCount} Page{targetCount !== 1 ? "s" : ""}</>}
-              </Button>
+              <div className="flex gap-3">
+                <Button
+                  size="lg"
+                  onClick={runAllServices}
+                  disabled={isRunningAll || targetCount === 0}
+                  data-testid="button-generate"
+                  className="gap-2"
+                >
+                  {isRunningAll
+                    ? <><Loader2 className="size-4 animate-spin" /> Running...</>
+                    : <><Play className="size-4" /> Generate {selectedServices.size * targetCount} Pages</>}
+                </Button>
+                {isRunningAll && (
+                  <Button variant="outline" size="lg" onClick={() => setCancelRequested(true)} data-testid="button-cancel">
+                    Cancel
+                  </Button>
+                )}
+              </div>
 
-              {lastResult && (
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-2" data-testid="div-results">
-                  <p className="font-medium text-sm">Last run results</p>
+              {/* Per-service progress */}
+              {serviceProgress.length > 0 && (
+                <div className="space-y-1.5">
+                  {serviceProgress.map(p => (
+                    <div key={p.service} className="flex items-center gap-3 text-sm py-1.5 px-3 rounded-md border bg-background" data-testid={`row-progress-${p.service}`}>
+                      <div className="shrink-0">
+                        {p.status === "pending" && <div className="size-4 rounded-full border-2 border-muted-foreground/30" />}
+                        {p.status === "running" && <Loader2 className="size-4 animate-spin text-primary" />}
+                        {p.status === "done" && <CheckCircle2 className="size-4 text-green-600" />}
+                        {p.status === "error" && <XCircle className="size-4 text-red-500" />}
+                      </div>
+                      <span className={`flex-1 font-medium ${p.status === "pending" ? "text-muted-foreground" : ""}`}>{p.service}</span>
+                      {p.status === "done" && (
+                        <span className="text-xs text-muted-foreground">
+                          <span className="text-green-700 font-semibold">+{p.created}</span>
+                          {p.skipped > 0 && <span className="ml-1.5">⊘{p.skipped} skipped</span>}
+                        </span>
+                      )}
+                      {p.status === "running" && <span className="text-xs text-primary">Generating...</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Summary */}
+              {lastResult && !isRunningAll && (
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-1" data-testid="div-results">
+                  <p className="font-medium text-sm">Run complete</p>
                   <div className="flex gap-4 text-sm">
                     <span className="text-green-700 font-semibold" data-testid="text-created">✓ {lastResult.created} created</span>
                     <span className="text-muted-foreground" data-testid="text-skipped">⊘ {lastResult.skipped} skipped</span>
                     {lastResult.errors > 0 && <span className="text-red-600" data-testid="text-errors">✗ {lastResult.errors} errors</span>}
                   </div>
-                  {lastResult.slugs.length > 0 && (
-                    <div>
-                      <button
-                        onClick={() => setShowSlugs(v => !v)}
-                        className="text-xs text-primary flex items-center gap-1 mt-1"
-                        data-testid="button-toggle-slugs"
-                      >
-                        {showSlugs ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                        {showSlugs ? "Hide" : "Show"} {lastResult.slugs.length} slug(s)
-                      </button>
-                      {showSlugs && (
-                        <div className="mt-2 max-h-48 overflow-y-auto rounded border bg-background text-xs p-2 space-y-0.5" data-testid="list-slugs">
-                          {lastResult.slugs.map(slug => <div key={slug} className="font-mono text-muted-foreground">/{slug}</div>)}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>
