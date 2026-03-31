@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Globe,
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, X, BookOpen, Inbox
+  Map, Menu, X, BookOpen, Inbox, Factory
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ const navigation = [
   { name: "Accounts", href: "/accounts", icon: Building2 },
   { name: "Websites", href: "/websites", icon: Globe },
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
+  { name: "Industries", href: "/industries", icon: Factory },
   { name: "Locations", href: "/locations", icon: MapPin },
   { name: "Services", href: "/services", icon: Wrench },
   { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
