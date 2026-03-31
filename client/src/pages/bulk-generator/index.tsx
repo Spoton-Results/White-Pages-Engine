@@ -115,6 +115,7 @@ export default function BulkGeneratorPage() {
         ? `Written using ${[ctx.brand, ctx.industry].filter(Boolean).join(" · ")} context`
         : `Content bank ready for "${service}"`;
       toast({ title: `Variations written for "${service}"`, description: desc });
+      setNewService("");
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "variation-services"] });
     },
     onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
@@ -160,8 +161,14 @@ export default function BulkGeneratorPage() {
     onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
   });
 
+  const allStatesPayloadCount = useMemo(() => {
+    if (dbStates.length === 0) return 50;
+    const unique = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean));
+    return unique.size;
+  }, [dbStates]);
+
   const targetCount = mode === "all_states"
-    ? (dbStates.length > 0 ? dbStates.length : 50)
+    ? allStatesPayloadCount
     : mode === "specific_states"
     ? selectedStateCodes.size
     : selectedCitySlugs.size;
@@ -241,7 +248,7 @@ export default function BulkGeneratorPage() {
                 <span className="text-xs font-normal text-muted-foreground ml-1">(optional)</span>
               </CardTitle>
               <CardDescription>
-                Attach a blueprint to tag generated pages for filtering and reporting. Pages use the variation engine regardless.
+                When selected, the blueprint's title, H1, meta, and slug templates are used instead of the defaults. Body content still comes from the variation bank.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -291,7 +298,7 @@ export default function BulkGeneratorPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Brand + Industry context indicator */}
-              {siteContext && (siteContext.brand || siteContext.industry) ? (
+              {contextQ.isLoading ? null : siteContext && (siteContext.brand || siteContext.industry) ? (
                 <div className="flex flex-wrap gap-2 items-center p-2.5 rounded-md bg-blue-50 border border-blue-200 text-xs">
                   <span className="text-blue-700 font-medium">AI context:</span>
                   {siteContext.brand?.name && (
