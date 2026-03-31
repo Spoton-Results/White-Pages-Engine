@@ -1186,8 +1186,9 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     const serviceSlug = body.service.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-    // Fetch blueprint templates if one was selected
-    const blueprint = body.blueprintId ? await storage.getBlueprint(body.blueprintId) : null;
+    // Fetch blueprint templates — use request value, else fall back to website's default blueprint
+    const effectiveBlueprintId = body.blueprintId || (website.settings as any)?.defaultBlueprintId || null;
+    const blueprint = effectiveBlueprintId ? await storage.getBlueprint(effectiveBlueprintId) : null;
     function applyBlueprintTemplates(vars: { service: string; location: string; state: string; stateAbbr: string; brand: string }) {
       if (!blueprint) return null;
       // Handle {service}, {service-lowercase-hyphenate}, {service_slug} and all other modifier forms

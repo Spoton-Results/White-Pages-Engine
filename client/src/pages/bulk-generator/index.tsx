@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -103,6 +103,12 @@ export default function BulkGeneratorPage() {
   const filteredCities = useMemo(() =>
     dbCities.filter((l: any) => !citySearch || l.name.toLowerCase().includes(citySearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(citySearch.toLowerCase())),
     [dbCities, citySearch]);
+
+  // Auto-select default blueprint when website changes
+  useEffect(() => {
+    const defaultId = selectedWebsite?.settings?.defaultBlueprintId;
+    if (defaultId) setBlueprintId(defaultId);
+  }, [selectedWebsite?.id]);
 
   function buildLocationPayload() {
     if (mode === "all_states") {
@@ -260,48 +266,58 @@ export default function BulkGeneratorPage() {
           </CardContent>
         </Card>
 
-        {/* Step 2 — Blueprint (optional) */}
+        {/* Step 2 — Blueprint */}
         {websiteId && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <span className="size-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">2</span>
-                Select Blueprint
-                <span className="text-xs font-normal text-muted-foreground ml-1">(optional)</span>
+                Blueprint
               </CardTitle>
-              <CardDescription>
-                When selected, the blueprint's title, H1, meta, and slug templates are used instead of the defaults. Body content still comes from the variation bank.
-              </CardDescription>
             </CardHeader>
             <CardContent>
               {blueprintsQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading blueprints...</p>
+                <p className="text-sm text-muted-foreground">Loading...</p>
               ) : blueprints.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No blueprints found for this account. You can still generate pages without one.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
-                  {blueprints.map((bp: any) => (
-                    <button
-                      key={bp.id}
-                      onClick={() => setBlueprintId(prev => prev === bp.id ? "" : bp.id)}
-                      className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${blueprintId === bp.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}
-                      data-testid={`button-blueprint-${bp.id}`}
-                    >
-                      <FileText className={`size-4 mt-0.5 shrink-0 ${blueprintId === bp.id ? "text-primary" : "text-muted-foreground"}`} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{bp.name}</p>
-                        {bp.pageType && <p className="text-xs text-muted-foreground capitalize">{bp.pageType.replace(/_/g, " ")}</p>}
+                <p className="text-sm text-muted-foreground">No blueprints found for this account.</p>
+              ) : (() => {
+                const activeBp = blueprints.find((bp: any) => bp.id === blueprintId);
+                return (
+                  <div className="space-y-3">
+                    {activeBp ? (
+                      <div className="flex items-center gap-2 p-3 rounded-lg border border-primary bg-primary/5">
+                        <FileText className="size-4 text-primary shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{activeBp.name}</p>
+                          {activeBp.pageType && <p className="text-xs text-muted-foreground capitalize">{activeBp.pageType.replace(/_/g, " ")}</p>}
+                        </div>
+                        <CheckCircle2 className="size-4 text-primary shrink-0" />
                       </div>
-                      {blueprintId === bp.id && <CheckCircle2 className="size-4 text-primary ml-auto shrink-0 mt-0.5" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {blueprintId && (
-                <Button variant="ghost" size="sm" className="mt-2 text-xs text-muted-foreground" onClick={() => setBlueprintId("")}>
-                  Clear selection
-                </Button>
-              )}
+                    ) : (
+                      <p className="text-sm text-amber-600">No blueprint selected — pages will use default title/slug format.</p>
+                    )}
+                    {blueprints.length > 1 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                        {blueprints.map((bp: any) => (
+                          <button
+                            key={bp.id}
+                            onClick={() => setBlueprintId(prev => prev === bp.id ? "" : bp.id)}
+                            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors text-xs ${blueprintId === bp.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}
+                            data-testid={`button-blueprint-${bp.id}`}
+                          >
+                            <FileText className={`size-3 mt-0.5 shrink-0 ${blueprintId === bp.id ? "text-primary" : "text-muted-foreground"}`} />
+                            <span className="truncate font-medium">{bp.name}</span>
+                            {blueprintId === bp.id && <CheckCircle2 className="size-3 text-primary ml-auto shrink-0 mt-0.5" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {!selectedWebsite?.settings?.defaultBlueprintId && (
+                      <p className="text-xs text-muted-foreground">Tip: Set a default blueprint in Website Settings so it's always pre-selected.</p>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         )}

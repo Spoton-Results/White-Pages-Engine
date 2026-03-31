@@ -72,6 +72,15 @@ export default function WebsitesPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const [editDefaultBlueprintId, setEditDefaultBlueprintId] = useState<string>("");
+
+  const editBlueprintsQ = useQuery({
+    queryKey: ["/api/accounts", editWebsite?.accountId, "blueprints"],
+    queryFn: () => api.get<any[]>(`/api/accounts/${editWebsite?.accountId}/blueprints`),
+    enabled: !!editWebsite?.accountId,
+  });
+  const editBlueprints: any[] = editBlueprintsQ.data ?? [];
+
   const contentReplace = useMutation({
     mutationFn: ({ id, find, replace }: { id: string; find: string; replace: string }) =>
       api.post<{ updated: number }>(`/api/websites/${id}/content-replace`, { find, replace }),
@@ -96,6 +105,7 @@ export default function WebsitesPage() {
         demoBannerSubtext: s.demoBannerSubtext || "",
         demoBannerButtonLabel: s.demoBannerButtonLabel || "",
       });
+      setEditDefaultBlueprintId(s.defaultBlueprintId || "");
     }
   }, [editWebsite, resetEdit]);
 
@@ -273,6 +283,7 @@ export default function WebsitesPage() {
                   demoBannerHeading: demoBannerHeading || "",
                   demoBannerSubtext: demoBannerSubtext || "",
                   demoBannerButtonLabel: demoBannerButtonLabel || "",
+                  defaultBlueprintId: editDefaultBlueprintId || null,
                 },
               },
             });
@@ -300,6 +311,25 @@ export default function WebsitesPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Default Blueprint */}
+            {editBlueprints.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Default Blueprint</Label>
+                <Select value={editDefaultBlueprintId || "__none__"} onValueChange={v => setEditDefaultBlueprintId(v === "__none__" ? "" : v)}>
+                  <SelectTrigger data-testid="select-default-blueprint">
+                    <SelectValue placeholder="None (use system defaults)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None (use system defaults)</SelectItem>
+                    {editBlueprints.map((bp: any) => (
+                      <SelectItem key={bp.id} value={bp.id}>{bp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Pre-selected in the bulk generator so you never have to pick it manually.</p>
+              </div>
+            )}
 
             {/* Demo Banner */}
             <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
