@@ -100,6 +100,11 @@ export default function WebsitesPage() {
         name: editWebsite.name,
         domain: editWebsite.domain,
         status: editWebsite.status,
+        mainWebsiteUrl: s.mainWebsiteUrl || "",
+        phone: s.phone || "",
+        ctaHeading: s.ctaHeading || "",
+        ctaText: s.ctaText || "",
+        ctaButtonLabel: s.ctaButtonLabel || "",
         demoBannerUrl: s.demoBannerUrl || "",
         demoBannerHeading: s.demoBannerHeading || "",
         demoBannerSubtext: s.demoBannerSubtext || "",
@@ -271,7 +276,7 @@ export default function WebsitesPage() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
           <form onSubmit={handleEdit(d => {
-            const { demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, ...rest } = d;
+            const { mainWebsiteUrl, phone, ctaHeading, ctaText, ctaButtonLabel, demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, ...rest } = d;
             const existingSettings = editWebsite?.settings || {};
             update.mutate({
               id: editWebsite.id,
@@ -279,6 +284,11 @@ export default function WebsitesPage() {
                 ...rest,
                 settings: {
                   ...existingSettings,
+                  mainWebsiteUrl: mainWebsiteUrl || "",
+                  phone: phone || "",
+                  ctaHeading: ctaHeading || "",
+                  ctaText: ctaText || "",
+                  ctaButtonLabel: ctaButtonLabel || "",
                   demoBannerUrl: demoBannerUrl || "",
                   demoBannerHeading: demoBannerHeading || "",
                   demoBannerSubtext: demoBannerSubtext || "",
@@ -310,6 +320,31 @@ export default function WebsitesPage() {
                   <SelectItem value="error">Error</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Brand & Contact — drives the header link and CTA section on all published pages */}
+            <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+              <p className="text-sm font-semibold">Brand &amp; Contact <span className="text-muted-foreground font-normal">(appears on every generated page)</span></p>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Main Website URL <span className="text-muted-foreground">(header brand link &amp; footer)</span></Label>
+                <Input {...regEdit("mainWebsiteUrl")} placeholder="https://spotonresults.com" data-testid="input-main-website-url" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Phone Number <span className="text-muted-foreground">(override brand profile)</span></Label>
+                <Input {...regEdit("phone")} placeholder="(801) 555-0100" data-testid="input-phone" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">CTA Section Heading</Label>
+                <Input {...regEdit("ctaHeading")} placeholder={`Visit ${watchEdit("name") || "your brand"}`} data-testid="input-cta-heading" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">CTA Body Text</Label>
+                <Input {...regEdit("ctaText")} placeholder="Ready to cut fees and grow sales? We're local." data-testid="input-cta-text" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">CTA Button Label</Label>
+                <Input {...regEdit("ctaButtonLabel")} placeholder="Get a Free Quote →" data-testid="input-cta-button-label" />
+              </div>
             </div>
 
             {/* Default Blueprint */}
