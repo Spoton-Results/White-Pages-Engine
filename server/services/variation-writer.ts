@@ -190,30 +190,28 @@ export async function writeVariationsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<void> {
-  await Promise.all(
-    SECTIONS.map(async (section) => {
-      const prompt = SECTION_PROMPTS[section](serviceName, ctx);
+  for (const section of SECTIONS) {
+    const prompt = SECTION_PROMPTS[section](serviceName, ctx);
 
-      const message = await client.messages.create({
-        model: MODEL,
-        max_tokens: 2500,
-        messages: [{ role: "user", content: prompt }],
-      });
+    const message = await client.messages.create({
+      model: MODEL,
+      max_tokens: 2500,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-      const raw = (message.content[0] as any).text as string;
-      const variations = parseVariations(raw);
+    const raw = (message.content[0] as any).text as string;
+    const variations = parseVariations(raw);
 
-      if (variations.length === 0) {
-        throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
-      }
+    if (variations.length === 0) {
+      throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
+    }
 
-      await db.createVariationBank({
-        accountId,
-        websiteId,
-        service: serviceName,
-        sectionName: section,
-        variations,
-      });
-    })
-  );
+    await db.createVariationBank({
+      accountId,
+      websiteId,
+      service: serviceName,
+      sectionName: section,
+      variations,
+    });
+  }
 }

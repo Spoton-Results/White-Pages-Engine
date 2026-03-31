@@ -119,16 +119,31 @@ export default function ServicesPage() {
   const writeAllUnbankedMut = useMutation({
     mutationFn: async () => {
       const unbanked = (services as any[]).filter((s: any) => !bankSet.has(s.name));
+      const failed: string[] = [];
       for (const svc of unbanked) {
-        await api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service: svc.name });
+        try {
+          await api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service: svc.name });
+        } catch {
+          failed.push(svc.name);
+        }
       }
+      return { total: unbanked.length, failed };
     },
-    onSuccess: () => {
-      toast({ title: "All banks written!", description: "All services now have variation banks." });
+    onSuccess: ({ total, failed }) => {
+      const written = total - failed.length;
       qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
       qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+      if (failed.length === 0) {
+        toast({ title: `All ${total} banks written!`, description: "All services are ready to generate pages." });
+      } else {
+        toast({
+          title: `${written} of ${total} banks written`,
+          description: `${failed.length} failed (${failed.join(", ")}) — click Write Bank on those individually to retry.`,
+          variant: failed.length === total ? "destructive" : "default",
+        });
+      }
     },
-    onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Write all failed", description: err.message, variant: "destructive" }),
   });
 
   const suggestMutation = useMutation({
