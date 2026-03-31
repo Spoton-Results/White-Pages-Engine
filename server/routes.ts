@@ -1190,12 +1190,17 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     const blueprint = body.blueprintId ? await storage.getBlueprint(body.blueprintId) : null;
     function applyBlueprintTemplates(vars: { service: string; location: string; state: string; stateAbbr: string; brand: string }) {
       if (!blueprint) return null;
+      // Handle {service}, {service-lowercase-hyphenate}, {service_slug} and all other modifier forms
+      // by matching anything that starts with the variable name inside {}
       const interp = (t: string) => t
-        .replace(/\{service\}/gi, vars.service)
-        .replace(/\{location\}/gi, vars.location)
-        .replace(/\{state\}/gi, vars.state)
-        .replace(/\{brand\}/gi, vars.brand)
-        .replace(/\{keyword\}/gi, vars.service)
+        .replace(/\{service[^}]*\}/gi, vars.service)
+        .replace(/\{location[^}]*\}/gi, vars.location)
+        .replace(/\{city[^}]*\}/gi, vars.location)
+        .replace(/\{state[^}]*\}/gi, vars.state)
+        .replace(/\{brand[^}]*\}/gi, vars.brand)
+        .replace(/\{keyword[^}]*\}/gi, vars.service)
+        .replace(/\{state_abbr[^}]*\}/gi, vars.stateAbbr)
+        .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
         .replace(/-{2,}/g, "-").trim();
       const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       return {
@@ -1304,6 +1309,14 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         results.errors++;
         console.error("[bulk-generate] error for", t.locationName, err);
       }
+    }
+
+    // Detect broken blueprint templates: if all generated slugs are identical,
+    // the template variables weren't substituted properly
+    const uniqueSlugs = new Set(results.slugs);
+    if (results.slugs.length > 1 && uniqueSlugs.size === 1) {
+      console.warn("[bulk-generate] WARNING: all slugs resolved to the same value:", [...uniqueSlugs][0], "— blueprint slug template may contain unsupported variable names");
+      (results as any).warning = `All pages resolved to slug "${[...uniqueSlugs][0]}" — check your blueprint slug template uses supported variables like {service}, {location}, {state}`;
     }
 
     return res.json(results);

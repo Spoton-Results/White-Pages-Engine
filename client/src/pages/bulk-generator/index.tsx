@@ -32,7 +32,7 @@ export default function BulkGeneratorPage() {
   const [selectedCitySlugs, setSelectedCitySlugs] = useState<Set<string>>(new Set());
   const [stateSearch, setStateSearch] = useState("");
   const [citySearch, setCitySearch] = useState("");
-  const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[] } | null>(null);
+  const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[]; warning?: string } | null>(null);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
@@ -153,6 +153,9 @@ export default function BulkGeneratorPage() {
         totalUpdated += data.updated ?? 0;
         totalSkipped += data.skipped ?? 0;
         totalErrors += data.errors ?? 0;
+        if (data.warning) {
+          toast({ title: "Blueprint template warning", description: data.warning, variant: "destructive" });
+        }
         setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0 } : p));
       } catch (err: any) {
         totalErrors++;
