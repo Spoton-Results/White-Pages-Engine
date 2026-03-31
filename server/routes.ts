@@ -1079,6 +1079,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       states: z.array(z.string()).optional(),
       cities: z.array(z.object({ name: z.string(), stateAbbr: z.string() })).optional(),
       blueprintId: z.string().uuid().optional(),
+      overwrite: z.boolean().optional(),
     });
     const body = schema.parse(req.body);
     const websiteId = req.params.id as string;
@@ -1134,7 +1135,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       }
     }
 
-    const results = { created: 0, skipped: 0, errors: 0, slugs: [] as string[] };
+    const results = { created: 0, updated: 0, skipped: 0, errors: 0, slugs: [] as string[] };
 
     for (const t of targets) {
       try {
@@ -1156,7 +1157,27 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
         const existingPage = await storage.getPageBySlug(websiteId, finalSlug);
         if (existingPage) {
-          results.skipped++;
+          if (!body.overwrite) {
+            results.skipped++;
+            continue;
+          }
+          // Overwrite mode — update metadata and replace active page version
+          await storage.updatePage(existingPage.id, {
+            title: finalTitle,
+            h1: finalH1,
+            metaDescription: finalMeta,
+            wordCount: result.wordCount,
+            blueprintId: body.blueprintId || null,
+          });
+          const pv = await storage.createPageVersion({
+            pageId: existingPage.id,
+            version: Date.now(),
+            contentHtml: result.contentHtml,
+            isActive: true,
+          });
+          await storage.setActivePageVersion(existingPage.id, pv.id);
+          results.updated++;
+          results.slugs.push(finalSlug);
           continue;
         }
 

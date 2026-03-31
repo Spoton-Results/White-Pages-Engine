@@ -34,9 +34,10 @@ export default function BulkGeneratorPage() {
   const [citySearch, setCitySearch] = useState("");
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[] } | null>(null);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  const [overwrite, setOverwrite] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
-  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; skipped: number }>>([]);
+  const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number }>>([]);
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -127,9 +128,9 @@ export default function BulkGeneratorPage() {
     setIsRunningAll(true);
     setCancelRequested(false);
     setLastResult(null);
-    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, skipped: 0 })));
+    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0 })));
 
-    let totalCreated = 0, totalSkipped = 0, totalErrors = 0;
+    let totalCreated = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
 
     for (let i = 0; i < svcs.length; i++) {
       if (cancelRequested) break;
@@ -141,7 +142,7 @@ export default function BulkGeneratorPage() {
       }
       setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "running" } : p));
       try {
-        const payload: any = { service: svc, ...buildLocationPayload() };
+        const payload: any = { service: svc, ...buildLocationPayload(), overwrite };
         if (blueprintId) payload.blueprintId = blueprintId;
         const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate`, {
           method: "POST",
@@ -149,9 +150,10 @@ export default function BulkGeneratorPage() {
           body: JSON.stringify(payload),
         });
         totalCreated += data.created ?? 0;
+        totalUpdated += data.updated ?? 0;
         totalSkipped += data.skipped ?? 0;
         totalErrors += data.errors ?? 0;
-        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created, skipped: data.skipped } : p));
+        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0 } : p));
       } catch (err: any) {
         totalErrors++;
         setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "error" } : p));
@@ -160,8 +162,11 @@ export default function BulkGeneratorPage() {
     }
 
     setIsRunningAll(false);
-    setLastResult({ created: totalCreated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
-    toast({ title: `Done! ${totalCreated} pages created`, description: `${totalSkipped} skipped, ${totalErrors} errors across ${svcs.length} service(s)` });
+    setLastResult({ created: totalCreated + totalUpdated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
+    const summary = totalUpdated > 0
+      ? `${totalCreated} new, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalErrors} errors`
+      : `${totalSkipped} skipped, ${totalErrors} errors across ${svcs.length} service(s)`;
+    toast({ title: `Done! ${totalCreated + totalUpdated} pages processed`, description: summary });
     qc.invalidateQueries({ queryKey: ["/api/pages"] });
   }
 
@@ -450,6 +455,21 @@ export default function BulkGeneratorPage() {
                   )}
                 </div>
               )}
+
+              {/* Options */}
+              <div className="pt-1 border-t">
+                <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-overwrite">
+                  <Checkbox
+                    checked={overwrite}
+                    onCheckedChange={v => setOverwrite(!!v)}
+                    data-testid="checkbox-overwrite"
+                  />
+                  <span className="text-sm font-medium">Overwrite existing pages</span>
+                </label>
+                <p className="text-xs text-muted-foreground mt-1 ml-6">
+                  When checked, pages that already exist will be regenerated with fresh content from the variation bank. Leave unchecked to skip existing pages.
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -463,7 +483,8 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Will generate up to <strong>{selectedServices.size * targetCount}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
+                Will {overwrite ? "create or update" : "create up to"} <strong>{selectedServices.size * targetCount}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
+                {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -501,8 +522,10 @@ export default function BulkGeneratorPage() {
                       <span className={`flex-1 font-medium ${p.status === "pending" ? "text-muted-foreground" : ""}`}>{p.service}</span>
                       {p.status === "done" && (
                         <span className="text-xs text-muted-foreground">
-                          <span className="text-green-700 font-semibold">+{p.created}</span>
+                          {p.created > 0 && <span className="text-green-700 font-semibold">+{p.created}</span>}
+                          {p.updated > 0 && <span className={`text-blue-700 font-semibold${p.created > 0 ? " ml-1.5" : ""}`}>↻{p.updated} updated</span>}
                           {p.skipped > 0 && <span className="ml-1.5">⊘{p.skipped} skipped</span>}
+                          {p.created === 0 && p.updated === 0 && p.skipped === 0 && <span>done</span>}
                         </span>
                       )}
                       {p.status === "running" && <span className="text-xs text-primary">Generating...</span>}
