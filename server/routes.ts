@@ -1320,6 +1320,11 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       (results as any).warning = `All pages resolved to slug "${[...uniqueSlugs][0]}" — check your blueprint slug template uses supported variables like {service}, {location}, {state}`;
     }
 
+    // Sync the website's cached publishedPages counter with the live count
+    if (results.created > 0 || results.updated > 0) {
+      await storage.syncWebsitePublishedCount(websiteId);
+    }
+
     return res.json(results);
   });
 

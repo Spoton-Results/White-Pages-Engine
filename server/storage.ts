@@ -116,10 +116,12 @@ export async function deleteBrandProfile(id: string): Promise<void> {
 // ─── Websites ─────────────────────────────────────────────────────────────────
 
 export async function getWebsites(accountId?: string): Promise<Website[]> {
+  const liveCount = sql<number>`(SELECT COUNT(*) FROM ${pages} WHERE ${pages.websiteId} = ${websites.id} AND ${pages.status} = 'published')::int`;
+  const query = db.select({ id: websites.id, accountId: websites.accountId, brandProfileId: websites.brandProfileId, name: websites.name, domain: websites.domain, subdomain: websites.subdomain, status: websites.status, primaryIndustry: websites.primaryIndustry, targetLocale: websites.targetLocale, robotsTxt: websites.robotsTxt, customHead: websites.customHead, r2Prefix: websites.r2Prefix, publishedPages: liveCount, settings: websites.settings, createdAt: websites.createdAt, updatedAt: websites.updatedAt }).from(websites);
   if (accountId) {
-    return db.select().from(websites).where(eq(websites.accountId, accountId)).orderBy(desc(websites.createdAt));
+    return query.where(eq(websites.accountId, accountId)).orderBy(desc(websites.createdAt)) as any;
   }
-  return db.select().from(websites).orderBy(desc(websites.createdAt));
+  return query.orderBy(desc(websites.createdAt)) as any;
 }
 
 export async function getWebsite(id: string): Promise<Website | undefined> {
@@ -143,6 +145,11 @@ export async function createWebsite(data: InsertWebsite): Promise<Website> {
   const normalized = data.domain ? { ...data, domain: data.domain.toLowerCase().trim() } : data;
   const [row] = await db.insert(websites).values(normalized).returning();
   return row;
+}
+
+export async function syncWebsitePublishedCount(websiteId: string): Promise<void> {
+  const [liveCount] = await db.select({ n: count() }).from(pages).where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published")));
+  await db.update(websites).set({ publishedPages: liveCount.n, updatedAt: new Date() }).where(eq(websites.id, websiteId));
 }
 
 export async function updateWebsite(id: string, data: Partial<InsertWebsite>): Promise<Website | undefined> {
