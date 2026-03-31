@@ -26,13 +26,15 @@ function notFoundHtml(msg: string): string {
 interface NavData {
   statePages: { displayName: string; slug: string }[];
   cityPages: { displayName: string; slug: string }[];
+  siblingServices: { title: string; slug: string }[];
   stateDisplayName?: string;
 }
 
-async function resolveNavData(page: any, websiteId: string): Promise<[NavData["statePages"], NavData["cityPages"], string]> {
+async function resolveNavData(page: any, websiteId: string): Promise<[NavData["statePages"], NavData["cityPages"], string, NavData["siblingServices"]]> {
   const statePages = await storage.getStateNavPages(websiteId);
   let cityPages: NavData["cityPages"] = [];
   let stateDisplayName = "";
+  let siblingServices: NavData["siblingServices"] = [];
 
   if (page.pageType === "state_hub") {
     const match = page.title.match(/\bin\s+(.+?)(\s*\|.*)?$/i);
@@ -45,10 +47,38 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
     }
   }
 
-  return [statePages, cityPages, stateDisplayName];
+  if (page.pageType === "service_city" && page.slug) {
+    siblingServices = await storage.getSiblingServicePages(websiteId, page.slug, page.id);
+  }
+
+  return [statePages, cityPages, stateDisplayName, siblingServices];
 }
 
-function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [] }): string {
+function extractFaqSchema(contentHtml: string, pageUrl: string): string | null {
+  const faqIdx = contentHtml.search(/Frequently Asked Questions/i);
+  if (faqIdx === -1) return null;
+  const faqSection = contentHtml.slice(faqIdx);
+  const qaPattern = /<(?:h3|dt)[^>]*>([\s\S]*?)<\/(?:h3|dt)>\s*<(?:p|dd)[^>]*>([\s\S]*?)<\/(?:p|dd)>/gi;
+  const items: { q: string; a: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = qaPattern.exec(faqSection)) !== null && items.length < 10) {
+    const q = m[1].replace(/<[^>]+>/g, "").trim();
+    const a = m[2].replace(/<[^>]+>/g, "").trim();
+    if (q && a && q.length > 5) items.push({ q, a });
+  }
+  if (items.length === 0) return null;
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": items.map(({ q, a }) => ({
+      "@type": "Question",
+      "name": q,
+      "acceptedAnswer": { "@type": "Answer", "text": a },
+    })),
+  });
+}
+
+function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [], siblingServices: [] }): string {
   const brandName = brand?.name || website.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || (website.settings as any)?.phone || "";
@@ -62,25 +92,57 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const demoBannerSubtext = (website.settings as any)?.demoBannerSubtext || "This page was generated automatically. Want 100,000+ pages like it for your business?";
   const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
-  // Schema markup
-  const schemaJson = JSON.stringify({
+  const pageUrl = `https://${website.domain}/${page.slug}`;
+  const baseUrl = `https://${website.domain}`;
+
+  // Extract service name and location from title (e.g. "Merchant Services in Dallas, TX | Brand")
+  const titleMatch = page.title.match(/^(.+?)\s+in\s+(.+?)(?:\s*\|.*)?$/i);
+  const serviceNameFromTitle = titleMatch ? titleMatch[1].trim() : brandName;
+  const locationFromTitle = titleMatch ? titleMatch[2].trim() : "";
+
+  // ── Schema: LocalBusiness + Service ───────────────────────────────────────
+  const localBusinessSchema = JSON.stringify({
     "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": page.title,
-    "description": page.metaDescription,
-    "url": `https://${website.domain}/${page.slug}`,
-    "publisher": { "@type": "Organization", "name": brandName },
+    "@graph": [
+      {
+        "@type": ["LocalBusiness", "FinancialService"],
+        "@id": `${baseUrl}/#business`,
+        "name": brandName,
+        "url": mainWebsiteUrl || baseUrl,
+        ...(phone ? { "telephone": phone } : {}),
+        "areaServed": locationFromTitle || undefined,
+        "description": page.metaDescription || undefined,
+        "sameAs": mainWebsiteUrl ? [mainWebsiteUrl] : [],
+      },
+      {
+        "@type": "Service",
+        "name": serviceNameFromTitle,
+        "provider": { "@id": `${baseUrl}/#business` },
+        "areaServed": locationFromTitle || undefined,
+        "url": pageUrl,
+        "description": page.metaDescription || undefined,
+      },
+    ],
   });
 
-  const faqSchema = page.faqItems?.length ? JSON.stringify({
+  // ── Schema: BreadcrumbList ────────────────────────────────────────────────
+  const breadcrumbItems: any[] = [
+    { "@type": "ListItem", "position": 1, "name": "Home", "item": baseUrl },
+  ];
+  if (locationFromTitle) {
+    breadcrumbItems.push({ "@type": "ListItem", "position": 2, "name": serviceNameFromTitle, "item": pageUrl });
+    breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": locationFromTitle, "item": pageUrl });
+  } else {
+    breadcrumbItems.push({ "@type": "ListItem", "position": 2, "name": page.h1 || page.title, "item": pageUrl });
+  }
+  const breadcrumbSchema = JSON.stringify({
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": page.faqItems.map((f: any) => ({
-      "@type": "Question",
-      "name": f.question,
-      "acceptedAnswer": { "@type": "Answer", "text": f.answer },
-    })),
-  }) : null;
+    "@type": "BreadcrumbList",
+    "itemListElement": breadcrumbItems,
+  });
+
+  // ── Schema: FAQPage (extracted from content HTML) ─────────────────────────
+  const faqSchema = extractFaqSchema(version?.contentHtml || "", pageUrl);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -89,11 +151,18 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${page.title}</title>
   <meta name="description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
+  <link rel="canonical" href="${pageUrl}" />
   <meta property="og:title" content="${page.title}" />
   <meta property="og:description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
   <meta property="og:type" content="website" />
-  <link rel="canonical" href="https://${website.domain}/${page.slug}" />
-  <script type="application/ld+json">${schemaJson}</script>
+  <meta property="og:url" content="${pageUrl}" />
+  <meta property="og:site_name" content="${brandName}" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="${page.title}" />
+  <meta name="twitter:description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
+  <script type="application/ld+json">${localBusinessSchema}</script>
+  <script type="application/ld+json">${breadcrumbSchema}</script>
   ${faqSchema ? `<script type="application/ld+json">${faqSchema}</script>` : ""}
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -134,6 +203,9 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     @media(max-width:480px){.loc-grid{grid-template-columns:repeat(2,1fr)}}
     .loc-grid a{display:block;padding:.4rem .6rem;font-size:.85rem;color:#4b5563;border:1px solid #e5e7eb;border-radius:.375rem;text-decoration:none;transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .loc-grid a:hover{background:${primaryColor}10;border-color:${primaryColor}40;color:${primaryColor};text-decoration:none}
+    .breadcrumb{font-size:.85rem;color:rgba(255,255,255,.75);margin-bottom:.75rem;display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+    .breadcrumb a{color:rgba(255,255,255,.85);text-decoration:none}.breadcrumb a:hover{color:#fff;text-decoration:underline}
+    .bc-sep{color:rgba(255,255,255,.5);font-size:.9rem}
     footer{background:#f9fafb;border-top:1px solid #e5e7eb;padding:1.5rem 2rem;text-align:center;color:#9ca3af;font-size:.85rem;margin-top:3rem}
     .demo-banner{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);color:#fff;padding:2.5rem 2rem;text-align:center;border-bottom:4px solid ${primaryColor}}
     .demo-banner h2{font-size:1.6rem;font-weight:800;margin-bottom:.6rem;color:#fff}
@@ -160,6 +232,13 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   </div>` : ""}
 
   <div class="hero">
+    ${locationFromTitle ? `<nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="${baseUrl}">Home</a>
+      <span class="bc-sep">›</span>
+      <span>${serviceNameFromTitle}</span>
+      <span class="bc-sep">›</span>
+      <span>${locationFromTitle}</span>
+    </nav>` : ""}
     <h1>${page.h1 || page.title}</h1>
     ${tagline ? `<p class="tagline">${tagline}</p>` : ""}
   </div>
@@ -244,6 +323,19 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       });
     });
   </script>
+
+  ${(navData.siblingServices ?? []).length > 0 ? `
+  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
+    <div class="loc-nav">
+      <div class="loc-nav-title">More Services${locationFromTitle ? ` in ${locationFromTitle}` : ""}</div>
+      <div class="loc-grid">
+        ${(navData.siblingServices ?? []).map(p => {
+          const svcName = p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim();
+          return `<a href="/${p.slug}">${svcName}</a>`;
+        }).join("\n        ")}
+      </div>
+    </div>
+  </div>` : ""}
 
   ${navData.cityPages.length > 0 ? `
   <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
@@ -997,8 +1089,8 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const version = await storage.getActivePageVersion(page.id);
       const brandProfiles = await storage.getBrandProfiles(website.accountId);
       const brand = brandProfiles[0];
-      const [statePages, cityPages, stateDisplayName] = await resolveNavData(page, website.id);
-      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName });
+      const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
+      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=3600");
       return res.send(html);

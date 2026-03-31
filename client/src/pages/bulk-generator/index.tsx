@@ -168,6 +168,16 @@ export default function BulkGeneratorPage() {
       : `${totalSkipped} skipped, ${totalErrors} errors across ${svcs.length} service(s)`;
     toast({ title: `Done! ${totalCreated + totalUpdated} pages processed`, description: summary });
     qc.invalidateQueries({ queryKey: ["/api/pages"] });
+
+    // Auto-regenerate sitemap so new pages are immediately indexed by Google
+    if (totalCreated + totalUpdated > 0 && websiteId) {
+      try {
+        await apiFetch(`/api/websites/${websiteId}/sitemaps/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        toast({ title: "Sitemap updated", description: "New pages are now included in your sitemap and ready for Google indexing." });
+      } catch {
+        // Non-critical — user can regenerate manually from Sitemap Manager
+      }
+    }
   }
 
   const allStatesPayloadCount = useMemo(() => {
