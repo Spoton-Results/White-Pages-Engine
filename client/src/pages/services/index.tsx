@@ -107,7 +107,13 @@ export default function ServicesPage() {
       qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
       qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
     },
-    onError: (err: any) => toast({ title: "Write failed", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({
+      title: "Write failed — please try again",
+      description: err.message?.includes("timed out")
+        ? "The AI API took too long. Try again in a moment — it usually completes on retry."
+        : (err.message ?? "Claude API error"),
+      variant: "destructive",
+    }),
   });
 
   const writeAllUnbankedMut = useMutation({

@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 90_000, maxRetries: 0 });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 0 });
 
 const SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 type Section = typeof SECTIONS[number];
@@ -196,7 +196,7 @@ export async function writeVariationsForService(
 
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 3000,
+        max_tokens: 2500,
         messages: [{ role: "user", content: prompt }],
       });
 
