@@ -1261,9 +1261,11 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
             wordCount: result.wordCount,
             blueprintId: body.blueprintId || null,
           });
+          const existingVersions = await storage.getPageVersions(existingPage.id);
+          const nextVersion = (existingVersions.length > 0 ? Math.max(...existingVersions.map((v: any) => v.version)) : 0) + 1;
           const pv = await storage.createPageVersion({
             pageId: existingPage.id,
-            version: Date.now(),
+            version: nextVersion,
             contentHtml: result.contentHtml,
             isActive: true,
           });
