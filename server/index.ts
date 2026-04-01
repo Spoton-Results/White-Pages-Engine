@@ -70,6 +70,28 @@ app.use((req, res, next) => {
     console.error("Seeding failed (non-fatal):", err);
   }
 
+  // Resume any bulk background jobs that were interrupted by a server restart
+  try {
+    const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
+    const { runBulkBackgroundJob } = await import("./services/bulk-background");
+    const stale = await getStaleRunningJobs();
+    const bulkJobs = stale.filter(j => Array.isArray((j.settings as any)?.services));
+    if (bulkJobs.length > 0) {
+      console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
+      for (const j of bulkJobs) {
+        await updateGenerationJob(j.id, { status: "pending", startedAt: null });
+        setImmediate(() => {
+          runBulkBackgroundJob(j.id).catch(err => {
+            console.error("[startup] Failed to resume job", j.id, err);
+            updateGenerationJob(j.id, { status: "error", completedAt: new Date() }).catch(() => {});
+          });
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[startup] Job recovery failed (non-fatal):", err);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

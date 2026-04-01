@@ -536,6 +536,22 @@ export async function deleteVariationBanks(websiteId: string, service: string): 
 
 // ─── State Data ───────────────────────────────────────────────────────────────
 
+export async function getAllStateData(): Promise<Map<string, StateData>> {
+  const rows = await db.select().from(stateData);
+  return new Map(rows.map(r => [r.stateAbbr.toUpperCase(), r]));
+}
+
+export async function getPageSlugSet(websiteId: string): Promise<Set<string>> {
+  const rows = await db.select({ slug: pages.slug }).from(pages).where(eq(pages.websiteId, websiteId));
+  return new Set(rows.map(r => r.slug));
+}
+
+export async function getStaleRunningJobs(): Promise<typeof generationJobs.$inferSelect[]> {
+  return db.select().from(generationJobs).where(
+    or(eq(generationJobs.status, "running"), eq(generationJobs.status, "pending"))
+  );
+}
+
 export async function getStateDataByAbbr(abbr: string): Promise<StateData | undefined> {
   const [row] = await db.select().from(stateData).where(eq(stateData.stateAbbr, abbr.toUpperCase()));
   return row;

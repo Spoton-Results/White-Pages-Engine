@@ -2,9 +2,16 @@
  * bulk-background.ts
  * Runs a bulk-generation job entirely server-side so the browser can be closed.
  * Progress is written to the generationJobs.settings JSONB field and polled by the UI.
+ *
+ * Performance design:
+ *   - State data loaded ONCE into a Map at job start (not per-page)
+ *   - All existing page slugs loaded ONCE per service into a Set (not per-page lookup)
+ *   - DB job progress updated every PAGE_BATCH_SIZE pages, not every page
  */
 import * as storage from "../storage";
 import { buildVariationPage } from "./variation-engine";
+
+const PAGE_BATCH_SIZE = 50; // flush job counters to DB every N pages
 
 export interface BulkJobSettings {
   services: string[];
@@ -49,6 +56,7 @@ function applyBlueprintTemplates(
 
 async function buildTargets(
   mode: BulkJobSettings["mode"],
+  stateDataMap: Map<string, any>,
   states?: string[],
   cities?: Array<{ name: string; stateAbbr: string }>,
 ): Promise<Array<{ locationName: string; locationType: string; stateAbbr: string; stateName: string }>> {
@@ -61,17 +69,17 @@ async function buildTargets(
 
   if (mode === "all_states") {
     for (const abbr of allStateAbbrs) {
-      const sd = await storage.getStateDataByAbbr(abbr);
+      const sd = stateDataMap.get(abbr);
       if (sd) targets.push({ locationName: sd.stateName, locationType: "state", stateAbbr: abbr, stateName: sd.stateName });
     }
   } else if (mode === "specific_states" && states) {
     for (const abbr of states) {
-      const sd = await storage.getStateDataByAbbr(abbr);
+      const sd = stateDataMap.get(abbr.toUpperCase());
       if (sd) targets.push({ locationName: sd.stateName, locationType: "state", stateAbbr: abbr, stateName: sd.stateName });
     }
   } else if (mode === "specific_cities" && cities) {
     for (const c of cities) {
-      const sd = await storage.getStateDataByAbbr(c.stateAbbr);
+      const sd = stateDataMap.get(c.stateAbbr.toUpperCase());
       targets.push({ locationName: c.name, locationType: "city", stateAbbr: c.stateAbbr, stateName: sd?.stateName ?? c.stateAbbr });
     }
   }
@@ -80,7 +88,7 @@ async function buildTargets(
 }
 
 export async function runBulkBackgroundJob(jobId: string): Promise<void> {
-  let job = await storage.getGenerationJob(jobId);
+  const job = await storage.getGenerationJob(jobId);
   if (!job) return;
 
   const settings = job.settings as unknown as BulkJobSettings;
@@ -100,18 +108,25 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await storage.getBlueprint(effectiveBlueprintId) : null;
 
-  const targets = await buildTargets(mode, states, cities);
+  // ── Pre-load all state data once ─────────────────────────────────────────────
+  const stateDataMap = await storage.getAllStateData();
+  const targets = await buildTargets(mode, stateDataMap, states, cities);
 
-  let totalCreated = 0, totalUpdated = 0, totalFailed = 0;
+  let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
   const totalPages = services.length * targets.length;
-
   await storage.updateGenerationJob(jobId, { totalPages });
 
-  // Process each service sequentially
+  const blueprintTemplate = blueprint ? {
+    titleTemplate: blueprint.titleTemplate,
+    h1Template: blueprint.h1Template,
+    metaDescTemplate: blueprint.metaDescTemplate,
+    slugTemplate: blueprint.slugTemplate,
+  } : null;
+
+  // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
     const svc = services[si];
 
-    // Check if banks exist
     const banks = await storage.getVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
       settings.progress[si] = { service: svc, status: "no-bank", created: 0, updated: 0, skipped: 0, errors: 0 };
@@ -125,17 +140,17 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     let svcCreated = 0, svcUpdated = 0, svcSkipped = 0, svcErrors = 0;
 
+    // ── Pre-load all existing slugs for this website (one query, not one per page)
+    const existingSlugSet = await storage.getPageSlugSet(job.websiteId);
+
+    let pagesSinceLastFlush = 0;
+
     for (const t of targets) {
       try {
-        const sd = await storage.getStateDataByAbbr(t.stateAbbr);
+        const sd = stateDataMap.get(t.stateAbbr.toUpperCase());
         const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd);
 
-        const bpOverride = applyBlueprintTemplates(blueprint ? {
-          titleTemplate: blueprint.titleTemplate,
-          h1Template: blueprint.h1Template,
-          metaDescTemplate: blueprint.metaDescTemplate,
-          slugTemplate: blueprint.slugTemplate,
-        } : null, {
+        const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
           service: svc,
           location: t.locationName,
           state: t.stateName,
@@ -148,19 +163,23 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         const finalH1 = bpOverride?.h1 || result.h1;
         const finalMeta = bpOverride?.metaDescription || result.metaDescription;
 
-        const existingPage = await storage.getPageBySlug(job.websiteId, finalSlug);
-        if (existingPage) {
+        if (existingSlugSet.has(finalSlug)) {
           if (!overwrite) {
             svcSkipped++;
+            totalSkipped++;
           } else {
-            await storage.updatePage(existingPage.id, {
-              title: finalTitle, h1: finalH1, metaDescription: finalMeta,
-              wordCount: result.wordCount, blueprintId: effectiveBlueprintId || null,
-            });
-            const existingVersions = await storage.getPageVersions(existingPage.id);
-            const nextVersion = (existingVersions.length > 0 ? Math.max(...existingVersions.map((v: any) => v.version)) : 0) + 1;
-            const pv = await storage.createPageVersion({ pageId: existingPage.id, version: nextVersion, contentHtml: result.contentHtml, isActive: true });
-            await storage.setActivePageVersion(existingPage.id, pv.id);
+            // Overwrite: fetch existing page record to get its id, then update
+            const existingPage = await storage.getPageBySlug(job.websiteId, finalSlug);
+            if (existingPage) {
+              await storage.updatePage(existingPage.id, {
+                title: finalTitle, h1: finalH1, metaDescription: finalMeta,
+                wordCount: result.wordCount, blueprintId: effectiveBlueprintId || null,
+              });
+              const existingVersions = await storage.getPageVersions(existingPage.id);
+              const nextVersion = (existingVersions.length > 0 ? Math.max(...existingVersions.map((v: any) => v.version)) : 0) + 1;
+              const pv = await storage.createPageVersion({ pageId: existingPage.id, version: nextVersion, contentHtml: result.contentHtml, isActive: true });
+              await storage.setActivePageVersion(existingPage.id, pv.id);
+            }
             svcUpdated++;
             totalUpdated++;
           }
@@ -174,6 +193,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           });
           const pv = await storage.createPageVersion({ pageId: page.id, version: 1, contentHtml: result.contentHtml, isActive: true });
           await storage.setActivePageVersion(page.id, pv.id);
+          existingSlugSet.add(finalSlug); // keep set in sync so we don't try to create it again
           svcCreated++;
           totalCreated++;
         }
@@ -183,30 +203,38 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         console.error("[bulk-background] error", svc, t.locationName, err);
       }
 
-      // Write progress after each page so polling UI stays current
-      await storage.updateGenerationJob(jobId, {
-        processedPages: totalCreated + totalUpdated + totalFailed + svcSkipped,
-        passedPages: totalCreated + totalUpdated,
-        failedPages: totalFailed,
-      });
+      // Flush counters to DB every PAGE_BATCH_SIZE pages instead of every page
+      pagesSinceLastFlush++;
+      if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
+        pagesSinceLastFlush = 0;
+        await storage.updateGenerationJob(jobId, {
+          processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
+          passedPages: totalCreated + totalUpdated,
+          failedPages: totalFailed,
+        });
+      }
     }
 
+    // Flush after service finishes
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
-    await storage.updateGenerationJob(jobId, { settings: settings as any });
+    await storage.updateGenerationJob(jobId, {
+      settings: settings as any,
+      processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
+      passedPages: totalCreated + totalUpdated,
+      failedPages: totalFailed,
+    });
   }
 
-  // Sync page count cache and regenerate sitemap
+  // Final sync and sitemap
   await storage.syncWebsitePublishedCount(job.websiteId);
-
   await storage.updateGenerationJob(jobId, {
     status: "completed",
     completedAt: new Date(),
-    processedPages: totalCreated + totalUpdated + totalFailed,
+    processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
     passedPages: totalCreated + totalUpdated,
     failedPages: totalFailed,
   });
 
-  // Regenerate sitemap in background
   try {
     const { generateSitemap } = await import("./sitemap");
     await generateSitemap(job.websiteId);
