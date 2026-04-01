@@ -164,14 +164,14 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   <script type="application/ld+json">${localBusinessSchema}</script>
   <script type="application/ld+json">${breadcrumbSchema}</script>
   ${faqSchema ? `<script type="application/ld+json">${faqSchema}</script>` : ""}
-  <!-- Google Analytics -->
+  ${website.domain === "pages.spotonresults.com" ? `<!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-VH980NTHCM"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
     gtag('config', 'G-VH980NTHCM');
-  </script>
+  </script>` : ""}
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;line-height:1.6}
