@@ -1101,6 +1101,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Strip port from host header
       const host = (req.headers.host || "").split(":")[0].toLowerCase().trim();
 
+      // Log every non-API, non-asset request to diagnose custom domain routing
+      if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__")) {
+        console.log(`[domain-mw] host=${host} path=${req.path}`);
+      }
+
       // Skip Replit platform domains, localhost, and internal asset paths
       if (!host
         || host === "localhost"
@@ -1118,7 +1123,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Look up website by the incoming domain
       const website = await storage.getWebsiteByDomain(host);
-      if (!website) return next(); // unknown domain — fall through to admin app
+      if (!website) {
+        console.log(`[domain-mw] no website found for host=${host}`);
+        return next(); // unknown domain — fall through to admin app
+      }
 
       const rawSlug = req.path.replace(/^\//, "").replace(/\/$/, "");
 
