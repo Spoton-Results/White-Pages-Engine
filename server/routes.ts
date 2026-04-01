@@ -1122,9 +1122,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const rawSlug = req.path.replace(/^\//, "").replace(/\/$/, "");
 
-      // Sitemap
+      // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
-        return res.redirect(301, `/api/websites/${website.id}/sitemap.xml`);
+        const sitemapList = await storage.getSitemaps(website.id);
+        const baseUrl = `https://${website.domain}`;
+        const today = new Date().toISOString().split("T")[0];
+        res.setHeader("Content-Type", "application/xml");
+        if (sitemapList.length === 0) {
+          const publishedPages = await storage.getPages(website.id, { status: "published", limit: 50000 });
+          const urls = publishedPages.map((p) => ({
+            loc: `${baseUrl}/${p.slug}`,
+            lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+            priority: "0.7",
+          }));
+          const { buildSitemapXml } = await import("./services/sitemap");
+          return res.send(buildSitemapXml(urls));
+        }
+        const { buildSitemapIndexXml } = await import("./services/sitemap");
+        return res.send(buildSitemapIndexXml(
+          sitemapList.map((sm) => ({ loc: `${baseUrl}/${sm.slug}.xml`, lastmod: today }))
+        ));
+      }
+
+      // Individual sitemap files (e.g. /sitemap-1.xml) — serve inline, no redirect
+      const sitemapChunkMatch = rawSlug.match(/^(sitemap-(\d+))\.xml$/);
+      if (sitemapChunkMatch) {
+        const chunkIndex = parseInt(sitemapChunkMatch[2], 10) - 1;
+        const offset = chunkIndex * 50000;
+        const chunk = await storage.getPages(website.id, { status: "published", limit: 50000, offset });
+        const baseUrl = `https://${website.domain}`;
+        const urls = chunk.map((p) => ({
+          loc: `${baseUrl}/${p.slug}`,
+          lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+          priority: (p as any).pageType === "state_hub" ? "0.9" : (p as any).pageType === "city_hub" ? "0.8" : "0.7",
+        }));
+        const { buildSitemapXml } = await import("./services/sitemap");
+        res.setHeader("Content-Type", "application/xml");
+        return res.send(buildSitemapXml(urls));
       }
 
       // Robots.txt
