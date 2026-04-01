@@ -728,12 +728,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       existingClusters: existingClusters.map((c: any) => c.primaryKeyword),
     });
 
+    // Build service name → id map for auto-linking
+    const serviceNameToId = new Map(services.map((s: any) => [s.name.toLowerCase(), s.id]));
+
     // Insert all generated clusters, skip any with duplicate primaryKeyword
     const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
-    const toInsert = generated.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase()));
+    const toInsert = generated
+      .filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase()))
+      .map(c => {
+        // Auto-assign serviceId: find first service whose name appears in the cluster keyword
+        let serviceId: string | null = null;
+        const kwLower = c.primaryKeyword.toLowerCase();
+        const nameLower = c.name.toLowerCase();
+        for (const [svcName, svcId] of serviceNameToId) {
+          const words = svcName.split(/\s+/).filter((w: string) => w.length > 3);
+          if (kwLower.includes(svcName) || nameLower.includes(svcName) ||
+              words.some((w: string) => kwLower.includes(w) || nameLower.includes(w))) {
+            serviceId = svcId;
+            break;
+          }
+        }
+        return { ...c, accountId, serviceId };
+      });
 
     const inserted = await Promise.all(
-      toInsert.map(c => storage.createQueryCluster({ ...c, accountId }))
+      toInsert.map(c => storage.createQueryCluster(c))
     );
 
     return res.status(201).json({ inserted: inserted.length, clusters: inserted });

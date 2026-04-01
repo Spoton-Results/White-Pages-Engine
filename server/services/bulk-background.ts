@@ -143,9 +143,21 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   for (let si = 0; si < services.length; si++) {
     const svc = services[si];
 
-    // Resolve cluster for this service (match by name → serviceId → cluster)
+    // Resolve cluster: 1) by serviceId link, 2) keyword fallback for unlinked clusters
     const svcId = serviceIdByName.get(svc.toLowerCase());
-    const svcCluster = svcId ? (clusterByServiceId.get(svcId) ?? null) : null;
+    let svcCluster = svcId ? (clusterByServiceId.get(svcId) ?? null) : null;
+    if (!svcCluster) {
+      const svcLower = svc.toLowerCase();
+      const svcWords = svcLower.split(/\s+/).filter(w => w.length > 3);
+      const fallback = accountClusters.find((c: any) =>
+        !c.serviceId && (
+          c.primaryKeyword?.toLowerCase().includes(svcLower) ||
+          c.name?.toLowerCase().includes(svcLower) ||
+          svcWords.some((w: string) => c.primaryKeyword?.toLowerCase().includes(w) || c.name?.toLowerCase().includes(w))
+        )
+      );
+      if (fallback) svcCluster = { id: fallback.id, primaryKeyword: fallback.primaryKeyword, secondaryKeywords: fallback.secondaryKeywords ?? [], intentType: fallback.intentType };
+    }
 
     const banks = await storage.getVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
