@@ -134,6 +134,8 @@ export async function updateBrandProfile(id: string, data: Partial<InsertBrandPr
 }
 
 export async function deleteBrandProfile(id: string): Promise<void> {
+  // websites.brandProfileId has no cascade — null out before deleting
+  await db.update(websites).set({ brandProfileId: null }).where(eq(websites.brandProfileId, id));
   await db.delete(brandProfiles).where(eq(brandProfiles.id, id));
 }
 
@@ -185,11 +187,13 @@ export async function updateWebsite(id: string, data: Partial<InsertWebsite>): P
 }
 
 export async function deleteWebsite(id: string): Promise<void> {
+  // pages.blueprintId has no cascade — null out before deleting blueprints for this site
+  await db.update(pages).set({ blueprintId: null }).where(eq(pages.websiteId, id));
   // Manually clean up tables that lack onDelete: "cascade" on websiteId
   await db.delete(pageMetrics).where(eq(pageMetrics.websiteId, id));
   await db.delete(generationJobs).where(eq(generationJobs.websiteId, id));
   await db.delete(blueprints).where(eq(blueprints.websiteId, id));
-  // internalLinks can have cross-page FK refs; delete by websiteId explicitly too
+  // internalLinks fromPageId/toPageId have no cascade — delete by websiteId first
   await db.delete(internalLinks).where(eq(internalLinks.websiteId, id));
   await db.delete(websites).where(eq(websites.id, id));
 }
@@ -219,6 +223,8 @@ export async function updateLocation(id: string, data: Partial<InsertLocation>):
 }
 
 export async function deleteLocation(id: string): Promise<void> {
+  // pages.locationId has no cascade — null out before deleting
+  await db.update(pages).set({ locationId: null }).where(eq(pages.locationId, id));
   await db.delete(locations).where(eq(locations.id, id));
 }
 
@@ -265,6 +271,9 @@ export async function updateService(id: string, data: Partial<InsertService>): P
 }
 
 export async function deleteService(id: string): Promise<void> {
+  // pages.serviceId and queryClusters.serviceId have no cascade — null out before deleting
+  await db.update(pages).set({ serviceId: null }).where(eq(pages.serviceId, id));
+  await db.update(queryClusters).set({ serviceId: null }).where(eq(queryClusters.serviceId, id));
   await db.delete(services).where(eq(services.id, id));
 }
 
@@ -290,6 +299,8 @@ export async function updateIndustry(id: string, data: Partial<InsertIndustry>):
 }
 
 export async function deleteIndustry(id: string): Promise<void> {
+  // pages.industryId has no cascade — null out before deleting
+  await db.update(pages).set({ industryId: null }).where(eq(pages.industryId, id));
   await db.delete(industries).where(eq(industries.id, id));
 }
 
@@ -315,6 +326,8 @@ export async function updateQueryCluster(id: string, data: Partial<InsertQueryCl
 }
 
 export async function deleteQueryCluster(id: string): Promise<void> {
+  // pages.queryClusterId has no cascade — null out before deleting
+  await db.update(pages).set({ queryClusterId: null }).where(eq(pages.queryClusterId, id));
   await db.delete(queryClusters).where(eq(queryClusters.id, id));
 }
 
@@ -340,6 +353,9 @@ export async function updateBlueprint(id: string, data: Partial<InsertBlueprint>
 }
 
 export async function deleteBlueprint(id: string): Promise<void> {
+  // pages.blueprintId and generationJobs.blueprintId have no cascade — null out before deleting
+  await db.update(pages).set({ blueprintId: null }).where(eq(pages.blueprintId, id));
+  await db.update(generationJobs).set({ blueprintId: null }).where(eq(generationJobs.blueprintId, id));
   await db.delete(blueprints).where(eq(blueprints.id, id));
 }
 
@@ -374,6 +390,8 @@ export async function updatePage(id: string, data: Partial<InsertPage>): Promise
 }
 
 export async function deletePage(id: string): Promise<void> {
+  // internalLinks.fromPageId and toPageId have no cascade — delete links for this page first
+  await db.delete(internalLinks).where(or(eq(internalLinks.fromPageId, id), eq(internalLinks.toPageId, id)));
   await db.delete(pages).where(eq(pages.id, id));
 }
 
