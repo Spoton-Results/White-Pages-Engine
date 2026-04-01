@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
-import { generateBlueprint, suggestServices } from "./services/claude";
+import { generateBlueprint, suggestServices, generateQueryClusters } from "./services/claude";
 import { buildVariationPage } from "./services/variation-engine";
 import { writeVariationsForService, BrandContext } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
@@ -706,6 +706,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/query-clusters/:id", requireAuth, async (req: Request, res: Response) => {
     await storage.deleteQueryCluster((req.params.id as string));
     return res.status(204).send();
+  });
+
+  app.post("/api/accounts/:accountId/query-clusters/ai-generate", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    }
+    const accountId = req.params.accountId as string;
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    const [services, existingClusters] = await Promise.all([
+      storage.getServices(accountId),
+      storage.getQueryClusters(accountId),
+    ]);
+
+    const generated = await generateQueryClusters({
+      businessName: account.name,
+      industry: (account as any).settings?.industry || account.name,
+      services: services.map((s: any) => s.name),
+      existingClusters: existingClusters.map((c: any) => c.primaryKeyword),
+    });
+
+    // Insert all generated clusters, skip any with duplicate primaryKeyword
+    const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
+    const toInsert = generated.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase()));
+
+    const inserted = await Promise.all(
+      toInsert.map(c => storage.createQueryCluster({ ...c, accountId }))
+    );
+
+    return res.status(201).json({ inserted: inserted.length, clusters: inserted });
   });
 
   // ── Blueprints ────────────────────────────────────────────────────────────

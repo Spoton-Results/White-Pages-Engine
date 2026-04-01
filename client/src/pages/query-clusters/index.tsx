@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search, Trash2, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -59,6 +59,16 @@ export default function QueryClustersPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/query-clusters/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/query-clusters"] }),
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const aiGenerate = useMutation({
+    mutationFn: () => api.post<{ inserted: number; clusters: any[] }>(`/api/accounts/${selectedAccount}/query-clusters/ai-generate`, {}),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/query-clusters"] });
+      toast({ title: `${data.inserted} clusters generated`, description: "AI-generated query clusters have been added." });
+    },
+    onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
   });
 
   const intentColors: Record<string, string> = {
@@ -77,9 +87,22 @@ export default function QueryClustersPage() {
             <p className="text-muted-foreground text-sm mt-0.5">Organize keyword groups by search intent for targeted content.</p>
           </div>
           {selectedAccount && (
-            <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)}>
-              <Plus className="size-4" />Add Cluster
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => aiGenerate.mutate()}
+                disabled={aiGenerate.isPending}
+                data-testid="button-ai-generate-clusters"
+              >
+                <Sparkles className="size-4" />
+                {aiGenerate.isPending ? "Generating…" : "Generate with AI"}
+              </Button>
+              <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-add-cluster">
+                <Plus className="size-4" />Add Cluster
+              </Button>
+            </div>
           )}
         </div>
 

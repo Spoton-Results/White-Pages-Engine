@@ -480,3 +480,78 @@ export async function reviewAndRewrite(html: string, ctx: PageContext): Promise<
     };
   });
 }
+
+// ── Query Cluster Generation ──────────────────────────────────────────────────
+
+export interface GeneratedCluster {
+  name: string;
+  intentType: "transactional" | "informational" | "local" | "navigational";
+  primaryKeyword: string;
+  secondaryKeywords: string[];
+  searchVolume: number | null;
+  difficulty: number | null;
+}
+
+export async function generateQueryClusters(opts: {
+  businessName: string;
+  industry: string;
+  services: string[];
+  existingClusters: string[];
+}): Promise<GeneratedCluster[]> {
+  const { businessName, industry, services, existingClusters } = opts;
+
+  const prompt = `You are an expert local SEO strategist specializing in keyword clustering for multi-location service businesses.
+
+BUSINESS DETAILS:
+- Business Name: ${businessName}
+- Industry: ${industry}
+${services.length > 0 ? `- Services: ${services.join(", ")}` : ""}
+${existingClusters.length > 0 ? `- Already has these clusters (do NOT repeat): ${existingClusters.join(", ")}` : ""}
+
+Generate 10-15 query clusters that cover the full range of search intent for this business. Spread across all intent types:
+- transactional: ready-to-buy searches ("merchant services near me", "get a pos system")
+- informational: research searches ("how to reduce credit card fees", "what is a payment processor")
+- local: geo-specific searches ("merchant services in [city]", "local payment processor")
+- navigational: brand/comparison searches ("best merchant services", "square vs stripe comparison")
+
+For each cluster output:
+- name: Short descriptive label (3-5 words)
+- intentType: one of transactional, informational, local, navigational
+- primaryKeyword: The single best target keyword phrase
+- secondaryKeywords: 3-5 related variants
+- searchVolume: Estimated monthly US search volume (realistic integer, null if unknown)
+- difficulty: SEO difficulty 0-100 (realistic, null if unknown)
+
+Respond ONLY with a JSON array (no markdown, no code fences):
+[
+  {
+    "name": "Cluster Name",
+    "intentType": "transactional",
+    "primaryKeyword": "primary keyword phrase",
+    "secondaryKeywords": ["variant 1", "variant 2", "variant 3"],
+    "searchVolume": 2400,
+    "difficulty": 42
+  }
+]`;
+
+  return callWithRetry(async () => {
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 3000,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const jsonStr = extractJson(raw);
+    if (!jsonStr) throw new Error("Claude did not return valid JSON");
+    const parsed = JSON.parse(jsonStr) as GeneratedCluster[];
+    return parsed.map(c => ({
+      name: c.name || "",
+      intentType: (["transactional", "informational", "local", "navigational"].includes(c.intentType) ? c.intentType : "informational") as GeneratedCluster["intentType"],
+      primaryKeyword: c.primaryKeyword || "",
+      secondaryKeywords: Array.isArray(c.secondaryKeywords) ? c.secondaryKeywords : [],
+      searchVolume: typeof c.searchVolume === "number" ? c.searchVolume : null,
+      difficulty: typeof c.difficulty === "number" ? Math.min(100, Math.max(0, c.difficulty)) : null,
+    }));
+  });
+}
