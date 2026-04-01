@@ -9,7 +9,7 @@
  *   - DB job progress updated every PAGE_BATCH_SIZE pages, not every page
  */
 import * as storage from "../storage";
-import { buildVariationPage } from "./variation-engine";
+import { buildVariationPage, ClusterContext } from "./variation-engine";
 
 const PAGE_BATCH_SIZE = 50; // flush job counters to DB every N pages
 
@@ -108,6 +108,22 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await storage.getBlueprint(effectiveBlueprintId) : null;
 
+  // ── Pre-load clusters once — keyed by service name (lowercase) ────────────────
+  const [accountServices, accountClusters] = await Promise.all([
+    storage.getServices(website.accountId!),
+    storage.getQueryClusters(website.accountId!),
+  ]);
+  // serviceId → cluster
+  const clusterByServiceId = new Map<string, ClusterContext>(
+    accountClusters
+      .filter((c: any) => c.serviceId)
+      .map((c: any) => [c.serviceId, { id: c.id, primaryKeyword: c.primaryKeyword, secondaryKeywords: c.secondaryKeywords ?? [], intentType: c.intentType }])
+  );
+  // service name (lowercase) → serviceId
+  const serviceIdByName = new Map<string, string>(
+    accountServices.map((s: any) => [s.name.toLowerCase(), s.id])
+  );
+
   // ── Pre-load all state data once ─────────────────────────────────────────────
   const stateDataMap = await storage.getAllStateData();
   const targets = await buildTargets(mode, stateDataMap, states, cities);
@@ -126,6 +142,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
     const svc = services[si];
+
+    // Resolve cluster for this service (match by name → serviceId → cluster)
+    const svcId = serviceIdByName.get(svc.toLowerCase());
+    const svcCluster = svcId ? (clusterByServiceId.get(svcId) ?? null) : null;
 
     const banks = await storage.getVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
@@ -148,7 +168,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     for (const t of targets) {
       try {
         const sd = stateDataMap.get(t.stateAbbr.toUpperCase());
-        const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd);
+        const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster);
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
           service: svc,
@@ -186,7 +206,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         } else {
           const page = await storage.createPage({
             websiteId: job.websiteId, blueprintId: effectiveBlueprintId || null,
-            serviceId: null, locationId: null, queryClusterId: null,
+            serviceId: svcId || null, locationId: null, queryClusterId: svcCluster?.id || null,
             slug: finalSlug, title: finalTitle, h1: finalH1, metaDescription: finalMeta,
             status: "published", pageType: t.locationType === "state" ? "state_hub" : "service_city",
             wordCount: result.wordCount,

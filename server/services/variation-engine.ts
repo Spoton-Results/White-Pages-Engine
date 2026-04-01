@@ -21,6 +21,13 @@ function substitute(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+export interface ClusterContext {
+  id: string;
+  primaryKeyword: string;
+  secondaryKeywords: string[];
+  intentType: string;
+}
+
 export function buildVariationPage(
   serviceName: string,
   serviceSlug: string,
@@ -31,6 +38,7 @@ export function buildVariationPage(
   brandName: string,
   banks: ContentVariationBank[],
   state: StateData | undefined,
+  cluster?: ClusterContext | null,
 ): VariationPageResult {
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
@@ -47,6 +55,9 @@ export function buildVariationPage(
     population: state?.population?.toLocaleString() ?? "",
     business_count: state?.businessCount?.toLocaleString() ?? "",
     brand: brandName,
+    primary_keyword: cluster?.primaryKeyword ?? serviceName,
+    secondary_keywords: cluster?.secondaryKeywords?.join(", ") ?? "",
+    intent_type: cluster?.intentType ?? "",
   };
 
   const getSection = (name: string): string => {
@@ -94,7 +105,8 @@ ${cta}
     ? `${serviceName} in ${stateName}`
     : `${serviceName} in ${city}, ${stateAbbr}`;
 
-  const metaDescription = `Looking for ${serviceName} in ${city}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
+  const targetKeyword = cluster?.primaryKeyword ?? serviceName;
+  const metaDescription = `Looking for ${targetKeyword} in ${city}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
 
   return { contentHtml, title, h1, metaDescription, slug, wordCount };
 }
