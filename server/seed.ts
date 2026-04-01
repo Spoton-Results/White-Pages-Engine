@@ -180,7 +180,25 @@ export async function seedDatabase() {
 
   await seedStateData();
 
+  // ── Website settings patches ─────────────────────────────────────────────────
+  await patchWebsiteSettings("pagessubtracker.spotonresults.com", {
+    mainWebsiteUrl: "https://subtrackers.spotonresults.com/",
+    ctaButtonLabel: "Visit SubTrackers",
+    ctaHeading: "Ready to Grow Your Business?",
+    ctaText: "Subtracker helps local businesses get more customers with merchant services built for your market.",
+  });
+
   console.log("Seed check complete.");
+}
+
+async function patchWebsiteSettings(domain: string, patch: Record<string, string>) {
+  const site = await storage.getWebsiteByDomain(domain);
+  if (!site) return;
+  const current = (site.settings as any) || {};
+  const needsUpdate = Object.entries(patch).some(([k, v]) => current[k] !== v);
+  if (!needsUpdate) return;
+  await storage.updateWebsite(site.id, { settings: { ...current, ...patch } });
+  console.log(`Patched website settings for ${domain}`);
 }
 
 // ─── State Data ───────────────────────────────────────────────────────────────
