@@ -51,25 +51,25 @@ export async function updateAccount(id: string, data: Partial<InsertAccount>): P
 
 export async function deleteAccount(id: string): Promise<void> {
   await db.transaction(async (tx) => {
-    // 1. Collect website IDs for this account (needed for page lookups)
+    // 1. Collect website IDs for this account
     const acctWebsites = await tx.select({ id: websites.id }).from(websites).where(eq(websites.accountId, id));
     const websiteIds = acctWebsites.map(w => w.id);
 
     if (websiteIds.length > 0) {
-      // 2. Collect page IDs so we can delete internalLinks (no cascade on those FKs)
+      // 2. Delete generationJobs — websiteId FK has no onDelete action and would block website deletion
+      await tx.delete(generationJobs).where(inArray(generationJobs.websiteId, websiteIds));
+
+      // 3. Collect page IDs so we can delete internalLinks (fromPageId/toPageId have no cascade)
       const acctPages = await tx.select({ id: pages.id }).from(pages).where(inArray(pages.websiteId, websiteIds));
       const pageIds = acctPages.map(p => p.id);
 
       if (pageIds.length > 0) {
-        // 3. Remove internalLinks — fromPageId/toPageId have no onDelete action
+        // 4. Remove internalLinks — fromPageId/toPageId have no onDelete action
         await tx.delete(internalLinks).where(or(inArray(internalLinks.fromPageId, pageIds), inArray(internalLinks.toPageId, pageIds)));
 
-        // 4. Null out blueprintId on pages — FK has no onDelete action
+        // 5. Null out blueprintId on pages — FK has no onDelete action
         await tx.update(pages).set({ blueprintId: null }).where(inArray(pages.id, pageIds));
       }
-
-      // 5. Null out blueprintId on generationJobs — FK has no onDelete action
-      await tx.update(generationJobs).set({ blueprintId: null } as any).where(eq(generationJobs.accountId, id));
     }
 
     // 6. Delete the account — all remaining FKs have onDelete: "cascade"

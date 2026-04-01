@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil, AlertTriangle } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -23,6 +23,7 @@ export default function AccountsPage() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editAccount, setEditAccount] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue } = useForm<any>();
 
@@ -58,6 +59,8 @@ export default function AccountsPage() {
     mutationFn: (id: string) => api.delete(`/api/accounts/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setDeleteTarget(null);
       toast({ title: "Account deleted" });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -183,7 +186,8 @@ export default function AccountsPage() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="gap-2 text-destructive cursor-pointer"
-                          onClick={() => confirm("Delete this account?") && remove.mutate(account.id)}
+                          onClick={() => setDeleteTarget(account)}
+                          data-testid={`button-delete-account-${account.id}`}
                         >
                           <Trash className="size-4" />Delete
                         </DropdownMenuItem>
@@ -226,6 +230,51 @@ export default function AccountsPage() {
               <Button type="submit" disabled={create.isPending}>Create</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              Delete Account
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              You are about to permanently delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span> and everything attached to it:
+            </p>
+            <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1 pl-1">
+              <li>All websites and published pages</li>
+              <li>All generation jobs</li>
+              <li>All services, locations, and industries</li>
+              <li>All brand profiles</li>
+              <li>All users under this account</li>
+            </ul>
+            <p className="text-sm font-medium text-destructive">This cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={remove.isPending}
+              data-testid="button-cancel-delete"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
+              disabled={remove.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {remove.isPending ? "Deleting…" : "Delete Account"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
