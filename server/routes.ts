@@ -172,6 +172,14 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     gtag('js', new Date());
     gtag('config', 'G-VH980NTHCM');
   </script>` : ""}
+  ${website.domain === "pagessubtracker.spotonresults.com" ? `<!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-GY5VTKVQ88"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-GY5VTKVQ88');
+  </script>` : ""}
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;line-height:1.6}
