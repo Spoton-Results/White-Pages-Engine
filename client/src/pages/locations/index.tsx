@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus, MapPin, Trash2, Search, Download } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -255,12 +256,38 @@ function BulkImportDialog({
   onImport: (items: LocationImportItem[]) => void;
   isPending: boolean;
 }) {
-  const [tab, setTab] = useState<"states" | "cities" | "region" | "metro">("states");
+  const [tab, setTab] = useState<"states" | "cities" | "region" | "metro" | "csv">("states");
   const [stateSearch, setStateSearch] = useState("");
   const [citySearch, setCitySearch] = useState("");
   const [cityStateFilter, setCityStateFilter] = useState("ALL");
   const [selectedStates, setSelectedStates] = useState<Set<string>>(new Set());
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
+  const [csvText, setCsvText] = useState("");
+
+  // Build state lookup maps once
+  const stateByCode = useMemo(() => new Map(US_STATES.map(s => [s.code.toUpperCase(), s])), []);
+  const stateByName = useMemo(() => new Map(US_STATES.map(s => [s.name.toLowerCase(), s])), []);
+
+  const csvParsed = useMemo((): LocationImportItem[] => {
+    if (!csvText.trim()) return [];
+    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const results: LocationImportItem[] = [];
+    for (const line of lines) {
+      // Support: "City, ST" or "City, State Name" or tab-separated
+      const parts = line.split(/\t|,(?=[^,]*$)/).map(p => p.trim());
+      if (parts.length < 2) continue;
+      const cityName = parts[0].trim();
+      const stateRaw = parts[parts.length - 1].trim();
+      const state = stateByCode.get(stateRaw.toUpperCase()) || stateByName.get(stateRaw.toLowerCase());
+      if (!cityName || !state) continue;
+      const slug = `${slugify(cityName)}-${state.code.toLowerCase()}`;
+      results.push({ type: "city", name: cityName, slug, stateCode: state.code, stateName: state.name, population: 0 });
+    }
+    // deduplicate by slug
+    const seen = new Set<string>();
+    return results.filter(r => { if (seen.has(r.slug)) return false; seen.add(r.slug); return true; });
+  }, [csvText, stateByCode, stateByName]);
 
   const filteredStates = useMemo(() =>
     US_STATES.filter(s =>
@@ -293,7 +320,6 @@ function BulkImportDialog({
       return { metro: m, total: cities.length, selected };
     }).filter(m => m.total > 0), [selectedCities]);
 
-  const totalSelected = selectedStates.size + selectedCities.size;
   const allStatesSelected = filteredStates.length > 0 && filteredStates.every(s => selectedStates.has(s.code));
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every(c => selectedCities.has(c.slug));
 
@@ -357,8 +383,12 @@ function BulkImportDialog({
       const city = US_CITIES_CLEAN.find(c => c.slug === slug);
       if (city) items.push({ type: "city", name: city.name, slug: city.slug, stateCode: city.stateCode, stateName: city.stateName, population: city.population });
     });
+    csvParsed.forEach(c => items.push(c));
     onImport(items);
   }
+
+  const totalSelected = selectedStates.size + selectedCities.size + (tab === "csv" ? csvParsed.length : 0);
+  const totalImportable = selectedStates.size + selectedCities.size + csvParsed.length;
 
   const REGION_COLORS: Record<string, string> = {
     "Northeast": "bg-blue-500/10 text-blue-700 border-blue-200",
@@ -384,7 +414,7 @@ function BulkImportDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v: any) => setTab(v)} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="w-full grid grid-cols-4">
+          <TabsList className="w-full grid grid-cols-5">
             <TabsTrigger value="states" data-testid="tab-states">
               States {selectedStates.size > 0 && <Badge variant="secondary" className="ml-1.5 text-xs">{selectedStates.size}</Badge>}
             </TabsTrigger>
@@ -393,6 +423,9 @@ function BulkImportDialog({
             </TabsTrigger>
             <TabsTrigger value="region" data-testid="tab-region">By Region</TabsTrigger>
             <TabsTrigger value="metro" data-testid="tab-metro">By Metro</TabsTrigger>
+            <TabsTrigger value="csv" data-testid="tab-csv">
+              Paste CSV {csvParsed.length > 0 && <Badge variant="secondary" className="ml-1.5 text-xs">{csvParsed.length}</Badge>}
+            </TabsTrigger>
           </TabsList>
 
           {/* ── States Tab ── */}
@@ -535,16 +568,50 @@ function BulkImportDialog({
             </ScrollArea>
             <p className="text-xs text-muted-foreground">{metroCounts.length} metro areas</p>
           </TabsContent>
+
+          {/* ── Paste CSV Tab ── */}
+          <TabsContent value="csv" className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">
+                Paste a list of cities — one per line. Accepted formats:
+              </p>
+              <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                <li><code>Austin, TX</code> — city name + 2-letter state code</li>
+                <li><code>Austin, Texas</code> — city name + full state name</li>
+                <li>Tab-separated columns also work</li>
+                <li>Header rows and blank lines are skipped automatically</li>
+              </ul>
+            </div>
+            <Textarea
+              className="flex-1 min-h-[220px] font-mono text-xs resize-none"
+              placeholder={"Austin, TX\nDallas, TX\nHouston, TX\nDenver, CO\nPhoenix, AZ\n..."}
+              value={csvText}
+              onChange={e => setCsvText(e.target.value)}
+              data-testid="textarea-csv-cities"
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {csvText.trim()
+                  ? csvParsed.length > 0
+                    ? `✓ ${csvParsed.length} cities parsed successfully`
+                    : "⚠ No valid cities found — check format (City, ST)"
+                  : "Paste city data above"}
+              </p>
+              {csvText.trim() && (
+                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => setCsvText("")}>Clear</Button>
+              )}
+            </div>
+          </TabsContent>
         </Tabs>
 
         <DialogFooter className="mt-2">
           <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
           <Button
             onClick={handleImport}
-            disabled={isPending || totalSelected === 0}
+            disabled={isPending || totalImportable === 0}
             data-testid="button-confirm-bulk-import"
           >
-            {isPending ? "Importing…" : totalSelected === 0 ? "Select locations to import" : `Import ${totalSelected} location${totalSelected !== 1 ? "s" : ""}`}
+            {isPending ? "Importing…" : totalImportable === 0 ? "Select locations to import" : `Import ${totalImportable} location${totalImportable !== 1 ? "s" : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>
