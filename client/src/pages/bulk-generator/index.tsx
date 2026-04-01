@@ -36,8 +36,8 @@ export default function BulkGeneratorPage() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
-  const [cancelRequested, setCancelRequested] = useState(false);
   const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
+  const [activeJobId, setActiveJobId] = useState<string>("");
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -72,6 +72,37 @@ export default function BulkGeneratorPage() {
     queryFn: () => api.get<any[]>(`/api/accounts/${accountId}/blueprints`),
     enabled: !!accountId,
   });
+
+  // Poll the active background job every 2 s; stops when it completes or errors
+  const activeJobQ = useQuery<any>({
+    queryKey: ["/api/jobs/active", activeJobId],
+    queryFn: () => api.get<any>(`/api/jobs/${activeJobId}`),
+    enabled: !!activeJobId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return (status === "completed" || status === "error") ? false : 2000;
+    },
+    staleTime: 0,
+  });
+
+  // Sync job progress → local state
+  useEffect(() => {
+    const job = activeJobQ.data;
+    if (!job) return;
+    const progress = job.settings?.progress;
+    if (progress) setServiceProgress(progress);
+    const isActive = job.status === "pending" || job.status === "running";
+    setIsRunningAll(isActive);
+    if (job.status === "completed" && progress) {
+      const totalCreated = progress.reduce((s: number, p: any) => s + (p.created ?? 0), 0);
+      const totalUpdated = progress.reduce((s: number, p: any) => s + (p.updated ?? 0), 0);
+      const totalSkipped = progress.reduce((s: number, p: any) => s + (p.skipped ?? 0), 0);
+      const totalErrors = progress.reduce((s: number, p: any) => s + (p.errors ?? 0), 0);
+      setLastResult({ created: totalCreated + totalUpdated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
+      qc.invalidateQueries({ queryKey: ["/api/pages"] });
+      qc.invalidateQueries({ queryKey: ["/api/websites"] });
+    }
+  }, [activeJobQ.data]);
 
   const services = servicesQ.data ?? [];
   const bankServicesSet = new Set<string>(bankServicesQ.data ?? []);
@@ -131,61 +162,26 @@ export default function BulkGeneratorPage() {
   async function runAllServices() {
     const svcs = Array.from(selectedServices);
     if (svcs.length === 0) return;
-    setIsRunningAll(true);
-    setCancelRequested(false);
     setLastResult(null);
+    setActiveJobId("");
     setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
-
-    let totalCreated = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
-
-    for (let i = 0; i < svcs.length; i++) {
-      if (cancelRequested) break;
-      const svc = svcs[i];
-      // Skip services that don't have variation banks written yet
-      if (!bankServicesSet.has(svc)) {
-        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "no-bank" } : p));
-        continue;
-      }
-      setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "running" } : p));
-      try {
-        const payload: any = { service: svc, ...buildLocationPayload(), overwrite };
-        if (blueprintId) payload.blueprintId = blueprintId;
-        const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        totalCreated += data.created ?? 0;
-        totalUpdated += data.updated ?? 0;
-        totalSkipped += data.skipped ?? 0;
-        totalErrors += data.errors ?? 0;
-        if (data.warning) {
-          toast({ title: "Blueprint template warning", description: data.warning, variant: "destructive" });
-        }
-        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "done", created: data.created ?? 0, updated: data.updated ?? 0, skipped: data.skipped ?? 0, errors: data.errors ?? 0 } : p));
-      } catch (err: any) {
-        totalErrors++;
-        setServiceProgress(prev => prev.map(p => p.service === svc ? { ...p, status: "error" } : p));
-        toast({ title: `Error on "${svc}"`, description: err.message, variant: "destructive" });
-      }
-    }
-
-    setIsRunningAll(false);
-    setLastResult({ created: totalCreated + totalUpdated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
-    const summary = totalUpdated > 0
-      ? `${totalCreated} new, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalErrors} errors`
-      : `${totalSkipped} skipped, ${totalErrors} errors across ${svcs.length} service(s)`;
-    toast({ title: `Done! ${totalCreated + totalUpdated} pages processed`, description: summary });
-    qc.invalidateQueries({ queryKey: ["/api/pages"] });
-
-    // Auto-regenerate sitemap so new pages are immediately indexed by Google
-    if (totalCreated + totalUpdated > 0 && websiteId) {
-      try {
-        await apiFetch(`/api/websites/${websiteId}/sitemaps/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-        toast({ title: "Sitemap updated", description: "New pages are now included in your sitemap and ready for Google indexing." });
-      } catch {
-        // Non-critical — user can regenerate manually from Sitemap Manager
-      }
+    setIsRunningAll(true);
+    try {
+      const payload: any = { services: svcs, ...buildLocationPayload(), overwrite };
+      if (blueprintId) payload.blueprintId = blueprintId;
+      const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate-job`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setActiveJobId(data.jobId);
+      toast({
+        title: "Job running in background",
+        description: "You can close this tab or switch apps — the job will keep running on the server.",
+      });
+    } catch (err: any) {
+      setIsRunningAll(false);
+      toast({ title: "Failed to start job", description: err.message, variant: "destructive" });
     }
   }
 
@@ -517,22 +513,25 @@ export default function BulkGeneratorPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-3">
-                <Button
-                  size="lg"
-                  onClick={runAllServices}
-                  disabled={isRunningAll || targetCount === 0}
-                  data-testid="button-generate"
-                  className="gap-2"
-                >
-                  {isRunningAll
-                    ? <><Loader2 className="size-4 animate-spin" /> Running...</>
-                    : <><Play className="size-4" /> Generate {selectedServices.size * targetCount} Pages</>}
-                </Button>
-                {isRunningAll && (
-                  <Button variant="outline" size="lg" onClick={() => setCancelRequested(true)} data-testid="button-cancel">
-                    Cancel
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-3">
+                  <Button
+                    size="lg"
+                    onClick={runAllServices}
+                    disabled={isRunningAll || targetCount === 0}
+                    data-testid="button-generate"
+                    className="gap-2"
+                  >
+                    {isRunningAll
+                      ? <><Loader2 className="size-4 animate-spin" /> Running in background...</>
+                      : <><Play className="size-4" /> Generate {selectedServices.size * targetCount} Pages</>}
                   </Button>
+                </div>
+                {isRunningAll && activeJobId && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="size-3 animate-spin" />
+                    Running on server — you can close this tab or switch apps and come back later. Progress updates every 2 s.
+                  </p>
                 )}
               </div>
 

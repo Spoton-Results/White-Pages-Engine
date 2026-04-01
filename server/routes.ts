@@ -1328,6 +1328,51 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json(results);
   });
 
+  // ── Background Bulk Generate — returns jobId immediately, runs server-side ──
+  app.post("/api/websites/:id/bulk-generate-job", requireAuth, async (req: Request, res: Response) => {
+    const schema = z.object({
+      services: z.array(z.string().min(1)).min(1),
+      mode: z.enum(["all_states", "specific_states", "specific_cities"]),
+      states: z.array(z.string()).optional(),
+      cities: z.array(z.object({ name: z.string(), stateAbbr: z.string() })).optional(),
+      blueprintId: z.string().uuid().optional(),
+      overwrite: z.boolean().optional(),
+    });
+    const body = schema.parse(req.body);
+    const websiteId = req.params.id as string;
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const progress = body.services.map(s => ({ service: s, status: "pending" as const, created: 0, updated: 0, skipped: 0, errors: 0 }));
+    const jobSettings = { ...body, progress };
+
+    const job = await storage.createGenerationJob({
+      accountId: website.accountId!,
+      websiteId,
+      blueprintId: body.blueprintId || null,
+      name: `Bulk Generate — ${body.services.length} service(s)`,
+      status: "pending",
+      totalPages: 0,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+      errorLog: [],
+      settings: jobSettings as any,
+    });
+
+    // Fire-and-forget — runs entirely on the server after response is sent
+    const { runBulkBackgroundJob } = await import("./services/bulk-background");
+    setImmediate(() => {
+      runBulkBackgroundJob(job.id).catch(err => {
+        console.error("[bulk-background] unhandled error in job", job.id, err);
+        storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() }).catch(() => {});
+      });
+    });
+
+    return res.json({ jobId: job.id, message: "Job started in background" });
+  });
+
   // ── Content Find-and-Replace (admin) ─────────────────────────────────────
   app.post("/api/websites/:id/content-replace", requireAuth, async (req: Request, res: Response) => {
     const schema = z.object({
