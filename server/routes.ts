@@ -703,6 +703,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(qc);
   });
 
+  app.delete("/api/query-clusters/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteQueryCluster((req.params.id as string));
+    return res.status(204).send();
+  });
+
   // ── Blueprints ────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
