@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Map, RefreshCw, Zap, ExternalLink, FileCode } from "lucide-react";
+import { Map, RefreshCw, Zap, ExternalLink, FileCode, Copy, Check } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
@@ -15,6 +15,13 @@ export default function SitemapsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [overrideWebsite, setOverrideWebsite] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+
+  function copySitemapUrl(url: string) {
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -78,6 +85,27 @@ export default function SitemapsPage() {
             </a>
           )}
         </div>
+
+        {currentWebsite && (
+          <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-blue-700 mb-1">Google Search Console — Submit this URL</p>
+              <p className="font-mono text-sm text-blue-900 truncate" data-testid="text-sitemap-url">
+                https://{currentWebsite.domain}/sitemap.xml
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100"
+              onClick={() => copySitemapUrl(`https://${currentWebsite.domain}/sitemap.xml`)}
+              data-testid="button-copy-sitemap-url"
+            >
+              {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
+              {copied ? "Copied!" : "Copy"}
+            </Button>
+          </div>
+        )}
 
         {!selectedWebsite ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
