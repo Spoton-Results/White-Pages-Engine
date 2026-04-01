@@ -1144,9 +1144,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             priority: "0.7",
           }));
           const { buildSitemapXml } = await import("./services/sitemap");
+          console.log(`[sitemap] serving inline ${urls.length} urls for ${host}`);
           return res.send(buildSitemapXml(urls));
         }
         const { buildSitemapIndexXml } = await import("./services/sitemap");
+        console.log(`[sitemap] serving index with ${sitemapList.length} sitemaps for ${host}`);
         return res.send(buildSitemapIndexXml(
           sitemapList.map((sm) => ({ loc: `${baseUrl}/${sm.slug}.xml`, lastmod: today }))
         ));
