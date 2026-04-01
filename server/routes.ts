@@ -1188,6 +1188,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       // Serve a specific page by slug
       const page = await storage.getPageBySlug(website.id, rawSlug);
       if (!page || page.status !== "published") {
+        console.log(`[page-serve] 404 ${host}/${rawSlug} — ${!page ? "not found" : "not published"}`);
         return res.status(404).send(notFoundHtml("Page not found or not yet published"));
       }
 
@@ -1198,6 +1199,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=3600");
+      console.log(`[page-serve] 200 ${host}/${rawSlug}`);
       return res.send(html);
     } catch (err) {
       return next(err);
