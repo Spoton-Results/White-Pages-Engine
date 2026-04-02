@@ -73,12 +73,21 @@ app.use((req, res, next) => {
 
   // Resume any bulk background jobs that were interrupted by a server restart
   try {
-    const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
+    const { getStaleRunningJobs, updateGenerationJob, syncWebsitePublishedCount } = await import("./storage");
     const { runBulkBackgroundJob } = await import("./services/bulk-background");
     const stale = await getStaleRunningJobs();
     const bulkJobs = stale.filter(j => Array.isArray((j.settings as any)?.services));
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
+      // Sync page counts first — interrupted jobs may have inserted pages without
+      // updating the counter, so the UI shows a stale lower number.
+      const syncedWebsites = new Set<string>();
+      for (const j of bulkJobs) {
+        if (j.websiteId && !syncedWebsites.has(j.websiteId)) {
+          await syncWebsitePublishedCount(j.websiteId).catch(() => {});
+          syncedWebsites.add(j.websiteId);
+        }
+      }
       for (const j of bulkJobs) {
         await updateGenerationJob(j.id, { status: "pending", startedAt: null });
         setImmediate(() => {

@@ -151,6 +151,15 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
+    // Check for cancellation before starting each service so Cancel actually stops the job.
+    // Without this check the worker runs through all services even after the user cancels.
+    const liveJob = await storage.getGenerationJob(jobId);
+    if (!liveJob || liveJob.status === "cancelled") {
+      console.log(`[bulk-background] Job ${jobId} was cancelled — stopping at service ${si}/${services.length}`);
+      await storage.syncWebsitePublishedCount(job.websiteId);
+      return;
+    }
+
     const svc = services[si];
 
     // Resolve cluster: 1) by serviceId link, 2) keyword fallback for unlinked clusters
@@ -274,6 +283,14 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
         await flushInsertBatch();
+        // Check cancellation every PAGE_BATCH_SIZE pages — reuses the same DB
+        // round-trip window so we don't add extra overhead per page.
+        const liveJob = await storage.getGenerationJob(jobId);
+        if (!liveJob || liveJob.status === "cancelled") {
+          console.log(`[bulk-background] Job ${jobId} cancelled mid-service — stopping`);
+          await storage.syncWebsitePublishedCount(job.websiteId);
+          return;
+        }
         await storage.updateGenerationJob(jobId, {
           processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
           passedPages: basePassedPages + totalCreated + totalUpdated,
