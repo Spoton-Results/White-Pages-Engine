@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Zap, Play, CheckCircle2, Loader2, Search, FileText, XCircle, AlertCircle } from "lucide-react";
+import { Zap, Play, CheckCircle2, Loader2, Search, FileText, XCircle, AlertCircle, Repeat2 } from "lucide-react";
 import { api } from "@/lib/api";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -35,9 +35,14 @@ export default function BulkGeneratorPage() {
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[]; warning?: string } | null>(null);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
+  const [cycleBlueprints, setCycleBlueprints] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const lastCityIdx = useRef<number | null>(null);
   const lastStateIdx = useRef<number | null>(null);
+  const bpQueueRef = useRef<string[]>([]);
+  const bpQueueIdxRef = useRef(0);
+  const [bpQueueDisplay, setBpQueueDisplay] = useState({ idx: 0, total: 1 });
+  const accumulatedRef = useRef({ created: 0, skipped: 0, errors: 0 });
   const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
   const [activeJobId, setActiveJobId] = useState<string>("");
 
@@ -87,22 +92,36 @@ export default function BulkGeneratorPage() {
     staleTime: 0,
   });
 
-  // Sync job progress → local state
+  // Sync job progress → local state; chain next blueprint when one job completes
   useEffect(() => {
     const job = activeJobQ.data;
     if (!job) return;
     const progress = job.settings?.progress;
     if (progress) setServiceProgress(progress);
-    const isActive = job.status === "pending" || job.status === "running";
-    setIsRunningAll(isActive);
-    if (job.status === "completed" && progress) {
-      const totalCreated = progress.reduce((s: number, p: any) => s + (p.created ?? 0), 0);
-      const totalUpdated = progress.reduce((s: number, p: any) => s + (p.updated ?? 0), 0);
-      const totalSkipped = progress.reduce((s: number, p: any) => s + (p.skipped ?? 0), 0);
-      const totalErrors = progress.reduce((s: number, p: any) => s + (p.errors ?? 0), 0);
-      setLastResult({ created: totalCreated + totalUpdated, skipped: totalSkipped, errors: totalErrors, slugs: [] });
-      qc.invalidateQueries({ queryKey: ["/api/pages"] });
-      qc.invalidateQueries({ queryKey: ["/api/websites"] });
+
+    if (job.status === "completed" || job.status === "error") {
+      // Accumulate totals from this blueprint's run
+      if (progress) {
+        accumulatedRef.current.created += progress.reduce((s: number, p: any) => s + (p.created ?? 0) + (p.updated ?? 0), 0);
+        accumulatedRef.current.skipped += progress.reduce((s: number, p: any) => s + (p.skipped ?? 0), 0);
+        accumulatedRef.current.errors  += progress.reduce((s: number, p: any) => s + (p.errors ?? 0), 0);
+      }
+      const nextIdx = bpQueueIdxRef.current + 1;
+      if (nextIdx < bpQueueRef.current.length) {
+        // Start next blueprint in the queue
+        bpQueueIdxRef.current = nextIdx;
+        setBpQueueDisplay({ idx: nextIdx, total: bpQueueRef.current.length });
+        const svcNames: string[] = (job.settings?.services as string[]) ?? [];
+        setServiceProgress(svcNames.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
+        setActiveJobId("");
+        submitJobForBlueprint(bpQueueRef.current[nextIdx]);
+      } else {
+        // All blueprints done
+        setIsRunningAll(false);
+        setLastResult({ ...accumulatedRef.current, slugs: [] });
+        qc.invalidateQueries({ queryKey: ["/api/pages"] });
+        qc.invalidateQueries({ queryKey: ["/api/websites"] });
+      }
     }
   }, [activeJobQ.data]);
 
@@ -165,29 +184,54 @@ export default function BulkGeneratorPage() {
     }
   }
 
-  async function runAllServices() {
-    const svcs = Array.from(selectedServices);
-    if (svcs.length === 0) return;
-    setLastResult(null);
-    setActiveJobId("");
-    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
-    setIsRunningAll(true);
+  async function submitJobForBlueprint(bpId: string) {
     try {
+      const svcs = Array.from(selectedServices);
       const payload: any = { services: svcs, ...buildLocationPayload(), overwrite };
-      if (blueprintId) payload.blueprintId = blueprintId;
+      if (bpId) payload.blueprintId = bpId;
       const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate-job`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       setActiveJobId(data.jobId);
+    } catch (err: any) {
+      setIsRunningAll(false);
+      toast({ title: "Failed to start job", description: err.message, variant: "destructive" });
+    }
+  }
+
+  async function runAllServices() {
+    const svcs = Array.from(selectedServices);
+    if (svcs.length === 0) return;
+
+    // Build the blueprint queue: all blueprints when cycling, else just the selected one
+    const queue = cycleBlueprints && blueprints.length > 1
+      ? blueprints.map((bp: any) => bp.id)
+      : [blueprintId];
+
+    bpQueueRef.current = queue;
+    bpQueueIdxRef.current = 0;
+    accumulatedRef.current = { created: 0, skipped: 0, errors: 0 };
+    setBpQueueDisplay({ idx: 0, total: queue.length });
+
+    setLastResult(null);
+    setActiveJobId("");
+    setServiceProgress(svcs.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
+    setIsRunningAll(true);
+
+    await submitJobForBlueprint(queue[0]);
+
+    if (queue.length > 1) {
+      toast({
+        title: `Running ${queue.length} blueprints in sequence`,
+        description: "Each blueprint will start automatically when the previous one finishes.",
+      });
+    } else {
       toast({
         title: "Job running in background",
         description: "You can close this tab or switch apps — the job will keep running on the server.",
       });
-    } catch (err: any) {
-      setIsRunningAll(false);
-      toast({ title: "Failed to start job", description: err.message, variant: "destructive" });
     }
   }
 
@@ -347,7 +391,19 @@ export default function BulkGeneratorPage() {
                         ))}
                       </div>
                     )}
-                    {!selectedWebsite?.settings?.defaultBlueprintId && (
+                    {blueprints.length > 1 && (
+                      <label className="flex items-center gap-2.5 cursor-pointer w-fit mt-1" data-testid="label-cycle-blueprints">
+                        <Checkbox
+                          checked={cycleBlueprints}
+                          onCheckedChange={v => setCycleBlueprints(!!v)}
+                          data-testid="checkbox-cycle-blueprints"
+                        />
+                        <Repeat2 className="size-3.5 text-muted-foreground" />
+                        <span className="text-sm">Run all {blueprints.length} blueprints in sequence</span>
+                        <span className="text-xs text-muted-foreground">(auto-advances to next when each job finishes)</span>
+                      </label>
+                    )}
+                    {!selectedWebsite?.settings?.defaultBlueprintId && !cycleBlueprints && (
                       <p className="text-xs text-muted-foreground">Tip: Set a default blueprint in Website Settings so it's always pre-selected.</p>
                     )}
                   </div>
@@ -569,8 +625,26 @@ export default function BulkGeneratorPage() {
                 {isRunningAll && activeJobId && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <Loader2 className="size-3 animate-spin" />
-                    Running on server — you can close this tab or switch apps and come back later. Progress updates every 2 s.
+                    {bpQueueDisplay.total > 1
+                      ? `Blueprint ${bpQueueDisplay.idx + 1} of ${bpQueueDisplay.total}: ${blueprints[bpQueueDisplay.idx]?.name ?? "…"} — next will start automatically.`
+                      : "Running on server — you can close this tab or switch apps and come back later. Progress updates every 2 s."}
                   </p>
+                )}
+                {isRunningAll && bpQueueDisplay.total > 1 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {blueprints.map((bp: any, i: number) => (
+                      <span key={bp.id} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${
+                        i < bpQueueDisplay.idx ? "bg-green-50 border-green-200 text-green-700" :
+                        i === bpQueueDisplay.idx ? "bg-primary/10 border-primary text-primary font-medium" :
+                        "bg-muted border-border text-muted-foreground"
+                      }`}>
+                        {i < bpQueueDisplay.idx && <CheckCircle2 className="size-3" />}
+                        {i === bpQueueDisplay.idx && <Loader2 className="size-3 animate-spin" />}
+                        {i > bpQueueDisplay.idx && <span className="size-3 flex items-center justify-center text-[10px] font-bold">{i + 1}</span>}
+                        {bp.name}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
 
