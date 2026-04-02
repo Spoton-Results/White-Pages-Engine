@@ -71,23 +71,30 @@ app.use((req, res, next) => {
     console.error("Seeding failed (non-fatal):", err);
   }
 
+  // Sync ALL website published-page counters on every startup.
+  // Background jobs may have inserted pages without updating the counter
+  // (e.g. cancelled mid-run, killed by a redeploy). This one-time pass
+  // ensures the UI always shows the real count after any restart.
+  try {
+    const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
+    const allWebsites = await getWebsites();
+    if (allWebsites.length > 0) {
+      console.log(`[startup] Syncing published-page counts for ${allWebsites.length} website(s)...`);
+      await Promise.all(allWebsites.map(w => syncWebsitePublishedCount(w.id).catch(() => {})));
+      console.log("[startup] Page count sync complete.");
+    }
+  } catch (err) {
+    console.error("[startup] Page count sync failed (non-fatal):", err);
+  }
+
   // Resume any bulk background jobs that were interrupted by a server restart
   try {
-    const { getStaleRunningJobs, updateGenerationJob, syncWebsitePublishedCount } = await import("./storage");
+    const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
     const { runBulkBackgroundJob } = await import("./services/bulk-background");
     const stale = await getStaleRunningJobs();
     const bulkJobs = stale.filter(j => Array.isArray((j.settings as any)?.services));
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
-      // Sync page counts first — interrupted jobs may have inserted pages without
-      // updating the counter, so the UI shows a stale lower number.
-      const syncedWebsites = new Set<string>();
-      for (const j of bulkJobs) {
-        if (j.websiteId && !syncedWebsites.has(j.websiteId)) {
-          await syncWebsitePublishedCount(j.websiteId).catch(() => {});
-          syncedWebsites.add(j.websiteId);
-        }
-      }
       for (const j of bulkJobs) {
         await updateGenerationJob(j.id, { status: "pending", startedAt: null });
         setImmediate(() => {
