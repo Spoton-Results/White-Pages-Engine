@@ -31,7 +31,7 @@ export default function WebsitesPage() {
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<any>();
 
-  const { data: websites = [], isLoading } = useQuery({
+  const { data: websites = [], isLoading, isFetching: websitesFetching } = useQuery({
     queryKey: ["/api/websites", accountIdFilter],
     queryFn: () => api.get<any[]>(`/api/websites${accountIdFilter ? `?accountId=${accountIdFilter}` : ""}`),
   });
@@ -137,8 +137,8 @@ export default function WebsitesPage() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Search domains..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-websites" />
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/websites"] })} data-testid="button-refresh-websites">
-            <RefreshCw className="size-4" />
+          <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/websites", accountIdFilter] })} disabled={websitesFetching} data-testid="button-refresh-websites">
+            <RefreshCw className={`size-4 ${websitesFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
 

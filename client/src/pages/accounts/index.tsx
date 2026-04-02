@@ -27,7 +27,7 @@ export default function AccountsPage() {
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue } = useForm<any>();
 
-  const { data: accounts = [], isLoading } = useQuery({
+  const { data: accounts = [], isLoading, isFetching: accountsFetching } = useQuery({
     queryKey: ["/api/accounts"],
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
@@ -118,8 +118,8 @@ export default function AccountsPage() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Search accounts..." className="pl-9 h-9" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/accounts"] })}>
-            <RefreshCw className="size-4" />
+          <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/accounts"] })} disabled={accountsFetching}>
+            <RefreshCw className={`size-4 ${accountsFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
 

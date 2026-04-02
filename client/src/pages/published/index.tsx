@@ -36,7 +36,7 @@ export default function PublishedPagesPage() {
 
   const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
-  const { data: pagesData, isLoading } = useQuery({
+  const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
     queryKey: ["/api/pages/published", selectedWebsite],
     queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=published&limit=200`) : Promise.resolve({ pages: [], total: 0 }),
     enabled: !!selectedWebsite,
@@ -136,8 +136,8 @@ export default function PublishedPagesPage() {
                 {publishAll.isPending ? "Publishing…" : `Publish All (${reviewData.total})`}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/published"] })}>
-              <RefreshCw className="size-4 mr-2" />Refresh
+            <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/pages/published", selectedWebsite] })} disabled={pagesFetching}>
+              <RefreshCw className={`size-4 mr-2 ${pagesFetching ? "animate-spin" : ""}`} />Refresh
             </Button>
           </div>
         </div>

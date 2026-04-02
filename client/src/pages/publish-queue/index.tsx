@@ -22,7 +22,7 @@ export default function PublishQueuePage() {
 
   const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
-  const { data: pagesData, isLoading } = useQuery({
+  const { data: pagesData, isLoading, isFetching: queueFetching } = useQuery({
     queryKey: ["/api/pages/approved", selectedWebsite],
     queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=approved`) : Promise.resolve({ pages: [], total: 0 }),
     enabled: !!selectedWebsite,
@@ -81,8 +81,8 @@ export default function PublishQueuePage() {
           {pagesData && (
             <span className="text-sm text-muted-foreground">{pagesData.total} pages approved</span>
           )}
-          <Button variant="ghost" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/approved"] })}>
-            <RefreshCw className="size-4" />
+          <Button variant="ghost" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/pages/approved", selectedWebsite] })} disabled={queueFetching}>
+            <RefreshCw className={`size-4 ${queueFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
 

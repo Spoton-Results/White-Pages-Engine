@@ -27,7 +27,7 @@ export default function DraftsPage() {
 
   const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
-  const { data: pagesData, isLoading } = useQuery({
+  const { data: pagesData, isLoading, isFetching: draftsFetching } = useQuery({
     queryKey: ["/api/pages/draft", selectedWebsite],
     queryFn: () => selectedWebsite
       ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=draft`)
@@ -135,8 +135,8 @@ export default function DraftsPage() {
                 </AlertDialog>
               </>
             )}
-            <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/draft"] })}>
-              <RefreshCw className="size-4 mr-2" />Refresh
+            <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/pages/draft", selectedWebsite] })} disabled={draftsFetching}>
+              <RefreshCw className={`size-4 mr-2 ${draftsFetching ? "animate-spin" : ""}`} />Refresh
             </Button>
           </div>
         </div>

@@ -44,7 +44,7 @@ export default function JobsPage() {
     });
   };
 
-  const { data: jobs = [], isLoading } = useQuery({
+  const { data: jobs = [], isLoading, isFetching: jobsFetching } = useQuery({
     queryKey: ["/api/jobs", websiteIdFilter],
     queryFn: () => api.get<any[]>("/api/jobs"),
     refetchInterval: 5000,
@@ -183,8 +183,8 @@ export default function JobsPage() {
             <p className="text-muted-foreground text-sm mt-0.5">Create and monitor AI page generation workflows.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/jobs"] })}>
-              <RefreshCw className="size-4 mr-2" />Refresh
+            <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/jobs"] })} disabled={jobsFetching}>
+              <RefreshCw className={`size-4 mr-2 ${jobsFetching ? "animate-spin" : ""}`} />Refresh
             </Button>
             <Button size="sm" className="gap-2" onClick={() => setShowCreate(true)} data-testid="button-new-job">
               <Plus className="size-4" />New Job
