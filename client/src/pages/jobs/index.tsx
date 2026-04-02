@@ -192,7 +192,7 @@ export default function JobsPage() {
           </div>
         </div>
 
-        {!systemStatus?.claudeConfigured && (
+        {systemStatus !== undefined && !systemStatus.claudeConfigured && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
