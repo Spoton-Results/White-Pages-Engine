@@ -81,11 +81,26 @@ export default function ServicesPage() {
     if (firstWebsiteId) setBankWebsiteId(firstWebsiteId);
   }, [firstWebsiteId]);
 
+  const [bgWrite, setBgWrite] = useState<{ total: number; websiteId: string } | null>(null);
+
   const bankServicesQ = useQuery<string[]>({
     queryKey: ["/api/websites", bankWebsiteId, "bank-services"],
     queryFn: () => api.get<string[]>(`/api/websites/${bankWebsiteId}/bank-services`),
     enabled: !!bankWebsiteId,
+    // Poll every 4 s while a background write is running for this website
+    refetchInterval: (bgWrite && bgWrite.websiteId === bankWebsiteId) ? 4000 : false,
   });
+
+  // Stop polling when all services are banked
+  const totalServices = (services as any[]).length;
+  const bankedCount = bankServicesQ.data?.length ?? 0;
+  useEffect(() => {
+    if (bgWrite && bgWrite.websiteId === bankWebsiteId && bankedCount >= totalServices && totalServices > 0) {
+      setBgWrite(null);
+      toast({ title: `All ${totalServices} banks written!`, description: "All services are ready to generate pages." });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+    }
+  }, [bankedCount, totalServices, bgWrite, bankWebsiteId]);
 
   const bankContextQ = useQuery<any>({
     queryKey: ["/api/websites", bankWebsiteId, "context"],
@@ -117,31 +132,17 @@ export default function ServicesPage() {
   });
 
   const writeAllUnbankedMut = useMutation({
-    mutationFn: async () => {
-      const unbanked = (services as any[]).filter((s: any) => !bankSet.has(s.name));
-      const failed: string[] = [];
-      for (const svc of unbanked) {
-        try {
-          await api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service: svc.name });
-        } catch {
-          failed.push(svc.name);
-        }
+    mutationFn: () => api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write-all`, {}),
+    onSuccess: (data: any) => {
+      if (data?.alreadyDone) {
+        toast({ title: "All banks already written", description: "Nothing to do — all services are ready." });
+        return;
       }
-      return { total: unbanked.length, failed };
-    },
-    onSuccess: ({ total, failed }) => {
-      const written = total - failed.length;
-      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
-      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
-      if (failed.length === 0) {
-        toast({ title: `All ${total} banks written!`, description: "All services are ready to generate pages." });
-      } else {
-        toast({
-          title: `${written} of ${total} banks written`,
-          description: `${failed.length} failed (${failed.join(", ")}) — click Write Bank on those individually to retry.`,
-          variant: failed.length === total ? "destructive" : "default",
-        });
-      }
+      setBgWrite({ total: data.total, websiteId: bankWebsiteId });
+      toast({
+        title: `Writing ${data.total} banks in the background`,
+        description: "You can keep using the app — this page will update automatically as banks complete.",
+      });
     },
     onError: (err: any) => toast({ title: "Write all failed", description: err.message, variant: "destructive" }),
   });
@@ -384,8 +385,28 @@ export default function ServicesPage() {
                       </div>
                     )}
 
+                    {/* Background write progress banner */}
+                    {bgWrite && bgWrite.websiteId === bankWebsiteId && (
+                      <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-blue-200 bg-blue-50">
+                        <div className="flex items-center justify-between text-xs text-blue-800">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <Loader2 className="size-3.5 animate-spin" />
+                            Writing banks in background…
+                          </span>
+                          <span>{bankedCount} of {totalServices} done</span>
+                        </div>
+                        <div className="w-full bg-blue-200 rounded-full h-1.5">
+                          <div
+                            className="bg-blue-600 h-1.5 rounded-full transition-all duration-700"
+                            style={{ width: `${totalServices > 0 ? Math.round((bankedCount / totalServices) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-blue-600">You can keep using the app — this updates automatically.</p>
+                      </div>
+                    )}
+
                     {/* Write All Unbanked button */}
-                    {(services as any[]).some((s: any) => !bankSet.has(s.name)) && (
+                    {!bgWrite && (services as any[]).some((s: any) => !bankSet.has(s.name)) && (
                       <div className="flex items-center gap-3">
                         <Button
                           size="sm"
@@ -395,7 +416,7 @@ export default function ServicesPage() {
                           data-testid="button-write-all-banks"
                         >
                           {writeAllUnbankedMut.isPending
-                            ? <><Loader2 className="size-4 animate-spin" /> Writing all...</>
+                            ? <><Loader2 className="size-4 animate-spin" /> Starting...</>
                             : <><BookOpen className="size-4" /> Write All Unbanked</>}
                         </Button>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -414,7 +435,7 @@ export default function ServicesPage() {
                       <div className="space-y-2">
                         {(services as any[]).map((svc: any) => {
                           const hasBanks = bankSet.has(svc.name);
-                          const isWriting = (writeBankMut.isPending || writeAllUnbankedMut.isPending) && writeBankMut.variables?.service === svc.name;
+                          const isWriting = writeBankMut.isPending && writeBankMut.variables?.service === svc.name;
                           return (
                             <div
                               key={svc.id}
@@ -437,7 +458,7 @@ export default function ServicesPage() {
                                 variant={hasBanks ? "ghost" : "default"}
                                 className={`shrink-0 gap-1.5 h-7 text-xs ${hasBanks ? "text-green-700 hover:text-green-900" : ""}`}
                                 onClick={() => writeBankMut.mutate({ service: svc.name })}
-                                disabled={writeBankMut.isPending || writeAllUnbankedMut.isPending}
+                                disabled={writeBankMut.isPending}
                                 data-testid={`button-bank-${svc.id}`}
                               >
                                 {isWriting

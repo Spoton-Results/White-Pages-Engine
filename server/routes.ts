@@ -1298,6 +1298,48 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ ok: true, context: { brand: ctx.brandName, industry: ctx.industryName } });
   });
 
+  // Background write-all: starts processing immediately, returns {started, total} without waiting
+  app.post("/api/websites/:id/variation-banks/write-all", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const [allServices, bankedNames, brand, industries] = await Promise.all([
+      storage.getServices(website.accountId),
+      storage.getVariationBankServices(websiteId),
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+
+    const bankedSet = new Set(bankedNames);
+    const unbanked = allServices.filter(s => !bankedSet.has(s.name));
+    if (unbanked.length === 0) return res.json({ started: false, total: 0, alreadyDone: true });
+
+    const industry = industries[0];
+    const ctx: BrandContext = {
+      brandName: brand?.name,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: industry?.description ?? undefined,
+    };
+
+    // Respond immediately — processing continues in the background
+    res.json({ started: true, total: unbanked.length });
+
+    (async () => {
+      for (const svc of unbanked) {
+        try {
+          await storage.deleteVariationBanks(websiteId, svc.name);
+          await writeVariationsForService(svc.name, website.accountId, websiteId, ctx);
+        } catch (err: any) {
+          console.error(`[write-all] Failed for "${svc.name}": ${err?.message ?? err}`);
+        }
+      }
+      console.log(`[write-all] Completed for website ${websiteId}: ${unbanked.length} services`);
+    })().catch(err => console.error("[write-all] Unexpected error:", err));
+  });
+
   app.post("/api/websites/:id/bulk-generate", requireAuth, async (req: Request, res: Response) => {
     const schema = z.object({
       service: z.string().min(1),
