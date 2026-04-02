@@ -107,13 +107,18 @@ export default function BlueprintsPage() {
 
   // Auto-generate: pull context from brand/services and skip the wizard
   function handleAutoGenerate() {
-    const brandName = (brandProfiles as any[])[0]?.name || "";
-    const svcList = (services as any[]).map((s: any) => s.name).join(", ");
-    const industryGuess = svcList || brandName || "Business services";
+    const brandName = (brandProfiles as any[])[0]?.name?.trim() || "";
+    const svcNames = (services as any[]).map((s: any) => s.name);
+    const firstService = svcNames[0] || "";
+    // Build a human-readable industry label, not a raw comma list
+    const industryGuess = aiForm.industry.trim()
+      || (svcNames.length > 0 ? `${svcNames[0]} and related merchant services` : "")
+      || brandName
+      || "Merchant services";
     const payload = {
       businessName: brandName || aiForm.businessName,
       industry: industryGuess,
-      serviceName: (services as any[])[0]?.name || "",
+      serviceName: firstService,
       pageType: aiForm.pageType,
       extraContext: aiForm.extraContext,
     };

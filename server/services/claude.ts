@@ -359,7 +359,7 @@ Generate a complete SEO-optimized blueprint for this page type.
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
-  "name": "<descriptive blueprint name>",
+  "name": "<short blueprint name describing the page type and service, e.g. 'Credit Card Processing — Service + City' or 'Merchant Services State Hub'>",
   "pageType": "${pageType}",
   "titleTemplate": "<SEO title using template vars, max 60 chars when rendered>",
   "metaDescTemplate": "<compelling meta description using template vars, max 160 chars when rendered>",
