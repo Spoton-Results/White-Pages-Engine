@@ -190,15 +190,20 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     const flushInsertBatch = async () => {
       if (pendingPageData.length === 0) return;
-      const created = await storage.createPagesBatch(pendingPageData);
-      await storage.createPageVersionsBatch(
-        created.map((p, i) => ({ pageId: p.id, version: 1, contentHtml: pendingContent[i], isActive: true }))
-      );
-      const n = created.length;
-      svcCreated += n;
-      totalCreated += n;
-      pendingPageData.length = 0;
-      pendingContent.length = 0;
+      // Snapshot and clear the batch BEFORE the insert so a failure never
+      // leaves stale data that causes infinite retry loops.
+      const batchData = pendingPageData.splice(0);
+      const batchContent = pendingContent.splice(0);
+      const slugToContent = new Map<string, string>();
+      batchData.forEach((d, i) => slugToContent.set(d.slug, batchContent[i]));
+      const created = await storage.createPagesBatch(batchData); // onConflictDoNothing
+      if (created.length > 0) {
+        await storage.createPageVersionsBatch(
+          created.map(p => ({ pageId: p.id, version: 1, contentHtml: slugToContent.get(p.slug) ?? "", isActive: true }))
+        );
+        svcCreated += created.length;
+        totalCreated += created.length;
+      }
     };
 
     for (const t of targets) {

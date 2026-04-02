@@ -421,7 +421,7 @@ export async function createPageVersion(data: InsertPageVersion): Promise<PageVe
 
 export async function createPagesBatch(data: InsertPage[]): Promise<Page[]> {
   if (data.length === 0) return [];
-  return db.insert(pages).values(data).returning();
+  return db.insert(pages).values(data).onConflictDoNothing().returning();
 }
 
 export async function createPageVersionsBatch(data: InsertPageVersion[]): Promise<void> {
