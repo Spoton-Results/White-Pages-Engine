@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +36,8 @@ export default function BulkGeneratorPage() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
+  const lastCityIdx = useRef<number | null>(null);
+  const lastStateIdx = useRef<number | null>(null);
   const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
   const [activeJobId, setActiveJobId] = useState<string>("");
 
@@ -127,13 +129,17 @@ export default function BulkGeneratorPage() {
     });
   }, [allLocations]);
 
-  const filteredStates = useMemo(() =>
-    dbStates.filter((l: any) => !stateSearch || l.name.toLowerCase().includes(stateSearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(stateSearch.toLowerCase())),
-    [dbStates, stateSearch]);
+  const filteredStates = useMemo(() => {
+    lastStateIdx.current = null;
+    const f = dbStates.filter((l: any) => !stateSearch || l.name.toLowerCase().includes(stateSearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(stateSearch.toLowerCase()));
+    return [...f].sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [dbStates, stateSearch]);
 
-  const filteredCities = useMemo(() =>
-    dbCities.filter((l: any) => !citySearch || l.name.toLowerCase().includes(citySearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(citySearch.toLowerCase())),
-    [dbCities, citySearch]);
+  const filteredCities = useMemo(() => {
+    lastCityIdx.current = null;
+    const f = dbCities.filter((l: any) => !citySearch || l.name.toLowerCase().includes(citySearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(citySearch.toLowerCase()));
+    return [...f].sort((a: any, b: any) => a.name.localeCompare(b.name) || a.stateCode?.localeCompare(b.stateCode));
+  }, [dbCities, citySearch]);
 
   // Auto-select default blueprint when website changes
   useEffect(() => {
@@ -200,11 +206,44 @@ export default function BulkGeneratorPage() {
   const allStatesSelected = filteredStates.length > 0 && filteredStates.every((l: any) => selectedStateCodes.has(l.stateCode));
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every((l: any) => selectedCitySlugs.has(l.slug));
 
-  function toggleState(code: string) {
-    setSelectedStateCodes(prev => { const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n; });
+  function handleCityClick(e: React.MouseEvent, idx: number, slug: string) {
+    e.preventDefault();
+    setSelectedCitySlugs(prev => {
+      const n = new Set(prev);
+      if (e.shiftKey && lastCityIdx.current !== null) {
+        const lo = Math.min(lastCityIdx.current, idx);
+        const hi = Math.max(lastCityIdx.current, idx);
+        const selecting = !prev.has(slug);
+        for (let i = lo; i <= hi; i++) {
+          const s = filteredCities[i]?.slug;
+          if (s) selecting ? n.add(s) : n.delete(s);
+        }
+      } else {
+        n.has(slug) ? n.delete(slug) : n.add(slug);
+      }
+      lastCityIdx.current = idx;
+      return n;
+    });
   }
-  function toggleCity(slug: string) {
-    setSelectedCitySlugs(prev => { const n = new Set(prev); n.has(slug) ? n.delete(slug) : n.add(slug); return n; });
+
+  function handleStateClick(e: React.MouseEvent, idx: number, code: string) {
+    e.preventDefault();
+    setSelectedStateCodes(prev => {
+      const n = new Set(prev);
+      if (e.shiftKey && lastStateIdx.current !== null) {
+        const lo = Math.min(lastStateIdx.current, idx);
+        const hi = Math.max(lastStateIdx.current, idx);
+        const selecting = !prev.has(code);
+        for (let i = lo; i <= hi; i++) {
+          const c = filteredStates[i]?.stateCode;
+          if (c) selecting ? n.add(c) : n.delete(c);
+        }
+      } else {
+        n.has(code) ? n.delete(code) : n.add(code);
+      }
+      lastStateIdx.current = idx;
+      return n;
+    });
   }
   function selectAllStates() {
     setSelectedStateCodes(prev => {
@@ -419,11 +458,11 @@ export default function BulkGeneratorPage() {
                       </div>
                       <ScrollArea className="h-52 border rounded-md p-2">
                         <div className="grid grid-cols-2 gap-1">
-                          {filteredStates.map((loc: any) => (
-                            <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-state-${loc.stateCode}`}>
+                          {filteredStates.map((loc: any, idx: number) => (
+                            <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-state-${loc.stateCode}`}
+                              onClick={e => handleStateClick(e, idx, loc.stateCode)}>
                               <Checkbox
                                 checked={selectedStateCodes.has(loc.stateCode)}
-                                onCheckedChange={() => toggleState(loc.stateCode)}
                                 data-testid={`checkbox-state-${loc.stateCode}`}
                               />
                               <span className="text-sm font-medium">{loc.name}</span>
@@ -456,11 +495,11 @@ export default function BulkGeneratorPage() {
                       </div>
                       <ScrollArea className="h-64 border rounded-md p-2">
                         <div className="space-y-0.5">
-                          {filteredCities.map((loc: any) => (
-                            <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-city-${loc.slug}`}>
+                          {filteredCities.map((loc: any, idx: number) => (
+                            <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-city-${loc.slug}`}
+                              onClick={e => handleCityClick(e, idx, loc.slug)}>
                               <Checkbox
                                 checked={selectedCitySlugs.has(loc.slug)}
-                                onCheckedChange={() => toggleCity(loc.slug)}
                                 data-testid={`checkbox-city-${loc.slug}`}
                               />
                               <span className="text-sm font-medium">{loc.name}</span>
@@ -475,7 +514,7 @@ export default function BulkGeneratorPage() {
                           )}
                         </div>
                       </ScrollArea>
-                      <p className="text-xs text-muted-foreground">{selectedCitySlugs.size} of {dbCities.length} cities selected</p>
+                      <p className="text-xs text-muted-foreground">{selectedCitySlugs.size} of {dbCities.length} cities selected &nbsp;·&nbsp; Shift-click to select a range</p>
                     </>
                   )}
                 </div>
