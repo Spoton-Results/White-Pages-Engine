@@ -963,10 +963,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/jobs/:id/cancel", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.id as string);
     const updated = await storage.updateGenerationJob((req.params.id as string), {
       status: "cancelled",
       completedAt: new Date(),
     });
+    // Sync the published-pages counter so the UI reflects pages already created
+    // before the cancel — without this the counter stays stale and new jobs
+    // appear to skip everything even though pages really do exist in the DB.
+    if (job?.websiteId) {
+      await storage.syncWebsitePublishedCount(job.websiteId).catch(() => {});
+    }
     return res.json(updated);
   });
 
