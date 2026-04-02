@@ -419,6 +419,16 @@ export async function createPageVersion(data: InsertPageVersion): Promise<PageVe
   return row;
 }
 
+export async function createPagesBatch(data: InsertPage[]): Promise<Page[]> {
+  if (data.length === 0) return [];
+  return db.insert(pages).values(data).returning();
+}
+
+export async function createPageVersionsBatch(data: InsertPageVersion[]): Promise<void> {
+  if (data.length === 0) return;
+  await db.insert(pageVersions).values(data);
+}
+
 export async function setActivePageVersion(pageId: string, versionId: string): Promise<void> {
   await db.update(pageVersions).set({ isActive: false }).where(eq(pageVersions.pageId, pageId));
   await db.update(pageVersions).set({ isActive: true }).where(eq(pageVersions.id, versionId));

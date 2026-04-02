@@ -11,7 +11,8 @@
 import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
 
-const PAGE_BATCH_SIZE = 50; // flush job counters to DB every N pages
+const INSERT_BATCH_SIZE = 500; // pages per bulk INSERT statement
+const PAGE_BATCH_SIZE = 500;  // flush job counters to DB every N pages
 
 export interface BulkJobSettings {
   services: string[];
@@ -145,6 +146,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     slugTemplate: blueprint.slugTemplate,
   } : null;
 
+  // ── Load slug set ONCE for the entire job (not once per service) ─────────────
+  const existingSlugSet = await storage.getPageSlugSet(job.websiteId);
+
   // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
     const svc = services[si];
@@ -178,10 +182,24 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     let svcCreated = 0, svcUpdated = 0, svcSkipped = 0, svcErrors = 0;
 
-    // ── Pre-load all existing slugs for this website (one query, not one per page)
-    const existingSlugSet = await storage.getPageSlugSet(job.websiteId);
+    // Pending batch for bulk inserts (new pages only)
+    const pendingPageData: Parameters<typeof storage.createPage>[0][] = [];
+    const pendingContent: string[] = [];
 
     let pagesSinceLastFlush = 0;
+
+    const flushInsertBatch = async () => {
+      if (pendingPageData.length === 0) return;
+      const created = await storage.createPagesBatch(pendingPageData);
+      await storage.createPageVersionsBatch(
+        created.map((p, i) => ({ pageId: p.id, version: 1, contentHtml: pendingContent[i], isActive: true }))
+      );
+      const n = created.length;
+      svcCreated += n;
+      totalCreated += n;
+      pendingPageData.length = 0;
+      pendingContent.length = 0;
+    };
 
     for (const t of targets) {
       try {
@@ -206,7 +224,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             svcSkipped++;
             totalSkipped++;
           } else {
-            // Overwrite: fetch existing page record to get its id, then update
+            // Flush pending batch before overwrite ops (need consistent state)
+            await flushInsertBatch();
             const existingPage = await storage.getPageBySlug(job.websiteId, finalSlug);
             if (existingPage) {
               await storage.updatePage(existingPage.id, {
@@ -222,18 +241,20 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             totalUpdated++;
           }
         } else {
-          const page = await storage.createPage({
+          // Mark slug used immediately so within-batch duplicates are caught
+          existingSlugSet.add(finalSlug);
+          pendingPageData.push({
             websiteId: job.websiteId, blueprintId: effectiveBlueprintId || null,
             serviceId: svcId || null, locationId: null, queryClusterId: svcCluster?.id || null,
             slug: finalSlug, title: finalTitle, h1: finalH1, metaDescription: finalMeta,
             status: "published", pageType: t.locationType === "state" ? "state_hub" : "service_city",
             wordCount: result.wordCount,
           });
-          const pv = await storage.createPageVersion({ pageId: page.id, version: 1, contentHtml: result.contentHtml, isActive: true });
-          await storage.setActivePageVersion(page.id, pv.id);
-          existingSlugSet.add(finalSlug); // keep set in sync so we don't try to create it again
-          svcCreated++;
-          totalCreated++;
+          pendingContent.push(result.contentHtml);
+
+          if (pendingPageData.length >= INSERT_BATCH_SIZE) {
+            await flushInsertBatch();
+          }
         }
       } catch (err) {
         svcErrors++;
@@ -241,7 +262,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         console.error("[bulk-background] error", svc, t.locationName, err);
       }
 
-      // Flush counters to DB every PAGE_BATCH_SIZE pages instead of every page
+      // Flush progress counters to DB every PAGE_BATCH_SIZE pages
       pagesSinceLastFlush++;
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
@@ -253,7 +274,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       }
     }
 
-    // Flush after service finishes
+    // Flush remaining pages in batch before marking service done
+    await flushInsertBatch();
+
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
     await storage.updateGenerationJob(jobId, {
       settings: settings as any,
@@ -274,7 +297,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   });
 
   try {
-    const { generateSitemap } = await import("./sitemap");
-    await generateSitemap(job.websiteId);
+    const { generateSitemapsForWebsite } = await import("./sitemap");
+    await generateSitemapsForWebsite(job.websiteId, website.domain);
   } catch { /* non-critical */ }
 }
