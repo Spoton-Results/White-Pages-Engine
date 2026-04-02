@@ -42,22 +42,19 @@ function escapeXml(str: string): string {
 }
 
 export async function generateSitemapsForWebsite(websiteId: string, domain: string): Promise<string[]> {
-  const publishedPages = await storage.getPages(websiteId, { status: "published", limit: 200000 });
-
   const baseUrl = `https://${domain}`;
   const sitemapKeys: string[] = [];
-
-  // Chunk into segments
-  const chunks: typeof publishedPages[] = [];
-  for (let i = 0; i < publishedPages.length; i += URLS_PER_SITEMAP) {
-    chunks.push(publishedPages.slice(i, i + URLS_PER_SITEMAP));
-  }
-
   const today = new Date().toISOString().split("T")[0];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    const slug = `sitemap-${i + 1}`;
+  // Stream pages in URLS_PER_SITEMAP-sized chunks to avoid loading 200K+ rows at once
+  let chunkIndex = 0;
+  let offset = 0;
+
+  while (true) {
+    const chunk = await storage.getPages(websiteId, { status: "published", limit: URLS_PER_SITEMAP, offset });
+    if (chunk.length === 0) break;
+
+    const slug = `sitemap-${chunkIndex + 1}`;
     const urls = chunk.map((p) => ({
       loc: `${baseUrl}/${p.slug}`,
       lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
@@ -71,19 +68,24 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
       try {
         await saveSitemap(websiteId, slug, xml);
         sitemapKeys.push(key);
-      } catch {
+      } catch (err) {
+        console.error(`[sitemap] R2 upload failed for ${slug}:`, err);
         sitemapKeys.push(key);
       }
     }
 
     await storage.upsertSitemap({
       websiteId,
-      name: `Sitemap ${i + 1}`,
+      name: `Sitemap ${chunkIndex + 1}`,
       slug,
       urlCount: urls.length,
       r2Key: key,
       lastGenerated: new Date(),
     });
+
+    if (chunk.length < URLS_PER_SITEMAP) break;
+    offset += URLS_PER_SITEMAP;
+    chunkIndex++;
   }
 
   // Build sitemap index

@@ -1516,7 +1516,20 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
   // ── Contact Form (public) ─────────────────────────────────────────────────
 
+  // Simple in-memory rate limiter: max 5 submissions per IP per 10 minutes
+  const contactRateMap = new Map<string, number[]>();
+  const CONTACT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+  const CONTACT_MAX_REQS = 5;
+
   app.post("/api/public/contact", async (req: Request, res: Response) => {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    const timestamps = (contactRateMap.get(ip) || []).filter(t => now - t < CONTACT_WINDOW_MS);
+    if (timestamps.length >= CONTACT_MAX_REQS) {
+      return res.status(429).json({ success: false, message: "Too many submissions. Please try again later." });
+    }
+    timestamps.push(now);
+    contactRateMap.set(ip, timestamps);
     try {
       const schema = z.object({
         websiteId: z.string().uuid(),

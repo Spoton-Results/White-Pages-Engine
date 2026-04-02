@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +31,10 @@ export default function JobsPage() {
   const [locFilter, setLocFilter] = useState("");
   const [locTypeFilter, setLocTypeFilter] = useState<"all" | "state" | "city">("state");
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  // Guards so auto-select fires once per dialog session and never overrides explicit user edits
+  const didAutoSelectServices = useRef(false);
+  const didAutoSelectLocations = useRef(false);
 
   const toggleErrors = (jobId: string) => {
     setExpandedErrors(prev => {
@@ -105,16 +109,18 @@ export default function JobsPage() {
     }
   }, [blueprints.length]);
 
-  // ── Auto-select ALL services when they load ─────────────────────
+  // ── Auto-select ALL services when they load (once per dialog session) ──────
   useEffect(() => {
-    if (services.length > 0 && form.serviceIds.length === 0) {
+    if (services.length > 0 && !didAutoSelectServices.current) {
+      didAutoSelectServices.current = true;
       setForm(p => ({ ...p, serviceIds: services.map((s: any) => s.id) }));
     }
   }, [services.length]);
 
-  // ── Auto-select all STATES when locations load ──────────────────
+  // ── Auto-select all STATES when locations load (once per dialog session) ────
   useEffect(() => {
-    if (locations.length > 0 && form.locationIds.length === 0) {
+    if (locations.length > 0 && !didAutoSelectLocations.current) {
+      didAutoSelectLocations.current = true;
       const stateIds = locations.filter((l: any) => l.type === "state").map((l: any) => l.id);
       setForm(p => ({ ...p, locationIds: stateIds }));
     }
@@ -280,7 +286,7 @@ export default function JobsPage() {
         )}
       </div>
 
-      <Dialog open={showCreate} onOpenChange={open => { setShowCreate(open); if (!open) { setForm({ ...emptyForm }); setLocFilter(""); setLocTypeFilter("state"); } }}>
+      <Dialog open={showCreate} onOpenChange={open => { setShowCreate(open); if (!open) { setForm({ ...emptyForm }); setLocFilter(""); setLocTypeFilter("state"); didAutoSelectServices.current = false; didAutoSelectLocations.current = false; } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Generation Job</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -294,7 +300,7 @@ export default function JobsPage() {
                   <span>{accounts[0].name}</span>
                 </div>
               ) : (
-                <Select value={form.accountId} onValueChange={v => setForm({ ...emptyForm, accountId: v })}>
+                <Select value={form.accountId} onValueChange={v => { didAutoSelectServices.current = false; didAutoSelectLocations.current = false; setForm({ ...emptyForm, accountId: v }); }}>
                   <SelectTrigger data-testid="select-account"><SelectValue placeholder="Select account" /></SelectTrigger>
                   <SelectContent>
                     {accounts.map((a: any) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}

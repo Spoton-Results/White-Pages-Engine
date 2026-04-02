@@ -4,24 +4,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Users, Globe, FileText, ArrowUpRight, Activity, Zap, Building2, 
-  CheckCircle, AlertCircle, BarChart3
-} from "lucide-react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { Globe, FileText, Activity, Zap, Building2, CheckCircle, AlertCircle, BarChart3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Link } from "wouter";
-import { format } from "date-fns";
-
-const sparkData = [
-  { name: "Jan", pages: 0 },
-  { name: "Feb", pages: 0 },
-  { name: "Mar", pages: 0 },
-  { name: "Apr", pages: 0 },
-  { name: "May", pages: 0 },
-  { name: "Jun", pages: 0 },
-  { name: "Jul", pages: 0 },
-];
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery({
