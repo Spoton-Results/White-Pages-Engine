@@ -91,12 +91,12 @@ export default function BlueprintsPage() {
   useEffect(() => {
     if (accounts.length > 0 && selectedAccount) {
       const acc = accounts.find((a: any) => a.id === selectedAccount);
-      if (acc) setAiForm(p => ({ ...p, industry: acc.name ? "" : p.industry }));
+      if (acc) setAiForm(p => ({ ...p, industry: p.industry || acc.name || "" }));
     }
   }, [selectedAccount]);
 
   const generateMutation = useMutation({
-    mutationFn: () => api.post<any>("/api/ai/generate-blueprint", aiForm),
+    mutationFn: (payload: typeof aiForm) => api.post<any>("/api/ai/generate-blueprint", payload),
     onSuccess: (data) => {
       setGeneratedBlueprint(data);
       setShowCreate(false);
@@ -104,6 +104,22 @@ export default function BlueprintsPage() {
     },
     onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
   });
+
+  // Auto-generate: pull context from brand/services and skip the wizard
+  function handleAutoGenerate() {
+    const brandName = (brandProfiles as any[])[0]?.name || "";
+    const svcList = (services as any[]).map((s: any) => s.name).join(", ");
+    const industryGuess = svcList || brandName || "Business services";
+    const payload = {
+      businessName: brandName || aiForm.businessName,
+      industry: industryGuess,
+      serviceName: (services as any[])[0]?.name || "",
+      pageType: aiForm.pageType,
+      extraContext: aiForm.extraContext,
+    };
+    setAiForm(payload);
+    generateMutation.mutate(payload);
+  }
 
   const accountWebsites = websites.filter((w: any) => w.accountId === selectedAccount);
 
@@ -138,8 +154,15 @@ export default function BlueprintsPage() {
             <p className="text-muted-foreground text-sm mt-0.5">AI-generated page templates — define once, generate thousands.</p>
           </div>
           {selectedAccount && (
-            <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-new-blueprint">
-              <Sparkles className="size-4" />Generate with AI
+            <Button
+              className="gap-2"
+              size="sm"
+              onClick={handleAutoGenerate}
+              disabled={generateMutation.isPending}
+              data-testid="button-new-blueprint"
+            >
+              <Sparkles className="size-4" />
+              {generateMutation.isPending ? "Generating…" : "Generate with AI"}
             </Button>
           )}
         </div>
@@ -180,8 +203,9 @@ export default function BlueprintsPage() {
                 Click "Generate with AI" and describe your page type — Claude will build the full template automatically.
               </p>
             </div>
-            <Button onClick={() => setShowCreate(true)} className="gap-2">
-              <Sparkles className="size-4" />Generate with AI
+            <Button onClick={handleAutoGenerate} disabled={generateMutation.isPending} className="gap-2">
+              <Sparkles className="size-4" />
+              {generateMutation.isPending ? "Generating…" : "Generate with AI"}
             </Button>
           </div>
         ) : (
@@ -341,7 +365,7 @@ export default function BlueprintsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button
-              onClick={() => generateMutation.mutate()}
+              onClick={() => generateMutation.mutate(aiForm)}
               disabled={generateMutation.isPending || !aiForm.businessName || !aiForm.industry}
               className="gap-2"
               data-testid="button-generate-blueprint"
