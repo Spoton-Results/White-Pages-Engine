@@ -190,7 +190,8 @@ export async function writeVariationsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<void> {
-  for (const section of SECTIONS) {
+  // Fire all 5 section prompts in parallel — they're fully independent
+  await Promise.all(SECTIONS.map(async (section) => {
     const prompt = SECTION_PROMPTS[section](serviceName, ctx);
 
     const message = await client.messages.create({
@@ -213,5 +214,5 @@ export async function writeVariationsForService(
       sectionName: section,
       variations,
     });
-  }
+  }));
 }

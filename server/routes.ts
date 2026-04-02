@@ -1328,13 +1328,18 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     res.json({ started: true, total: unbanked.length });
 
     (async () => {
-      for (const svc of unbanked) {
-        try {
-          await storage.deleteVariationBanks(websiteId, svc.name);
-          await writeVariationsForService(svc.name, website.accountId, websiteId, ctx);
-        } catch (err: any) {
-          console.error(`[write-all] Failed for "${svc.name}": ${err?.message ?? err}`);
-        }
+      // Process 3 services at a time — each service already parallelises its 5 section calls internally
+      const CONCURRENCY = 3;
+      for (let i = 0; i < unbanked.length; i += CONCURRENCY) {
+        const batch = unbanked.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async (svc) => {
+          try {
+            await storage.deleteVariationBanks(websiteId, svc.name);
+            await writeVariationsForService(svc.name, website.accountId, websiteId, ctx);
+          } catch (err: any) {
+            console.error(`[write-all] Failed for "${svc.name}": ${err?.message ?? err}`);
+          }
+        }));
       }
       console.log(`[write-all] Completed for website ${websiteId}: ${unbanked.length} services`);
     })().catch(err => console.error("[write-all] Unexpected error:", err));
