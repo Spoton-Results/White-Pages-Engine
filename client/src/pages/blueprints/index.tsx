@@ -40,14 +40,28 @@ export default function BlueprintsPage() {
   const [generatedBlueprint, setGeneratedBlueprint] = useState<any>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // AI form state
-  const [aiForm, setAiForm] = useState({
-    businessName: "",
-    industry: "",
-    serviceName: "",
-    pageType: "service_city",
-    extraContext: "",
+  const LS_KEY = "nexus_blueprint_wizard";
+
+  // AI form state — seed from localStorage so Extra Instructions are remembered
+  const [aiForm, setAiForm] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+      return {
+        businessName: saved.businessName || "",
+        industry: saved.industry || "",
+        serviceName: saved.serviceName || "",
+        pageType: saved.pageType || "service_city",
+        extraContext: saved.extraContext || "",
+      };
+    } catch {
+      return { businessName: "", industry: "", serviceName: "", pageType: "service_city", extraContext: "" };
+    }
   });
+
+  // Persist wizard fields to localStorage whenever they change
+  useEffect(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(aiForm)); } catch {}
+  }, [aiForm]);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -83,11 +97,12 @@ export default function BlueprintsPage() {
   // Stable primitive dep — avoids infinite loop from new [] refs on every render
   const firstBrandName = (brandProfiles as any[])[0]?.name ?? "";
 
-  // Pre-fill AI form from brand profile
+  // Pre-fill businessName from brand profile (only if not already set)
   useEffect(() => {
-    if (firstBrandName) setAiForm(p => ({ ...p, businessName: firstBrandName || p.businessName }));
+    if (firstBrandName) setAiForm(p => ({ ...p, businessName: p.businessName || firstBrandName }));
   }, [firstBrandName]);
 
+  // Pre-fill industry from account name (only if not already set by user)
   useEffect(() => {
     if (accounts.length > 0 && selectedAccount) {
       const acc = accounts.find((a: any) => a.id === selectedAccount);
@@ -104,27 +119,6 @@ export default function BlueprintsPage() {
     },
     onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
   });
-
-  // Auto-generate: pull context from brand/services and skip the wizard
-  function handleAutoGenerate() {
-    const brandName = (brandProfiles as any[])[0]?.name?.trim() || "";
-    const svcNames = (services as any[]).map((s: any) => s.name);
-    const firstService = svcNames[0] || "";
-    // Build a human-readable industry label, not a raw comma list
-    const industryGuess = aiForm.industry.trim()
-      || (svcNames.length > 0 ? `${svcNames[0]} and related merchant services` : "")
-      || brandName
-      || "Merchant services";
-    const payload = {
-      businessName: brandName || aiForm.businessName,
-      industry: industryGuess,
-      serviceName: firstService,
-      pageType: aiForm.pageType,
-      extraContext: aiForm.extraContext,
-    };
-    setAiForm(payload);
-    generateMutation.mutate(payload);
-  }
 
   const accountWebsites = websites.filter((w: any) => w.accountId === selectedAccount);
 
@@ -162,12 +156,10 @@ export default function BlueprintsPage() {
             <Button
               className="gap-2"
               size="sm"
-              onClick={handleAutoGenerate}
-              disabled={generateMutation.isPending}
+              onClick={() => setShowCreate(true)}
               data-testid="button-new-blueprint"
             >
-              <Sparkles className="size-4" />
-              {generateMutation.isPending ? "Generating…" : "Generate with AI"}
+              <Sparkles className="size-4" />Generate with AI
             </Button>
           )}
         </div>
@@ -208,9 +200,8 @@ export default function BlueprintsPage() {
                 Click "Generate with AI" and describe your page type — Claude will build the full template automatically.
               </p>
             </div>
-            <Button onClick={handleAutoGenerate} disabled={generateMutation.isPending} className="gap-2">
-              <Sparkles className="size-4" />
-              {generateMutation.isPending ? "Generating…" : "Generate with AI"}
+            <Button onClick={() => setShowCreate(true)} className="gap-2">
+              <Sparkles className="size-4" />Generate with AI
             </Button>
           </div>
         ) : (
