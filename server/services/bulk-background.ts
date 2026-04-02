@@ -11,8 +11,8 @@
 import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
 
-const INSERT_BATCH_SIZE = 500; // pages per bulk INSERT statement
-const PAGE_BATCH_SIZE = 500;  // flush job counters to DB every N pages
+const INSERT_BATCH_SIZE = 100; // pages per bulk INSERT statement
+const PAGE_BATCH_SIZE = 200;  // flush job counters to DB every N pages
 
 export interface BulkJobSettings {
   services: string[];
@@ -262,10 +262,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         console.error("[bulk-background] error", svc, t.locationName, err);
       }
 
-      // Flush progress counters to DB every PAGE_BATCH_SIZE pages
+      // Flush progress counters to DB every PAGE_BATCH_SIZE pages.
+      // Always flush the insert batch first so totalCreated is accurate
+      // even when most pages are skips (batch may not have reached INSERT_BATCH_SIZE yet).
       pagesSinceLastFlush++;
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
+        await flushInsertBatch();
         await storage.updateGenerationJob(jobId, {
           processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
           passedPages: basePassedPages + totalCreated + totalUpdated,
