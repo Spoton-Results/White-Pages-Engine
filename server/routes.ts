@@ -863,6 +863,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ published: count });
   });
 
+  // Bulk-prune all draft pages for a website
+  app.post("/api/websites/:id/pages/prune-all-drafts", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = (req.params.id as string);
+    const drafts = await storage.getPages(websiteId, { status: "draft", limit: 100000 });
+    for (const p of drafts) {
+      await storage.updatePage(p.id, { status: "pruned", pruneReason: "Bulk pruned from draft review" });
+    }
+    return res.json({ pruned: drafts.length });
+  });
+
   // Prune a page
   app.put("/api/pages/:id/slug", requireAuth, async (req: Request, res: Response) => {
     const { slug } = z.object({ slug: z.string().min(1) }).parse(req.body);

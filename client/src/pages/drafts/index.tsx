@@ -7,10 +7,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, X, Eye, FileText, RefreshCw, AlertCircle, Globe } from "lucide-react";
+import { Check, X, Eye, FileText, RefreshCw, AlertCircle, Globe, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 export default function DraftsPage() {
   const qc = useQueryClient();
@@ -53,6 +54,26 @@ export default function DraftsPage() {
     },
   });
 
+  const publishAll = useMutation({
+    mutationFn: () => api.post<{ published: number }>(`/api/websites/${selectedWebsite}/pages/publish-all`, {}),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/pages/draft"] });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: `Published ${data.published} pages` });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const pruneAll = useMutation({
+    mutationFn: () => api.post<{ pruned: number }>(`/api/websites/${selectedWebsite}/pages/prune-all-drafts`, {}),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/pages/draft"] });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: `Pruned ${data.pruned} draft pages` });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const handlePreview = async (page: any) => {
     setPreviewPage(page);
     try {
@@ -75,9 +96,49 @@ export default function DraftsPage() {
               Pages that failed QA — review and publish or prune them.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/draft"] })}>
-            <RefreshCw className="size-4 mr-2" />Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {pages.length > 0 && (
+              <>
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => publishAll.mutate()}
+                  disabled={publishAll.isPending}
+                  data-testid="button-publish-all"
+                >
+                  <Globe className="size-4 mr-2" />
+                  {publishAll.isPending ? "Publishing…" : `Publish All (${pages.length})`}
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" data-testid="button-prune-all">
+                      <Trash2 className="size-4 mr-2" />Prune All ({pages.length})
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Prune all {pages.length} draft pages?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently mark all draft pages as pruned. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-red-600 hover:bg-red-700"
+                        onClick={() => pruneAll.mutate()}
+                      >
+                        Prune All
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            )}
+            <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/pages/draft"] })}>
+              <RefreshCw className="size-4 mr-2" />Refresh
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">

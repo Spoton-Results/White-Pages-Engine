@@ -76,18 +76,16 @@ export function buildVariationPage(
 
   const h2Class = "style=\"font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20\"";
 
-  const contentHtml = `
-${intro}
-<h2 ${h2Class}>How ${serviceName} Works in ${city}, ${stateAbbr}</h2>
-${howItWorks}
-<h2 ${h2Class}>Why ${city} Businesses Choose ${brandName}</h2>
-${benefits}
-<h2 ${h2Class}>Frequently Asked Questions</h2>
-${faq}
-<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">
-<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>
-${cta}
-</div>`.trim();
+  const section = (heading: string, body: string) =>
+    body ? `<h2 ${h2Class}>${heading}</h2>\n${body}` : "";
+
+  const contentHtml = [
+    intro,
+    section(`How ${serviceName} Works in ${city}, ${stateAbbr}`, howItWorks),
+    section(`Why ${city} Businesses Choose ${brandName}`, benefits),
+    section("Frequently Asked Questions", faq),
+    cta ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>` : "",
+  ].filter(Boolean).join("\n");
 
   const wordCount = contentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
 
