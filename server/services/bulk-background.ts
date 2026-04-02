@@ -129,6 +129,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const targets = await buildTargets(mode, stateDataMap, states, cities);
 
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
+
+  // Carry forward counters from any previous interrupted run so a server restart
+  // does not reset "passed" back to 0 on the next flush.
+  const basePassedPages = job.passedPages ?? 0;
+  const baseProcessedPages = job.processedPages ?? 0;
+
   const totalPages = services.length * targets.length;
   await storage.updateGenerationJob(jobId, { totalPages });
 
@@ -240,8 +246,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
         await storage.updateGenerationJob(jobId, {
-          processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
-          passedPages: totalCreated + totalUpdated,
+          processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
+          passedPages: basePassedPages + totalCreated + totalUpdated,
           failedPages: totalFailed,
         });
       }
@@ -251,8 +257,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
     await storage.updateGenerationJob(jobId, {
       settings: settings as any,
-      processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
-      passedPages: totalCreated + totalUpdated,
+      processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
+      passedPages: basePassedPages + totalCreated + totalUpdated,
       failedPages: totalFailed,
     });
   }
@@ -262,8 +268,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   await storage.updateGenerationJob(jobId, {
     status: "completed",
     completedAt: new Date(),
-    processedPages: totalCreated + totalUpdated + totalFailed + totalSkipped,
-    passedPages: totalCreated + totalUpdated,
+    processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
+    passedPages: basePassedPages + totalCreated + totalUpdated,
     failedPages: totalFailed,
   });
 
