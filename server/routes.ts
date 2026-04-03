@@ -991,6 +991,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ message: "Sitemaps generated", keys });
   });
 
+  // Submit existing published pages to Google Indexing API in batches of 200.
+  // State hub pages are submitted first (highest SEO priority).
+  // Returns { submitted, nextOffset, total } so the UI can track progress day-over-day.
+  app.post("/api/websites/:websiteId/submit-to-google", requireAuth, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const offset = Number(req.body?.offset ?? 0);
+    const BATCH = 200;
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const { rows, total } = await storage.getPagesForIndexing(websiteId, offset, BATCH);
+    if (rows.length === 0) return res.json({ submitted: 0, nextOffset: offset, total, done: true });
+
+    const urls = rows.map(p => `https://${website.domain}/${p.slug}`);
+    const { submitUrlsToGoogle } = await import("./services/gsc-indexing");
+    await submitUrlsToGoogle(urls);
+
+    const nextOffset = offset + rows.length;
+    return res.json({ submitted: rows.length, nextOffset, total, done: nextOffset >= total });
+  });
+
   // ── SEO Routes (live page rendering) ─────────────────────────────────────
 
   app.get("/api/websites/:websiteId/sitemap.xml", async (req: Request, res: Response) => {

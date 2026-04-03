@@ -361,6 +361,20 @@ export async function deleteBlueprint(id: string): Promise<void> {
 
 // ─── Pages ────────────────────────────────────────────────────────────────────
 
+export async function getPagesForIndexing(websiteId: string, offset: number, limit: number): Promise<{ rows: Page[]; total: number }> {
+  const rows = await db.select().from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published")))
+    .orderBy(
+      sql`CASE WHEN page_type = 'state_hub' THEN 0 WHEN page_type = 'city_hub' THEN 1 ELSE 2 END`,
+      desc(pages.updatedAt),
+    )
+    .limit(limit)
+    .offset(offset);
+  const [{ value }] = await db.select({ value: count() }).from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published")));
+  return { rows, total: Number(value) };
+}
+
 export async function getPages(websiteId: string, opts?: { status?: string; limit?: number; offset?: number }): Promise<Page[]> {
   let query = db.select().from(pages).where(eq(pages.websiteId, websiteId));
   if (opts?.status) {
