@@ -486,8 +486,12 @@ export async function updateGenerationJob(id: string, data: Partial<InsertGenera
 
 // ─── Sitemaps ─────────────────────────────────────────────────────────────────
 
+// Sort numerically by chunk number (sitemap-1, sitemap-2 ... sitemap-10, sitemap-11)
+// rather than alphabetically (sitemap-1, sitemap-10, sitemap-11 ... sitemap-2).
+const sitemapNumericOrder = sql`CAST(REGEXP_REPLACE(${sitemaps.slug}, '[^0-9]', '', 'g') AS INTEGER)`;
+
 export async function getSitemaps(websiteId: string): Promise<Sitemap[]> {
-  return db.select().from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(asc(sitemaps.name));
+  return db.select().from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(sitemapNumericOrder);
 }
 
 // Lightweight version — omits xmlContent so the response stays small even for sites with 28+ chunks
@@ -502,7 +506,7 @@ export async function getSitemapsMeta(websiteId: string) {
     lastGenerated: sitemaps.lastGenerated,
     createdAt: sitemaps.createdAt,
     updatedAt: sitemaps.updatedAt,
-  }).from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(asc(sitemaps.name));
+  }).from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(sitemapNumericOrder);
 }
 
 // Fetch a single chunk's xmlContent by slug — avoids loading all N chunks for one row
