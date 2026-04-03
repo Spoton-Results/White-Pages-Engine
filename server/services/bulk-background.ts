@@ -129,6 +129,17 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const stateDataMap = await storage.getAllStateData();
   const targets = await buildTargets(mode, stateDataMap, states, cities);
 
+  // ── Build city-by-state index for internal linking on state hub pages ─────────
+  // Maps stateAbbr (uppercase) → list of city names being generated in this job
+  const citiesByState = new Map<string, string[]>();
+  for (const t of targets) {
+    if (t.locationType === "city") {
+      const list = citiesByState.get(t.stateAbbr.toUpperCase()) ?? [];
+      list.push(t.locationName);
+      citiesByState.set(t.stateAbbr.toUpperCase(), list);
+    }
+  }
+
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
 
   // Carry forward counters from any previous interrupted run so a server restart
@@ -218,7 +229,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     for (const t of targets) {
       try {
         const sd = stateDataMap.get(t.stateAbbr.toUpperCase());
-        const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster);
+        const citiesInState = t.locationType === "state"
+          ? (citiesByState.get(t.stateAbbr.toUpperCase()) ?? []).map(name => ({ name }))
+          : undefined;
+        const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster, citiesInState);
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
           service: svc,
@@ -325,4 +339,11 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const { generateSitemapsForWebsite } = await import("./sitemap");
     await generateSitemapsForWebsite(job.websiteId, website.domain);
   } catch { /* non-critical */ }
+
+  // Ping Google to re-crawl the sitemap immediately after job completion
+  try {
+    const sitemapUrl = `https://${website.domain}/sitemap.xml`;
+    await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
+    console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
+  } catch { /* non-critical — Google ping is best-effort */ }
 }

@@ -21,6 +21,22 @@ function substitute(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+// Parse FAQ HTML into schema.org FAQPage JSON-LD
+function buildFaqJsonLd(faqHtml: string): string {
+  const entities: Array<{ "@type": string; name: string; acceptedAnswer: { "@type": string; text: string } }> = [];
+  const regex = /<p><strong>Q:\s*(.*?)<\/strong><\/p>\s*<p>(.*?)<\/p>/gis;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(faqHtml)) !== null) {
+    const question = m[1].replace(/<[^>]+>/g, "").trim();
+    const answer = m[2].replace(/<[^>]+>/g, "").trim();
+    if (question && answer) {
+      entities.push({ "@type": "Question", name: question, acceptedAnswer: { "@type": "Answer", text: answer } });
+    }
+  }
+  if (!entities.length) return "";
+  return `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "FAQPage", mainEntity: entities })}</script>`;
+}
+
 export interface ClusterContext {
   id: string;
   primaryKeyword: string;
@@ -39,6 +55,7 @@ export function buildVariationPage(
   banks: ContentVariationBank[],
   state: StateData | undefined,
   cluster?: ClusterContext | null,
+  citiesInState?: Array<{ name: string }>,
 ): VariationPageResult {
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
@@ -79,12 +96,29 @@ export function buildVariationPage(
   const section = (heading: string, body: string) =>
     body ? `<h2 ${h2Class}>${heading}</h2>\n${body}` : "";
 
+  // Internal links: state hub pages link down to every city page for same service
+  let citiesSection = "";
+  if (locationType === "state" && citiesInState && citiesInState.length > 0) {
+    const items = citiesInState
+      .map(c => {
+        const citySlug = `${serviceSlug}-in-${slugify(c.name)}-${stateAbbr.toLowerCase()}`;
+        return `<li style="break-inside:avoid"><a href="/${citySlug}" style="color:#2563eb;text-decoration:none">${c.name}, ${stateAbbr}</a></li>`;
+      })
+      .join("\n");
+    citiesSection = `<h2 ${h2Class}>Cities We Serve in ${stateName}</h2>\n<ul style="columns:3;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
+  }
+
+  // FAQ JSON-LD schema for rich results
+  const faqJsonLd = faq ? buildFaqJsonLd(faq) : "";
+
   const contentHtml = [
     intro,
     section(`How ${serviceName} Works in ${city}, ${stateAbbr}`, howItWorks),
     section(`Why ${city} Businesses Choose ${brandName}`, benefits),
     section("Frequently Asked Questions", faq),
     cta ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>` : "",
+    citiesSection,
+    faqJsonLd,
   ].filter(Boolean).join("\n");
 
   const wordCount = contentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
