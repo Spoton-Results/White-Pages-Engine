@@ -406,12 +406,12 @@ export default function ServicesPage() {
                             <Loader2 className="size-3.5 animate-spin" />
                             Writing banks in background…
                           </span>
-                          <span>{bankedCount} of {activeJob?.total ?? totalServices} done</span>
+                          <span>{activeJob?.done ?? 0} of {activeJob?.total ?? totalServices} done</span>
                         </div>
                         <div className="w-full bg-blue-200 rounded-full h-1.5">
                           <div
                             className="bg-blue-600 h-1.5 rounded-full transition-all duration-700"
-                            style={{ width: `${(activeJob?.total ?? totalServices) > 0 ? Math.round((bankedCount / (activeJob?.total ?? totalServices)) * 100) : 0}%` }}
+                            style={{ width: `${(activeJob?.total ?? 0) > 0 ? Math.round(((activeJob?.done ?? 0) / activeJob!.total) * 100) : 0}%` }}
                           />
                         </div>
                         <p className="text-xs text-blue-600">You can keep using the app — progress is saved and resumes automatically if the server restarts.</p>
