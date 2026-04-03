@@ -183,7 +183,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     gtag('js', new Date());
     gtag('config', 'G-VH980NTHCM');
   </script>` : ""}
-  ${website.domain === "pagessubtracker.spotonresults.com" ? `<!-- Google Analytics -->
+  ${website.domain === "pagessubtrackers.spotonresults.com" ? `<!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-GY5VTKVQ88"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
