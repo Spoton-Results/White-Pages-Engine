@@ -109,6 +109,7 @@ export default function ServicesPage() {
   });
 
   const bankSet = new Set<string>(bankServicesQ.data ?? []);
+  const allBanked = (services as any[]).length > 0 && (services as any[]).every((s: any) => bankSet.has(s.name));
 
   const writeBankMut = useMutation({
     mutationFn: ({ service }: { service: string }) =>
@@ -132,7 +133,8 @@ export default function ServicesPage() {
   });
 
   const writeAllUnbankedMut = useMutation({
-    mutationFn: () => api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write-all`, {}),
+    mutationFn: ({ force }: { force?: boolean } = {}) =>
+      api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write-all`, { force: force ?? false }),
     onSuccess: (data: any) => {
       if (data?.alreadyDone) {
         toast({ title: "All banks already written", description: "Nothing to do — all services are ready." });
@@ -405,19 +407,21 @@ export default function ServicesPage() {
                       </div>
                     )}
 
-                    {/* Write All Unbanked button */}
-                    {!bgWrite && (services as any[]).some((s: any) => !bankSet.has(s.name)) && (
+                    {/* Write All Unbanked / Rewrite All button */}
+                    {!bgWrite && (services as any[]).length > 0 && (
                       <div className="flex items-center gap-3">
                         <Button
                           size="sm"
                           className="gap-2"
-                          onClick={() => writeAllUnbankedMut.mutate()}
+                          onClick={() => writeAllUnbankedMut.mutate({ force: allBanked })}
                           disabled={writeAllUnbankedMut.isPending || writeBankMut.isPending}
                           data-testid="button-write-all-banks"
                         >
                           {writeAllUnbankedMut.isPending
                             ? <><Loader2 className="size-4 animate-spin" /> Starting...</>
-                            : <><BookOpen className="size-4" /> Write All Unbanked</>}
+                            : allBanked
+                              ? <><BookOpen className="size-4" /> Rewrite All</>
+                              : <><BookOpen className="size-4" /> Write All Unbanked</>}
                         </Button>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <Info className="size-3" />

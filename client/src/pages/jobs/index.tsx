@@ -167,6 +167,9 @@ export default function JobsPage() {
 
   const totalPages = form.locationIds.length * form.serviceIds.length;
 
+  const websiteById = new Map(websites.map((w: any) => [w.id, w]));
+  const accountById = new Map(accounts.map((a: any) => [a.id, a]));
+
   const statusIcon = (status: string) => {
     if (status === "completed") return <CheckCircle className="size-4 text-emerald-500" />;
     if (status === "failed") return <XCircle className="size-4 text-destructive" />;
@@ -232,6 +235,17 @@ export default function JobsPage() {
                         job.status === "failed" ? "border-red-200 text-red-700" : ""
                       }`}>{job.status}</Badge>
                     </div>
+                    {job.websiteId && (() => {
+                      const site = websiteById.get(job.websiteId);
+                      const acct = accountById.get(job.accountId ?? site?.accountId);
+                      return (acct?.name || site?.domain) ? (
+                        <p className="text-xs text-muted-foreground mt-0.5" data-testid={`text-job-context-${job.id}`}>
+                          {acct?.name && <span className="font-medium">{acct.name}</span>}
+                          {acct?.name && site?.domain && <span className="mx-1">·</span>}
+                          {site?.domain && <span>{site.domain}</span>}
+                        </p>
+                      ) : null;
+                    })()}
 
                     {job.totalPages > 0 && (
                       <div className="mt-2">

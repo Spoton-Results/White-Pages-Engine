@@ -1311,9 +1311,10 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       storage.getIndustries(website.accountId),
     ]);
 
+    const { force } = z.object({ force: z.boolean().optional() }).parse(req.body);
     const bankedSet = new Set(bankedNames);
-    const unbanked = allServices.filter(s => !bankedSet.has(s.name));
-    if (unbanked.length === 0) return res.json({ started: false, total: 0, alreadyDone: true });
+    const toProcess = force ? allServices : allServices.filter(s => !bankedSet.has(s.name));
+    if (toProcess.length === 0) return res.json({ started: false, total: 0, alreadyDone: true });
 
     const industry = industries[0];
     const ctx: BrandContext = {
@@ -1325,13 +1326,13 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     };
 
     // Respond immediately — processing continues in the background
-    res.json({ started: true, total: unbanked.length });
+    res.json({ started: true, total: toProcess.length });
 
     (async () => {
       // Process 3 services at a time — each service already parallelises its 5 section calls internally
       const CONCURRENCY = 3;
-      for (let i = 0; i < unbanked.length; i += CONCURRENCY) {
-        const batch = unbanked.slice(i, i + CONCURRENCY);
+      for (let i = 0; i < toProcess.length; i += CONCURRENCY) {
+        const batch = toProcess.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(async (svc) => {
           try {
             await storage.deleteVariationBanks(websiteId, svc.name);
@@ -1341,7 +1342,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
           }
         }));
       }
-      console.log(`[write-all] Completed for website ${websiteId}: ${unbanked.length} services`);
+      console.log(`[write-all] Completed for website ${websiteId}: ${toProcess.length} services`);
     })().catch(err => console.error("[write-all] Unexpected error:", err));
   });
 
