@@ -10,6 +10,7 @@
  */
 import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
+import { submitUrlsToGoogle } from "./gsc-indexing";
 
 const INSERT_BATCH_SIZE = 100; // pages per bulk INSERT statement
 const PAGE_BATCH_SIZE = 200;  // flush job counters to DB every N pages
@@ -140,6 +141,17 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     }
   }
 
+  // ── Build related-services list for cross-service mesh links ─────────────
+  // Pre-compute once: every service name + its slug, passed to every page so
+  // city pages can link sideways to sibling services in the same city.
+  const allRelatedServices = services.map(s => ({
+    name: s,
+    slug: s.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+  }));
+
+  // ── Collect new page URLs for Google Indexing API submission ─────────────
+  const newPageUrls: string[] = [];
+
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
 
   // Carry forward counters from any previous interrupted run so a server restart
@@ -221,6 +233,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         await storage.createPageVersionsBatch(
           created.map(p => ({ pageId: p.id, version: 1, contentHtml: slugToContent.get(p.slug) ?? "", isActive: true }))
         );
+        // Collect URLs for Google Indexing API submission at job end
+        for (const p of created) {
+          newPageUrls.push(`https://${website.domain}/${p.slug}`);
+        }
         svcCreated += created.length;
         totalCreated += created.length;
       }
@@ -232,7 +248,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         const citiesInState = t.locationType === "state"
           ? (citiesByState.get(t.stateAbbr.toUpperCase()) ?? []).map(name => ({ name }))
           : undefined;
-        const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster, citiesInState);
+        const result = buildVariationPage(
+          svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr,
+          brandName, banks, sd, svcCluster,
+          citiesInState,
+          allRelatedServices,
+          website.domain,
+        );
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
           service: svc,
@@ -346,4 +368,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
     console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
   } catch { /* non-critical — Google ping is best-effort */ }
+
+  // Submit new page URLs directly to Google Indexing API for rapid indexing
+  try {
+    await submitUrlsToGoogle(newPageUrls);
+  } catch { /* non-critical — GSC indexing is best-effort */ }
 }

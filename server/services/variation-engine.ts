@@ -21,7 +21,8 @@ function substitute(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
-// Parse FAQ HTML into schema.org FAQPage JSON-LD
+// ── Structured data builders ─────────────────────────────────────────────────
+
 function buildFaqJsonLd(faqHtml: string): string {
   const entities: Array<{ "@type": string; name: string; acceptedAnswer: { "@type": string; text: string } }> = [];
   const regex = /<p><strong>Q:\s*(.*?)<\/strong><\/p>\s*<p>(.*?)<\/p>/gis;
@@ -34,8 +35,70 @@ function buildFaqJsonLd(faqHtml: string): string {
     }
   }
   if (!entities.length) return "";
-  return `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "FAQPage", mainEntity: entities })}</script>`;
+  return `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: entities,
+  })}</script>`;
 }
+
+function buildBreadcrumbJsonLd(
+  domain: string,
+  serviceName: string,
+  serviceSlug: string,
+  locationName: string,
+  locationType: string,
+  stateName: string,
+  stateAbbr: string,
+): string {
+  const base = domain ? `https://${domain}` : "";
+  const statePageSlug = `${serviceSlug}-in-${slugify(stateName)}`;
+
+  const items =
+    locationType === "state"
+      ? [
+          { "@type": "ListItem", position: 1, name: "Home", item: `${base}/` },
+          { "@type": "ListItem", position: 2, name: `${serviceName} in ${stateName}` },
+        ]
+      : [
+          { "@type": "ListItem", position: 1, name: "Home", item: `${base}/` },
+          { "@type": "ListItem", position: 2, name: `${serviceName} in ${stateName}`, item: `${base}/${statePageSlug}` },
+          { "@type": "ListItem", position: 3, name: `${serviceName} in ${locationName}, ${stateAbbr}` },
+        ];
+
+  return `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items,
+  })}</script>`;
+}
+
+function buildLocalBusinessJsonLd(
+  brandName: string,
+  serviceName: string,
+  locationName: string,
+  stateName: string,
+  stateAbbr: string,
+  locationType: string,
+): string {
+  if (locationType !== "city") return "";
+  return `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    name: brandName,
+    description: `${serviceName} services for businesses in ${locationName}, ${stateAbbr}`,
+    areaServed: { "@type": "City", name: locationName, containedInPlace: { "@type": "State", name: stateName } },
+    serviceType: serviceName,
+    address: {
+      "@type": "PostalAddress",
+      addressLocality: locationName,
+      addressRegion: stateAbbr,
+      addressCountry: "US",
+    },
+  })}</script>`;
+}
+
+// ── Exports ──────────────────────────────────────────────────────────────────
 
 export interface ClusterContext {
   id: string;
@@ -56,6 +119,8 @@ export function buildVariationPage(
   state: StateData | undefined,
   cluster?: ClusterContext | null,
   citiesInState?: Array<{ name: string }>,
+  relatedServices?: Array<{ name: string; slug: string }>,
+  websiteDomain?: string,
 ): VariationPageResult {
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
@@ -91,12 +156,12 @@ export function buildVariationPage(
   const faq = getSection("faq");
   const cta = getSection("cta");
 
-  const h2Class = "style=\"font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20\"";
+  const h2Style = `style="font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20"`;
 
   const section = (heading: string, body: string) =>
-    body ? `<h2 ${h2Class}>${heading}</h2>\n${body}` : "";
+    body ? `<h2 ${h2Style}>${heading}</h2>\n${body}` : "";
 
-  // Internal links: state hub pages link down to every city page for same service
+  // ── State hub → city pages (downward links) ──────────────────────────────
   let citiesSection = "";
   if (locationType === "state" && citiesInState && citiesInState.length > 0) {
     const items = citiesInState
@@ -105,40 +170,88 @@ export function buildVariationPage(
         return `<li style="break-inside:avoid"><a href="/${citySlug}" style="color:#2563eb;text-decoration:none">${c.name}, ${stateAbbr}</a></li>`;
       })
       .join("\n");
-    citiesSection = `<h2 ${h2Class}>Cities We Serve in ${stateName}</h2>\n<ul style="columns:3;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
+    citiesSection = `<h2 ${h2Style}>Cities We Serve in ${stateName}</h2>\n<ul style="columns:3;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
   }
 
-  // FAQ JSON-LD schema for rich results
+  // ── City pages → sibling services (cross-service mesh links) ────────────
+  let relatedServicesSection = "";
+  if (locationType === "city" && relatedServices && relatedServices.length > 0) {
+    const others = relatedServices.filter(s => s.slug !== serviceSlug);
+    if (others.length > 0) {
+      const locationSlug = `${slugify(city)}-${stateAbbr.toLowerCase()}`;
+      const items = others
+        .map(s => {
+          const pageSlug = `${s.slug}-in-${locationSlug}`;
+          return `<li style="break-inside:avoid"><a href="/${pageSlug}" style="color:#2563eb;text-decoration:none">${s.name} in ${city}, ${stateAbbr}</a></li>`;
+        })
+        .join("\n");
+      relatedServicesSection = `<h2 ${h2Style}>Related Services in ${city}, ${stateAbbr}</h2>\n<ul style="columns:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
+    }
+  }
+
+  // ── Structured data ──────────────────────────────────────────────────────
   const faqJsonLd = faq ? buildFaqJsonLd(faq) : "";
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd(
+    websiteDomain ?? "",
+    serviceName,
+    serviceSlug,
+    locationName,
+    locationType,
+    stateName,
+    stateAbbr,
+  );
+  const localBusinessJsonLd = buildLocalBusinessJsonLd(
+    brandName,
+    serviceName,
+    locationName,
+    stateName,
+    stateAbbr,
+    locationType,
+  );
 
   const contentHtml = [
     intro,
     section(`How ${serviceName} Works in ${city}, ${stateAbbr}`, howItWorks),
     section(`Why ${city} Businesses Choose ${brandName}`, benefits),
     section("Frequently Asked Questions", faq),
-    cta ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>` : "",
+    cta
+      ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>`
+      : "",
     citiesSection,
+    relatedServicesSection,
     faqJsonLd,
-  ].filter(Boolean).join("\n");
+    breadcrumbJsonLd,
+    localBusinessJsonLd,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const wordCount = contentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
 
-  const locationSlug = locationType === "state"
-    ? slugify(stateName)
-    : `${slugify(locationName)}-${stateAbbr.toLowerCase()}`;
+  const locationSlug =
+    locationType === "state"
+      ? slugify(stateName)
+      : `${slugify(locationName)}-${stateAbbr.toLowerCase()}`;
 
   const slug = `${serviceSlug}-in-${locationSlug}`;
 
-  const title = locationType === "state"
-    ? `${serviceName} in ${stateName} | ${brandName}`
-    : `${serviceName} in ${city}, ${stateAbbr} | ${brandName}`;
+  const title =
+    locationType === "state"
+      ? `${serviceName} in ${stateName} | ${brandName}`
+      : `${serviceName} in ${city}, ${stateAbbr} | ${brandName}`;
 
-  const h1 = locationType === "state"
-    ? `${serviceName} in ${stateName}`
-    : `${serviceName} in ${city}, ${stateAbbr}`;
+  const h1 =
+    locationType === "state"
+      ? `${serviceName} in ${stateName}`
+      : `${serviceName} in ${city}, ${stateAbbr}`;
 
   const targetKeyword = cluster?.primaryKeyword ?? serviceName;
-  const metaDescription = `Looking for ${targetKeyword} in ${city}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
+
+  // "near me" phrasing for city pages captures the highest-volume local modifier
+  const metaDescription =
+    locationType === "city"
+      ? `Looking for ${targetKeyword} near ${city}, ${stateAbbr}? ${brandName} provides trusted ${serviceName} to local businesses. Serving the ${city} area — get a free quote today.`
+      : `Looking for ${targetKeyword} in ${stateName}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
 
   return { contentHtml, title, h1, metaDescription, slug, wordCount };
 }
