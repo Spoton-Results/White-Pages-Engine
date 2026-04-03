@@ -1401,7 +1401,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ ok: true, context: { brand: ctx.brandName, industry: ctx.industryName } });
   });
 
-  // Background write-all: starts processing immediately, returns {started, total} without waiting
+  // Background write-all — persistent job that survives server restarts
   app.post("/api/websites/:id/variation-banks/write-all", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
     const website = await storage.getWebsite(websiteId);
@@ -1428,25 +1428,30 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       industryDescription: industry?.description ?? undefined,
     };
 
-    // Respond immediately — processing continues in the background
-    res.json({ started: true, total: toProcess.length });
+    const { startBankWriteJob } = await import("./services/bank-write-background");
+    const jobId = await startBankWriteJob(
+      websiteId,
+      website.accountId,
+      toProcess.map(s => ({ id: s.id, name: s.name })),
+      ctx,
+    );
 
-    (async () => {
-      // Process 3 services at a time — each service already parallelises its 5 section calls internally
-      const CONCURRENCY = 3;
-      for (let i = 0; i < toProcess.length; i += CONCURRENCY) {
-        const batch = toProcess.slice(i, i + CONCURRENCY);
-        await Promise.all(batch.map(async (svc) => {
-          try {
-            await storage.deleteVariationBanks(websiteId, svc.name);
-            await writeVariationsForService(svc.name, website.accountId, websiteId, ctx);
-          } catch (err: any) {
-            console.error(`[write-all] Failed for "${svc.name}": ${err?.message ?? err}`);
-          }
-        }));
-      }
-      console.log(`[write-all] Completed for website ${websiteId}: ${toProcess.length} services`);
-    })().catch(err => console.error("[write-all] Unexpected error:", err));
+    return res.json({ started: true, total: toProcess.length, jobId });
+  });
+
+  // Active bank-write job status for a website (used by UI to restore progress bar on page refresh)
+  app.get("/api/websites/:id/bank-write-job", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const jobs = await storage.getGenerationJobs(websiteId);
+    const active = jobs.find(j => {
+      const s = j.settings as any;
+      return s?.type === "bank_write" && (j.status === "running" || j.status === "pending");
+    });
+    if (!active) return res.json(null);
+    const s = active.settings as any;
+    const total: number = s.progress?.length ?? active.totalPages;
+    const done: number = s.progress?.filter((p: any) => p.status === "done" || p.status === "error").length ?? active.processedPages;
+    return res.json({ jobId: active.id, total, done, status: active.status });
   });
 
   app.post("/api/websites/:id/bulk-generate", requireAuth, async (req: Request, res: Response) => {

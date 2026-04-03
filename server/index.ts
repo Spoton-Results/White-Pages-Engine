@@ -97,11 +97,14 @@ app.use((req, res, next) => {
     console.error("[startup] Page count sync failed (non-fatal):", err);
   }
 
-  // Resume any bulk background jobs that were interrupted by a server restart
+  // Resume any background jobs that were interrupted by a server restart
   try {
     const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
     const { runBulkBackgroundJob } = await import("./services/bulk-background");
+    const { runBankWriteJob } = await import("./services/bank-write-background");
     const stale = await getStaleRunningJobs();
+
+    // Bulk page-generation jobs
     const bulkJobs = stale.filter(j => Array.isArray((j.settings as any)?.services));
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
@@ -109,7 +112,29 @@ app.use((req, res, next) => {
         await updateGenerationJob(j.id, { status: "pending", startedAt: null });
         setImmediate(() => {
           runBulkBackgroundJob(j.id).catch(err => {
-            console.error("[startup] Failed to resume job", j.id, err);
+            console.error("[startup] Failed to resume bulk job", j.id, err);
+            updateGenerationJob(j.id, { status: "error", completedAt: new Date() }).catch(() => {});
+          });
+        });
+      }
+    }
+
+    // Bank-write jobs — reset any "running" services back to "pending" so they re-run
+    const bankJobs = stale.filter(j => (j.settings as any)?.type === "bank_write");
+    if (bankJobs.length > 0) {
+      console.log(`[startup] Resuming ${bankJobs.length} interrupted bank-write job(s)...`);
+      for (const j of bankJobs) {
+        const settings = j.settings as any;
+        // Reset any "running" service back to "pending" so it gets re-processed
+        if (Array.isArray(settings?.progress)) {
+          settings.progress = settings.progress.map((p: any) =>
+            p.status === "running" ? { ...p, status: "pending" } : p,
+          );
+        }
+        await updateGenerationJob(j.id, { status: "pending", startedAt: null, settings });
+        setImmediate(() => {
+          runBankWriteJob(j.id).catch(err => {
+            console.error("[startup] Failed to resume bank-write job", j.id, err);
             updateGenerationJob(j.id, { status: "error", completedAt: new Date() }).catch(() => {});
           });
         });

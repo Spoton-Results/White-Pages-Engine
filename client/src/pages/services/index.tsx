@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,26 +81,36 @@ export default function ServicesPage() {
     if (firstWebsiteId) setBankWebsiteId(firstWebsiteId);
   }, [firstWebsiteId]);
 
-  const [bgWrite, setBgWrite] = useState<{ total: number; websiteId: string } | null>(null);
+  // Poll the server for an active bank-write job every 4 s.
+  // This is the single source of truth — survives page refresh and app close.
+  const bankWriteJobQ = useQuery<{ jobId: string; total: number; done: number; status: string } | null>({
+    queryKey: ["/api/websites", bankWebsiteId, "bank-write-job"],
+    queryFn: () => api.get(`/api/websites/${bankWebsiteId}/bank-write-job`),
+    enabled: !!bankWebsiteId,
+    refetchInterval: 4000,
+  });
+  const activeJob = bankWriteJobQ.data ?? null;
+  const jobRunning = !!activeJob;
 
   const bankServicesQ = useQuery<string[]>({
     queryKey: ["/api/websites", bankWebsiteId, "bank-services"],
     queryFn: () => api.get<string[]>(`/api/websites/${bankWebsiteId}/bank-services`),
     enabled: !!bankWebsiteId,
-    // Poll every 4 s while a background write is running for this website
-    refetchInterval: (bgWrite && bgWrite.websiteId === bankWebsiteId) ? 4000 : false,
+    refetchInterval: jobRunning ? 4000 : false,
   });
 
-  // Stop polling when all services are banked
+  // Toast when job finishes (transitions from active → null)
   const totalServices = (services as any[]).length;
   const bankedCount = bankServicesQ.data?.length ?? 0;
+  const prevJobRunning = useRef(false);
   useEffect(() => {
-    if (bgWrite && bgWrite.websiteId === bankWebsiteId && bankedCount >= totalServices && totalServices > 0) {
-      setBgWrite(null);
-      toast({ title: `All ${totalServices} banks written!`, description: "All services are ready to generate pages." });
+    if (prevJobRunning.current && !jobRunning && totalServices > 0) {
+      toast({ title: `All banks written!`, description: "All services are ready to generate pages." });
       qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
     }
-  }, [bankedCount, totalServices, bgWrite, bankWebsiteId]);
+    prevJobRunning.current = jobRunning;
+  }, [jobRunning]);
 
   const bankContextQ = useQuery<any>({
     queryKey: ["/api/websites", bankWebsiteId, "context"],
@@ -140,10 +150,11 @@ export default function ServicesPage() {
         toast({ title: "All banks already written", description: "Nothing to do — all services are ready." });
         return;
       }
-      setBgWrite({ total: data.total, websiteId: bankWebsiteId });
+      // Immediately fetch the new job so the progress bar appears without waiting 4 s
+      bankWriteJobQ.refetch();
       toast({
         title: `Writing ${data.total} banks in the background`,
-        description: "You can keep using the app — this page will update automatically as banks complete.",
+        description: "You can keep using the app — progress is saved and will resume if the server restarts.",
       });
     },
     onError: (err: any) => toast({ title: "Write all failed", description: err.message, variant: "destructive" }),
@@ -388,27 +399,27 @@ export default function ServicesPage() {
                     )}
 
                     {/* Background write progress banner */}
-                    {bgWrite && bgWrite.websiteId === bankWebsiteId && (
+                    {jobRunning && (
                       <div className="flex flex-col gap-1.5 p-3 rounded-lg border border-blue-200 bg-blue-50">
                         <div className="flex items-center justify-between text-xs text-blue-800">
                           <span className="flex items-center gap-1.5 font-medium">
                             <Loader2 className="size-3.5 animate-spin" />
                             Writing banks in background…
                           </span>
-                          <span>{bankedCount} of {totalServices} done</span>
+                          <span>{bankedCount} of {activeJob?.total ?? totalServices} done</span>
                         </div>
                         <div className="w-full bg-blue-200 rounded-full h-1.5">
                           <div
                             className="bg-blue-600 h-1.5 rounded-full transition-all duration-700"
-                            style={{ width: `${totalServices > 0 ? Math.round((bankedCount / totalServices) * 100) : 0}%` }}
+                            style={{ width: `${(activeJob?.total ?? totalServices) > 0 ? Math.round((bankedCount / (activeJob?.total ?? totalServices)) * 100) : 0}%` }}
                           />
                         </div>
-                        <p className="text-xs text-blue-600">You can keep using the app — this updates automatically.</p>
+                        <p className="text-xs text-blue-600">You can keep using the app — progress is saved and resumes automatically if the server restarts.</p>
                       </div>
                     )}
 
                     {/* Write All Unbanked / Rewrite All button */}
-                    {!bgWrite && (services as any[]).length > 0 && (
+                    {!jobRunning && (services as any[]).length > 0 && (
                       <div className="flex items-center gap-3">
                         <Button
                           size="sm"
