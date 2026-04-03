@@ -1187,7 +1187,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const sitemapList = await storage.getSitemaps(website.id);
         const baseUrl = `https://${website.domain}`;
         const today = new Date().toISOString().split("T")[0];
-        res.setHeader("Content-Type", "application/xml");
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
         if (sitemapList.length === 0) {
           const publishedPages = await storage.getPages(website.id, { status: "published", limit: 50000 });
           const urls = publishedPages.map((p) => ({
