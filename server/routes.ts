@@ -1210,9 +1210,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.send(buildSitemapXml(urls));
       }
 
-      // Robots.txt
+      // Robots.txt — serve inline (no redirect; Google does not follow redirects for robots.txt)
       if (rawSlug === "robots.txt") {
-        return res.redirect(301, `/api/websites/${website.id}/robots.txt`);
+        const robotsContent = website.robotsTxt
+          || generateRobotsTxt(website.domain, `https://${website.domain}/sitemap.xml`);
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        return res.send(robotsContent);
       }
 
       // Root — show a simple page index for the domain
