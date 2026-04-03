@@ -6,7 +6,7 @@ import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices, generateQueryClusters } from "./services/claude";
 import { buildVariationPage } from "./services/variation-engine";
 import { writeVariationsForService, BrandContext } from "./services/variation-writer";
-import { generateSitemapsForWebsite, generateRobotsTxt } from "./services/sitemap";
+import { generateSitemapsForWebsite, generateRobotsTxt, URLS_PER_SITEMAP } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
   insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
@@ -17,7 +17,7 @@ import {
 import { z } from "zod";
 
 // ── Sitemap chunk cache ───────────────────────────────────────────────────────
-// Serving 50K-row sitemap chunks inline takes 3-4s per request (live DB query).
+// Each child sitemap holds up to URLS_PER_SITEMAP (10K) URLs.
 // Cache the built XML for 1 hour so Googlebot never times out on retry.
 const sitemapChunkCache = new Map<string, { xml: string; expiresAt: number }>();
 const SITEMAP_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -50,8 +50,8 @@ export async function warmSitemapCache(websiteId: string): Promise<void> {
         continue;
       }
       // 3. Not stored yet — build from pages (slow, one-time cost) + persist to DB
-      const offset = i * 50000;
-      const chunk = await storage.getPages(websiteId, { status: "published", limit: 50000, offset });
+      const offset = i * URLS_PER_SITEMAP;
+      const chunk = await storage.getPages(websiteId, { status: "published", limit: URLS_PER_SITEMAP, offset });
       const baseUrl = `https://${website.domain}`;
       const urls = chunk.map((p) => ({
         loc: `${baseUrl}/${p.slug}`,
@@ -1271,8 +1271,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.send(record.xmlContent);
         }
         // 3. Not yet stored — build from pages (slow, one-time), then persist to DB for future
-        const offset = chunkIndex * 50000;
-        const chunk = await storage.getPages(website.id, { status: "published", limit: 50000, offset });
+        const offset = chunkIndex * URLS_PER_SITEMAP;
+        const chunk = await storage.getPages(website.id, { status: "published", limit: URLS_PER_SITEMAP, offset });
         const baseUrl = `https://${website.domain}`;
         const urls = chunk.map((p) => ({
           loc: `${baseUrl}/${p.slug}`,

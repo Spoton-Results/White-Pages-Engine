@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 import * as storage from "../storage";
 import { saveSitemap, isR2Configured } from "./r2";
 
-const URLS_PER_SITEMAP = 50000;
+export const URLS_PER_SITEMAP = 10000;
 
 function buildSitemapXml(urls: Array<{ loc: string; lastmod?: string; priority?: string }>): string {
   const items = urls.map(({ loc, lastmod, priority }) =>
@@ -62,6 +62,9 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
     }));
 
     const xml = buildSitemapXml(urls);
+    if (urls.length === 0) {
+      console.warn(`[sitemap] WARNING: chunk ${slug} for website ${websiteId} produced 0 URLs — empty XML file will be stored`);
+    }
     const key = `sitemaps/${websiteId}/${slug}.xml`;
 
     if (isR2Configured()) {

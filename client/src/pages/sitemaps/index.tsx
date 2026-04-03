@@ -112,8 +112,8 @@ export default function SitemapsPage() {
           </Select>
           {selectedWebsite && (
             <Button size="sm" className="gap-2" onClick={() => generate.mutate()} disabled={generate.isPending} data-testid="button-generate-sitemaps">
-              {generate.isPending ? <RefreshCw className="size-4 animate-spin" /> : <Zap className="size-4" />}
-              Generate Sitemaps
+              {generate.isPending ? <RefreshCw className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              {(sitemaps as any[]).length > 0 ? "Regenerate Sitemaps" : "Generate Sitemaps"}
             </Button>
           )}
           {currentWebsite && (
