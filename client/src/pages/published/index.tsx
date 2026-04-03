@@ -283,9 +283,12 @@ export default function PublishedPagesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className={`text-sm font-medium ${parseFloat(page.publishScore) >= 0.7 ? "text-emerald-600" : "text-amber-600"}`}>
-                        {(parseFloat(page.publishScore) * 100).toFixed(0)}%
-                      </span>
+                      {page.publishScore != null
+                        ? <span className={`text-sm font-medium ${parseFloat(page.publishScore) >= 0.7 ? "text-emerald-600" : "text-amber-600"}`}>
+                            {(parseFloat(page.publishScore) * 100).toFixed(0)}%
+                          </span>
+                        : <span className="text-sm text-muted-foreground">—</span>
+                      }
                     </TableCell>
                     <TableCell className="text-right text-sm">{page.wordCount?.toLocaleString()}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
