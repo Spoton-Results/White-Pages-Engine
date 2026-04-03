@@ -176,25 +176,51 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
 
-      // Pre-warm sitemap chunk cache for all websites after server is ready.
-      // Without this, the first Googlebot hit after a deploy triggers a slow 3-4s
-      // DB query per chunk (50K rows each), causing "Couldn't fetch" timeouts.
-      // Warmup runs sequentially in background to avoid hammering the DB.
+      // Sitemap startup task — two-phase, runs in background after server is ready.
+      //
+      // Phase 1 (fast): warm the in-memory cache from any already-stored xml_content
+      //   rows (single DB row per chunk — ~10ms each). Sites that have been regenerated
+      //   at least once are fully covered here.
+      //
+      // Phase 2 (one-time migration): for any website whose sitemaps still have
+      //   null xml_content (i.e. generated before the xml_content fix), run a full
+      //   sitemap regeneration which stores the XML to the DB permanently. After this
+      //   runs once, Phase 1 handles everything on every future restart.
+      //
+      // Both websites run in parallel so total time = max(site_a, site_b) not sum.
       setImmediate(async () => {
         try {
-          const { getWebsites } = await import("./storage");
+          const { getWebsites, getSitemaps } = await import("./storage");
           const { warmSitemapCache } = await import("./routes");
+          const { generateSitemapsForWebsite } = await import("./services/sitemap");
           const allWebsites = await getWebsites();
-          const withSitemaps = allWebsites.filter(w => w.publishedPageCount && w.publishedPageCount > 0);
-          if (withSitemaps.length > 0) {
-            console.log(`[startup] Pre-warming sitemap cache for ${withSitemaps.length} website(s)...`);
-            for (const w of withSitemaps) {
+          const withPages = allWebsites.filter(w => w.publishedPageCount && w.publishedPageCount > 0);
+          if (withPages.length === 0) return;
+
+          console.log(`[startup] Sitemap startup task for ${withPages.length} website(s)...`);
+
+          await Promise.all(withPages.map(async (w) => {
+            try {
+              // Phase 1: warm from stored xml_content (fast, ms per chunk)
               await warmSitemapCache(w.id);
+
+              // Phase 2: if any chunk still has null xml_content, do a full regen
+              // to store it permanently. This path runs at most once per website.
+              const chunks = await getSitemaps(w.id);
+              const needsRegen = chunks.length > 0 && chunks.some(c => !c.xmlContent);
+              if (needsRegen) {
+                console.log(`[startup] Running one-time sitemap regen for ${w.domain} (${chunks.length} chunk(s) missing xml_content)...`);
+                await generateSitemapsForWebsite(w.id, w.domain);
+                console.log(`[startup] Sitemap regen complete for ${w.domain}`);
+              }
+            } catch (err) {
+              console.error(`[startup] Sitemap task failed for ${w.domain} (non-fatal):`, err);
             }
-            console.log("[startup] Sitemap cache warmup complete.");
-          }
+          }));
+
+          console.log("[startup] Sitemap startup task complete.");
         } catch (err) {
-          console.error("[startup] Sitemap warmup failed (non-fatal):", err);
+          console.error("[startup] Sitemap startup task failed (non-fatal):", err);
         }
       });
     },
