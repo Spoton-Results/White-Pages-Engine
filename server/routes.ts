@@ -1032,7 +1032,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Sitemaps ──────────────────────────────────────────────────────────────
 
   app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {
-    return res.json(await storage.getSitemaps((req.params.websiteId as string)));
+    // Use meta-only query — xmlContent can be 1MB+ per row (28 rows for large sites = 28MB) and the admin UI never needs it
+    return res.json(await storage.getSitemapsMeta((req.params.websiteId as string)));
   });
 
   app.post("/api/websites/:websiteId/sitemaps/generate", requireAuth, async (req: Request, res: Response) => {
@@ -1225,7 +1226,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
-        const sitemapList = await storage.getSitemaps(website.id);
+        const sitemapList = await storage.getSitemapsMeta(website.id);
         const baseUrl = `https://${website.domain}`;
         const today = new Date().toISOString().split("T")[0];
         res.setHeader("Content-Type", "application/xml; charset=utf-8");
@@ -1261,9 +1262,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           res.setHeader("Cache-Control", "public, max-age=3600");
           return res.send(cached.xml);
         }
-        // 2. Stored XML in DB row — fast single-row lookup (~10ms), immune to DB load
-        const sitemapList = await storage.getSitemaps(website.id);
-        const record = sitemapList[chunkIndex];
+        // 2. Stored XML in DB row — single-row lookup by slug (avoids loading all N chunks)
+        const chunkSlug = sitemapChunkMatch[1]; // e.g. "sitemap-3"
+        const record = await storage.getSitemapBySlug(website.id, chunkSlug);
         if (record?.xmlContent) {
           sitemapChunkCache.set(cacheKey, { xml: record.xmlContent, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
           res.setHeader("Content-Type", "application/xml; charset=utf-8");
@@ -1282,7 +1283,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const { buildSitemapXml } = await import("./services/sitemap");
         const xml = buildSitemapXml(urls);
         sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
-        if (record) storage.updateSitemapXml(website.id, record.slug, xml).catch(() => {});
+        storage.updateSitemapXml(website.id, chunkSlug, xml).catch(() => {});
         res.setHeader("Content-Type", "application/xml; charset=utf-8");
         res.setHeader("Cache-Control", "public, max-age=3600");
         return res.send(xml);

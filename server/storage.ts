@@ -490,6 +490,27 @@ export async function getSitemaps(websiteId: string): Promise<Sitemap[]> {
   return db.select().from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(asc(sitemaps.name));
 }
 
+// Lightweight version — omits xmlContent so the response stays small even for sites with 28+ chunks
+export async function getSitemapsMeta(websiteId: string) {
+  return db.select({
+    id: sitemaps.id,
+    websiteId: sitemaps.websiteId,
+    name: sitemaps.name,
+    slug: sitemaps.slug,
+    urlCount: sitemaps.urlCount,
+    r2Key: sitemaps.r2Key,
+    lastGenerated: sitemaps.lastGenerated,
+    createdAt: sitemaps.createdAt,
+    updatedAt: sitemaps.updatedAt,
+  }).from(sitemaps).where(eq(sitemaps.websiteId, websiteId)).orderBy(asc(sitemaps.name));
+}
+
+// Fetch a single chunk's xmlContent by slug — avoids loading all N chunks for one row
+export async function getSitemapBySlug(websiteId: string, slug: string): Promise<Sitemap | undefined> {
+  const [row] = await db.select().from(sitemaps).where(and(eq(sitemaps.websiteId, websiteId), eq(sitemaps.slug, slug)));
+  return row;
+}
+
 export async function getSitemap(id: string): Promise<Sitemap | undefined> {
   const [row] = await db.select().from(sitemaps).where(eq(sitemaps.id, id));
   return row;
