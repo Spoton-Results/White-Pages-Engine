@@ -64,6 +64,16 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Run safe schema migrations (idempotent ADD COLUMN IF NOT EXISTS)
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`);
+    console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
+  } catch (err) {
+    console.error("[startup] Schema migration failed (non-fatal):", err);
+  }
+
   // Seed database on startup
   try {
     await seedDatabase();

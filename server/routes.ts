@@ -36,11 +36,20 @@ export async function warmSitemapCache(websiteId: string): Promise<void> {
     const { buildSitemapXml } = await import("./services/sitemap");
     for (let i = 0; i < sitemapList.length; i++) {
       const cacheKey = `${websiteId}:${i}`;
+      // 1. Already warm in memory — done
       const cached = sitemapChunkCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
-        console.log(`[sitemap-warmup] chunk ${i + 1}/${sitemapList.length} already warm for ${website.domain}`);
+        console.log(`[sitemap-warmup] chunk ${i + 1}/${sitemapList.length} already in memory for ${website.domain}`);
         continue;
       }
+      // 2. Stored in DB — fast path (single row lookup, no 50K-page scan)
+      const record = sitemapList[i];
+      if (record?.xmlContent) {
+        sitemapChunkCache.set(cacheKey, { xml: record.xmlContent, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+        console.log(`[sitemap-warmup] chunk ${i + 1}/${sitemapList.length} loaded from DB for ${website.domain}`);
+        continue;
+      }
+      // 3. Not stored yet — build from pages (slow, one-time cost) + persist to DB
       const offset = i * 50000;
       const chunk = await storage.getPages(websiteId, { status: "published", limit: 50000, offset });
       const baseUrl = `https://${website.domain}`;
@@ -51,7 +60,8 @@ export async function warmSitemapCache(websiteId: string): Promise<void> {
       }));
       const xml = buildSitemapXml(urls);
       sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
-      console.log(`[sitemap-warmup] Warmed chunk ${i + 1}/${sitemapList.length} for ${website.domain} (${urls.length} URLs)`);
+      await storage.updateSitemapXml(websiteId, record?.slug ?? `sitemap-${i + 1}`, xml).catch(() => {});
+      console.log(`[sitemap-warmup] Built+stored chunk ${i + 1}/${sitemapList.length} for ${website.domain} (${urls.length} URLs)`);
     }
   } catch (err) {
     console.error(`[sitemap-warmup] Failed for ${websiteId}:`, err);
@@ -1238,18 +1248,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ));
       }
 
-      // Individual sitemap files (e.g. /sitemap-1.xml) — served with 1-hour cache
-      // to avoid 3-4s live DB queries that cause Googlebot "Couldn't fetch" timeouts.
+      // Individual sitemap files (e.g. /sitemap-1.xml)
+      // Serve order: memory cache → stored DB xml → live page query (one-time cost, then stored)
       const sitemapChunkMatch = rawSlug.match(/^(sitemap-(\d+))\.xml$/);
       if (sitemapChunkMatch) {
         const chunkIndex = parseInt(sitemapChunkMatch[2], 10) - 1;
         const cacheKey = `${website.id}:${chunkIndex}`;
+        // 1. In-memory cache hit (fastest — sub-ms)
         const cached = sitemapChunkCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
           res.setHeader("Content-Type", "application/xml; charset=utf-8");
           res.setHeader("Cache-Control", "public, max-age=3600");
           return res.send(cached.xml);
         }
+        // 2. Stored XML in DB row — fast single-row lookup (~10ms), immune to DB load
+        const sitemapList = await storage.getSitemaps(website.id);
+        const record = sitemapList[chunkIndex];
+        if (record?.xmlContent) {
+          sitemapChunkCache.set(cacheKey, { xml: record.xmlContent, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+          res.setHeader("Content-Type", "application/xml; charset=utf-8");
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          return res.send(record.xmlContent);
+        }
+        // 3. Not yet stored — build from pages (slow, one-time), then persist to DB for future
         const offset = chunkIndex * 50000;
         const chunk = await storage.getPages(website.id, { status: "published", limit: 50000, offset });
         const baseUrl = `https://${website.domain}`;
@@ -1261,6 +1282,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const { buildSitemapXml } = await import("./services/sitemap");
         const xml = buildSitemapXml(urls);
         sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+        if (record) storage.updateSitemapXml(website.id, record.slug, xml).catch(() => {});
         res.setHeader("Content-Type", "application/xml; charset=utf-8");
         res.setHeader("Cache-Control", "public, max-age=3600");
         return res.send(xml);

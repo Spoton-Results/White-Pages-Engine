@@ -80,6 +80,7 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
       slug,
       urlCount: urls.length,
       r2Key: key,
+      xmlContent: xml,
       lastGenerated: new Date(),
     });
 

@@ -505,6 +505,12 @@ export async function upsertSitemap(data: InsertSitemap): Promise<Sitemap> {
   return row;
 }
 
+export async function updateSitemapXml(websiteId: string, slug: string, xmlContent: string): Promise<void> {
+  await db.update(sitemaps)
+    .set({ xmlContent, updatedAt: new Date() })
+    .where(and(eq(sitemaps.websiteId, websiteId), eq(sitemaps.slug, slug)));
+}
+
 // ─── Page Metrics ─────────────────────────────────────────────────────────────
 
 export async function getPageMetrics(pageId: string, days = 30): Promise<PageMetric[]> {
