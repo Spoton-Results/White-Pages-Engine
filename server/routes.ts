@@ -16,6 +16,17 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 
+// ── Sitemap chunk cache ───────────────────────────────────────────────────────
+// Serving 50K-row sitemap chunks inline takes 3-4s per request (live DB query).
+// Cache the built XML for 1 hour so Googlebot never times out on retry.
+const sitemapChunkCache = new Map<string, { xml: string; expiresAt: number }>();
+const SITEMAP_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+export function invalidateSitemapCache(websiteId: string) {
+  for (const key of sitemapChunkCache.keys()) {
+    if (key.startsWith(websiteId + ":")) sitemapChunkCache.delete(key);
+  }
+}
+
 function notFoundHtml(msg: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title>
   <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8f9fa;}
@@ -987,6 +998,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const website = await storage.getWebsite((req.params.websiteId as string));
     if (!website) return res.status(404).json({ message: "Website not found" });
 
+    // Clear chunk cache so regenerated content is served immediately
+    invalidateSitemapCache(req.params.websiteId as string);
     const keys = await generateSitemapsForWebsite((req.params.websiteId as string), website.domain);
     return res.json({ message: "Sitemaps generated", keys });
   });
@@ -1193,10 +1206,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ));
       }
 
-      // Individual sitemap files (e.g. /sitemap-1.xml) — serve inline, no redirect
+      // Individual sitemap files (e.g. /sitemap-1.xml) — served with 1-hour cache
+      // to avoid 3-4s live DB queries that cause Googlebot "Couldn't fetch" timeouts.
       const sitemapChunkMatch = rawSlug.match(/^(sitemap-(\d+))\.xml$/);
       if (sitemapChunkMatch) {
         const chunkIndex = parseInt(sitemapChunkMatch[2], 10) - 1;
+        const cacheKey = `${website.id}:${chunkIndex}`;
+        const cached = sitemapChunkCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          res.setHeader("Content-Type", "application/xml; charset=utf-8");
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          return res.send(cached.xml);
+        }
         const offset = chunkIndex * 50000;
         const chunk = await storage.getPages(website.id, { status: "published", limit: 50000, offset });
         const baseUrl = `https://${website.domain}`;
@@ -1206,8 +1227,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           priority: (p as any).pageType === "state_hub" ? "0.9" : (p as any).pageType === "city_hub" ? "0.8" : "0.7",
         }));
         const { buildSitemapXml } = await import("./services/sitemap");
-        res.setHeader("Content-Type", "application/xml");
-        return res.send(buildSitemapXml(urls));
+        const xml = buildSitemapXml(urls);
+        sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.send(xml);
       }
 
       // Robots.txt — serve inline (no redirect; Google does not follow redirects for robots.txt)
