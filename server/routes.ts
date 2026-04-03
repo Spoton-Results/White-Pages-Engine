@@ -27,6 +27,37 @@ export function invalidateSitemapCache(websiteId: string) {
   }
 }
 
+export async function warmSitemapCache(websiteId: string): Promise<void> {
+  try {
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return;
+    const sitemapList = await storage.getSitemaps(websiteId);
+    if (sitemapList.length === 0) return;
+    const { buildSitemapXml } = await import("./services/sitemap");
+    for (let i = 0; i < sitemapList.length; i++) {
+      const cacheKey = `${websiteId}:${i}`;
+      const cached = sitemapChunkCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        console.log(`[sitemap-warmup] chunk ${i + 1}/${sitemapList.length} already warm for ${website.domain}`);
+        continue;
+      }
+      const offset = i * 50000;
+      const chunk = await storage.getPages(websiteId, { status: "published", limit: 50000, offset });
+      const baseUrl = `https://${website.domain}`;
+      const urls = chunk.map((p) => ({
+        loc: `${baseUrl}/${p.slug}`,
+        lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+        priority: (p as any).pageType === "state_hub" ? "0.9" : (p as any).pageType === "city_hub" ? "0.8" : "0.7",
+      }));
+      const xml = buildSitemapXml(urls);
+      sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+      console.log(`[sitemap-warmup] Warmed chunk ${i + 1}/${sitemapList.length} for ${website.domain} (${urls.length} URLs)`);
+    }
+  } catch (err) {
+    console.error(`[sitemap-warmup] Failed for ${websiteId}:`, err);
+  }
+}
+
 function notFoundHtml(msg: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title>
   <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8f9fa;}

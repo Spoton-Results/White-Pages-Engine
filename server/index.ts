@@ -140,6 +140,28 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+
+      // Pre-warm sitemap chunk cache for all websites after server is ready.
+      // Without this, the first Googlebot hit after a deploy triggers a slow 3-4s
+      // DB query per chunk (50K rows each), causing "Couldn't fetch" timeouts.
+      // Warmup runs sequentially in background to avoid hammering the DB.
+      setImmediate(async () => {
+        try {
+          const { getWebsites } = await import("./storage");
+          const { warmSitemapCache } = await import("./routes");
+          const allWebsites = await getWebsites();
+          const withSitemaps = allWebsites.filter(w => w.publishedPageCount && w.publishedPageCount > 0);
+          if (withSitemaps.length > 0) {
+            console.log(`[startup] Pre-warming sitemap cache for ${withSitemaps.length} website(s)...`);
+            for (const w of withSitemaps) {
+              await warmSitemapCache(w.id);
+            }
+            console.log("[startup] Sitemap cache warmup complete.");
+          }
+        } catch (err) {
+          console.error("[startup] Sitemap warmup failed (non-fatal):", err);
+        }
+      });
     },
   );
 })();
