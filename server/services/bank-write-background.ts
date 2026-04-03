@@ -69,25 +69,39 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   let done = 0;
   let failed = 0;
 
-  for (let i = 0; i < progress.length; i++) {
-    const entry = progress[i];
-    if (entry.status === "done") { done++; continue; }   // already completed before restart
-    if (entry.status === "error") { failed++; continue; } // permanently failed — skip
+  // Count already-finished entries from a previous run
+  for (const entry of progress) {
+    if (entry.status === "done") done++;
+    else if (entry.status === "error") failed++;
+  }
 
-    // Mark running
-    progress[i] = { ...entry, status: "running" };
+  // Process 3 services at a time (same as the previous non-persistent implementation)
+  const CONCURRENCY = 3;
+  const pending = progress
+    .map((entry, i) => ({ entry, i }))
+    .filter(({ entry }) => entry.status !== "done" && entry.status !== "error");
+
+  for (let b = 0; b < pending.length; b += CONCURRENCY) {
+    const batch = pending.slice(b, b + CONCURRENCY);
+
+    // Mark batch as running
+    for (const { i, entry } of batch) {
+      progress[i] = { ...entry, status: "running" };
+    }
     await storage.updateGenerationJob(jobId, { settings: { ...settings, progress } as any });
 
-    try {
-      await storage.deleteVariationBanks(job.websiteId, entry.serviceName);
-      await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
-      progress[i] = { ...entry, status: "done" };
-      done++;
-    } catch (err: any) {
-      console.error(`[bank-write] Failed for "${entry.serviceName}":`, err?.message ?? err);
-      progress[i] = { ...entry, status: "error" };
-      failed++;
-    }
+    await Promise.all(batch.map(async ({ i, entry }) => {
+      try {
+        await storage.deleteVariationBanks(job.websiteId, entry.serviceName);
+        await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
+        progress[i] = { ...entry, status: "done" };
+        done++;
+      } catch (err: any) {
+        console.error(`[bank-write] Failed for "${entry.serviceName}":`, err?.message ?? err);
+        progress[i] = { ...entry, status: "error" };
+        failed++;
+      }
+    }));
 
     await storage.updateGenerationJob(jobId, {
       settings: { ...settings, progress } as any,
