@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -164,6 +164,43 @@ export default function JobsPage() {
     const matchSearch = !locFilter || loc.name.toLowerCase().includes(locFilter.toLowerCase()) || (loc.stateCode || "").toLowerCase().includes(locFilter.toLowerCase());
     return matchType && matchSearch;
   });
+
+  const selectedLocSet = useMemo(() => new Set(form.locationIds), [form.locationIds]);
+
+  const JOBS_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+  const cityLocGroups = useMemo(() => {
+    if (locTypeFilter !== "city") return {} as Record<string, any[]>;
+    const groups: Record<string, any[]> = {};
+    filteredLocations.forEach((loc: any) => {
+      const letter = loc.name?.[0]?.toUpperCase() ?? "#";
+      if (!groups[letter]) groups[letter] = [];
+      groups[letter].push(loc);
+    });
+    return groups;
+  }, [filteredLocations, locTypeFilter]);
+
+  const cityLocAvailLetters = useMemo(() => new Set(Object.keys(cityLocGroups)), [cityLocGroups]);
+
+  function isCityLocLetterFull(letter: string): boolean {
+    return (cityLocGroups[letter] ?? []).every((loc: any) => selectedLocSet.has(loc.id));
+  }
+
+  function isCityLocLetterPartial(letter: string): boolean {
+    const g: any[] = cityLocGroups[letter] ?? [];
+    return g.some((loc: any) => selectedLocSet.has(loc.id)) && !isCityLocLetterFull(letter);
+  }
+
+  function toggleCityLocLetter(letter: string): void {
+    const g: any[] = cityLocGroups[letter] ?? [];
+    if (!g.length) return;
+    const allSel = isCityLocLetterFull(letter);
+    setForm(prev => {
+      const ids = new Set(prev.locationIds);
+      g.forEach((loc: any) => (allSel ? ids.delete(loc.id) : ids.add(loc.id)));
+      return { ...prev, locationIds: Array.from(ids) };
+    });
+  }
 
   const totalPages = form.locationIds.length * form.serviceIds.length;
 
@@ -436,17 +473,75 @@ export default function JobsPage() {
                   </Select>
                 </div>
 
+                {/* Alphabet bar — only in Cities mode */}
+                {locTypeFilter === "city" && (
+                  <>
+                    <div className="overflow-x-auto">
+                      <div className="flex gap-0.5 min-w-max pb-0.5" data-testid="div-jobs-alphabet-bar">
+                        {JOBS_ALPHABET.map(letter => {
+                          const avail = cityLocAvailLetters.has(letter);
+                          const fully = avail && isCityLocLetterFull(letter);
+                          const partial = avail && isCityLocLetterPartial(letter);
+                          return (
+                            <button
+                              key={letter}
+                              type="button"
+                              disabled={!avail}
+                              onClick={() => toggleCityLocLetter(letter)}
+                              data-testid={`button-jobletter-${letter}`}
+                              className={`w-6 h-6 rounded text-xs font-mono font-semibold transition-colors ${
+                                fully   ? "bg-primary text-primary-foreground" :
+                                partial ? "bg-primary/25 text-primary border border-primary/40" :
+                                avail   ? "bg-muted hover:bg-muted-foreground/20 text-foreground" :
+                                          "text-muted-foreground/25 cursor-not-allowed"
+                              }`}
+                            >
+                              {letter}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <p className="text-xs font-medium" data-testid="text-jobs-city-count">
+                      {form.locationIds.filter(id => locations.find((l: any) => l.id === id && l.type === "city")).length.toLocaleString()} cities selected
+                    </p>
+                  </>
+                )}
+
+                {/* Location list */}
                 <div className="border rounded-md p-2 max-h-44 overflow-y-auto space-y-0.5">
-                  {filteredLocations.length === 0
-                    ? <p className="text-xs text-muted-foreground px-1 py-2">No locations match.</p>
-                    : filteredLocations.map((loc: any) => (
+                  {filteredLocations.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-1 py-2">No locations match.</p>
+                  ) : locTypeFilter === "city" && !locFilter ? (
+                    /* Grouped alphabetical view for cities */
+                    <>
+                      {Object.entries(cityLocGroups)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([letter, group]) => (
+                          <div key={letter}>
+                            <div className="sticky top-0 bg-muted/90 backdrop-blur-sm px-1 py-0.5 text-xs font-bold text-muted-foreground tracking-widest rounded mb-0.5" data-testid={`header-jobletter-${letter}`}>
+                              {letter}
+                            </div>
+                            {(group as any[]).map((loc: any) => (
+                              <label key={loc.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 px-1 py-1 rounded" data-testid={`checkbox-location-${loc.id}`}>
+                                <input type="checkbox" className="accent-primary" checked={selectedLocSet.has(loc.id)} onChange={() => toggleSelection("locationIds", loc.id)} />
+                                <span className="flex-1">{loc.name}</span>
+                                <span className="text-xs text-muted-foreground">{loc.stateCode}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ))}
+                    </>
+                  ) : (
+                    /* Flat list for states/all, or when searching */
+                    filteredLocations.map((loc: any) => (
                       <label key={loc.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 px-1 py-1 rounded" data-testid={`checkbox-location-${loc.id}`}>
-                        <input type="checkbox" className="accent-primary" checked={form.locationIds.includes(loc.id)} onChange={() => toggleSelection("locationIds", loc.id)} />
+                        <input type="checkbox" className="accent-primary" checked={selectedLocSet.has(loc.id)} onChange={() => toggleSelection("locationIds", loc.id)} />
                         <span className="flex-1">{loc.name}</span>
                         <span className="text-xs text-muted-foreground">{loc.type === "state" ? "State" : loc.stateCode}</span>
                       </label>
                     ))
-                  }
+                  )}
                 </div>
               </div>
             )}

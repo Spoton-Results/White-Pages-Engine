@@ -263,6 +263,50 @@ export default function BulkGeneratorPage() {
   const estimatedPages = selectedServices.size * targetCount;
   const overLimit = estimatedPages > MAX_SAFE_PAGES;
 
+  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+  const cityGroups = useMemo(() => {
+    const groups: Record<string, typeof filteredCities> = {};
+    filteredCities.forEach((c: any) => {
+      const letter = c.name?.[0]?.toUpperCase() ?? "#";
+      if (!groups[letter]) groups[letter] = [];
+      groups[letter].push(c);
+    });
+    return groups;
+  }, [filteredCities]);
+
+  const cityIndexMap = useMemo(() => {
+    const m = new Map<string, number>();
+    filteredCities.forEach((c: any, i: number) => m.set(c.slug, i));
+    return m;
+  }, [filteredCities]);
+
+  const cityAvailableLetters = useMemo(() => new Set(Object.keys(cityGroups)), [cityGroups]);
+
+  function isCityLetterFullySelected(letter: string): boolean {
+    return (cityGroups[letter] ?? []).every((c: any) => selectedCitySlugs.has(c.slug));
+  }
+
+  function isCityLetterPartial(letter: string): boolean {
+    const g: any[] = cityGroups[letter] ?? [];
+    return g.some((c: any) => selectedCitySlugs.has(c.slug)) && !isCityLetterFullySelected(letter);
+  }
+
+  function toggleCityLetter(letter: string): void {
+    const g: any[] = cityGroups[letter] ?? [];
+    if (!g.length) return;
+    const allSel = isCityLetterFullySelected(letter);
+    setSelectedCitySlugs(prev => {
+      const n = new Set(prev);
+      g.forEach((c: any) => (allSel ? n.delete(c.slug) : n.add(c.slug)));
+      return n;
+    });
+  }
+
+  function clearAllCities(): void {
+    setSelectedCitySlugs(new Set());
+  }
+
   function handleCityClick(e: React.MouseEvent, idx: number, slug: string) {
     e.preventDefault();
     setSelectedCitySlugs(prev => {
@@ -561,29 +605,86 @@ export default function BulkGeneratorPage() {
                         <Button variant="outline" size="sm" onClick={selectAllCities} data-testid="button-select-all-cities">
                           {allCitiesSelected ? "Deselect All" : "Select All"}
                         </Button>
+                        <Button variant="outline" size="sm" onClick={clearAllCities} data-testid="button-clear-all-cities" disabled={selectedCitySlugs.size === 0}>
+                          Clear All
+                        </Button>
                       </div>
-                      <ScrollArea className="h-64 border rounded-md p-2">
-                        <div className="space-y-0.5">
-                          {filteredCities.map((loc: any, idx: number) => (
-                            <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-city-${loc.slug}`}
-                              onClick={e => handleCityClick(e, idx, loc.slug)}>
-                              <Checkbox
-                                checked={selectedCitySlugs.has(loc.slug)}
-                                data-testid={`checkbox-city-${loc.slug}`}
-                              />
-                              <span className="text-sm font-medium">{loc.name}</span>
-                              <span className="text-xs text-muted-foreground">{loc.stateCode}</span>
-                              {loc.population > 0 && (
-                                <span className="text-xs text-muted-foreground ml-auto">{loc.population?.toLocaleString()}</span>
-                              )}
-                            </label>
-                          ))}
-                          {filteredCities.length === 0 && (
-                            <p className="text-center py-6 text-muted-foreground text-sm">No cities match.</p>
-                          )}
+
+                      {/* Alphabet bar */}
+                      <div className="overflow-x-auto">
+                        <div className="flex gap-0.5 min-w-max pb-0.5" data-testid="div-alphabet-bar">
+                          {ALPHABET.map(letter => {
+                            const avail = cityAvailableLetters.has(letter);
+                            const fully = avail && isCityLetterFullySelected(letter);
+                            const partial = avail && isCityLetterPartial(letter);
+                            return (
+                              <button
+                                key={letter}
+                                type="button"
+                                disabled={!avail}
+                                onClick={() => toggleCityLetter(letter)}
+                                data-testid={`button-letter-${letter}`}
+                                className={`w-7 h-7 rounded text-xs font-mono font-semibold transition-colors ${
+                                  fully   ? "bg-primary text-primary-foreground" :
+                                  partial ? "bg-primary/25 text-primary border border-primary/40" :
+                                  avail   ? "bg-muted hover:bg-muted-foreground/20 text-foreground" :
+                                            "text-muted-foreground/25 cursor-not-allowed"
+                                }`}
+                              >
+                                {letter}
+                              </button>
+                            );
+                          })}
                         </div>
+                      </div>
+
+                      {/* Counter */}
+                      <p className="text-sm font-medium" data-testid="text-city-selected-count">
+                        {selectedCitySlugs.size.toLocaleString()} {selectedCitySlugs.size === 1 ? "city" : "cities"} selected
+                        <span className="text-muted-foreground font-normal"> of {dbCities.length.toLocaleString()} &nbsp;·&nbsp; Shift-click to select a range</span>
+                      </p>
+
+                      {/* City list — grouped when not searching, flat when searching */}
+                      <ScrollArea className="h-64 border rounded-md p-2">
+                        {citySearch ? (
+                          <div className="space-y-0.5">
+                            {filteredCities.map((loc: any, idx: number) => (
+                              <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-city-${loc.slug}`}
+                                onClick={e => handleCityClick(e, idx, loc.slug)}>
+                                <Checkbox checked={selectedCitySlugs.has(loc.slug)} data-testid={`checkbox-city-${loc.slug}`} />
+                                <span className="text-sm font-medium">{loc.name}</span>
+                                <span className="text-xs text-muted-foreground">{loc.stateCode}</span>
+                                {loc.population > 0 && <span className="text-xs text-muted-foreground ml-auto">{loc.population?.toLocaleString()}</span>}
+                              </label>
+                            ))}
+                            {filteredCities.length === 0 && <p className="text-center py-6 text-muted-foreground text-sm">No cities match.</p>}
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {Object.entries(cityGroups)
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([letter, group]) => (
+                                <div key={letter}>
+                                  <div className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm px-2 py-0.5 text-xs font-bold text-muted-foreground tracking-widest rounded mb-0.5" data-testid={`header-letter-${letter}`}>
+                                    {letter}
+                                  </div>
+                                  {(group as any[]).map((loc: any) => {
+                                    const idx = cityIndexMap.get(loc.slug) ?? 0;
+                                    return (
+                                      <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-city-${loc.slug}`}
+                                        onClick={e => handleCityClick(e, idx, loc.slug)}>
+                                        <Checkbox checked={selectedCitySlugs.has(loc.slug)} data-testid={`checkbox-city-${loc.slug}`} />
+                                        <span className="text-sm font-medium">{loc.name}</span>
+                                        <span className="text-xs text-muted-foreground">{loc.stateCode}</span>
+                                        {loc.population > 0 && <span className="text-xs text-muted-foreground ml-auto">{loc.population?.toLocaleString()}</span>}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                          </div>
+                        )}
                       </ScrollArea>
-                      <p className="text-xs text-muted-foreground">{selectedCitySlugs.size} of {dbCities.length} cities selected &nbsp;·&nbsp; Shift-click to select a range</p>
                     </>
                   )}
                 </div>
