@@ -205,6 +205,15 @@ export default function BulkGeneratorPage() {
     const svcs = Array.from(selectedServices);
     if (svcs.length === 0) return;
 
+    if (overLimit) {
+      toast({
+        title: "Job too large — not started",
+        description: `${estimatedPages.toLocaleString()} estimated pages exceeds the 500,000-page safety limit. Switch to "Specific States" mode or select fewer cities.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Build the blueprint queue: all blueprints when cycling, else just the selected one
     const queue = cycleBlueprints && blueprints.length > 1
       ? blueprints.map((bp: any) => bp.id)
@@ -249,6 +258,10 @@ export default function BulkGeneratorPage() {
 
   const allStatesSelected = filteredStates.length > 0 && filteredStates.every((l: any) => selectedStateCodes.has(l.stateCode));
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every((l: any) => selectedCitySlugs.has(l.slug));
+
+  const MAX_SAFE_PAGES = 500_000;
+  const estimatedPages = selectedServices.size * targetCount;
+  const overLimit = estimatedPages > MAX_SAFE_PAGES;
 
   function handleCityClick(e: React.MouseEvent, idx: number, slug: string) {
     e.preventDefault();
@@ -603,23 +616,29 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Will {overwrite ? "create or update" : "create up to"} <strong>{selectedServices.size * targetCount}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
+                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount.toLocaleString()} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
                 {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {overLimit && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2.5 text-sm text-destructive" data-testid="alert-over-limit">
+                  <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                  <span><strong>{estimatedPages.toLocaleString()} pages</strong> exceeds the 500,000-page safety limit. Switch to "Specific States" mode or select fewer cities before generating.</span>
+                </div>
+              )}
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
                   <Button
                     size="lg"
                     onClick={runAllServices}
-                    disabled={isRunningAll || targetCount === 0}
+                    disabled={isRunningAll || targetCount === 0 || overLimit}
                     data-testid="button-generate"
                     className="gap-2"
                   >
                     {isRunningAll
                       ? <><Loader2 className="size-4 animate-spin" /> Running in background...</>
-                      : <><Play className="size-4" /> Generate {selectedServices.size * targetCount} Pages</>}
+                      : <><Play className="size-4" /> Generate {estimatedPages.toLocaleString()} Pages</>}
                   </Button>
                 </div>
                 {isRunningAll && activeJobId && (
