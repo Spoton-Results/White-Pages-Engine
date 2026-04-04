@@ -287,14 +287,14 @@ export default function JobsPage() {
                     {job.totalPages > 0 && (
                       <div className="mt-2">
                         <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                          <span>{job.processedPages} / {job.totalPages} pages</span>
+                          <span>{Math.min(job.processedPages, job.totalPages)} / {job.totalPages} pages</span>
                           <div className="flex items-center gap-2">
                             <span className="text-emerald-600">{job.passedPages} passed</span>
                             {job.failedPages > 0 && <span className="text-destructive">{job.failedPages} failed</span>}
-                            {(() => { const skipped = job.processedPages - job.passedPages - (job.failedPages ?? 0); return skipped > 0 ? <span className="text-amber-500">{skipped} skipped</span> : null; })()}
+                            {(() => { const skipped = Math.min(job.processedPages, job.totalPages) - job.passedPages - (job.failedPages ?? 0); return skipped > 0 ? <span className="text-amber-500">{skipped} skipped</span> : null; })()}
                           </div>
                         </div>
-                        <Progress value={(job.processedPages / job.totalPages) * 100} className="h-1.5" />
+                        <Progress value={Math.min((job.processedPages / job.totalPages) * 100, 100)} className="h-1.5" />
                       </div>
                     )}
 

@@ -154,13 +154,33 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
 
-  // Carry forward counters from any previous interrupted run so a server restart
-  // does not reset "passed" back to 0 on the next flush.
-  const basePassedPages = job.passedPages ?? 0;
-  const baseProcessedPages = job.processedPages ?? 0;
+  // ── Resume-aware: skip services that already completed before a restart ───
+  const completedServiceSet = new Set<number>();
+  let resumePassedPages = 0, resumeProcessedPages = 0;
+
+  if (Array.isArray(settings.progress)) {
+    settings.progress.forEach((p: any, i: number) => {
+      if (p.status === "done" || p.status === "no-bank") {
+        completedServiceSet.add(i);
+        const svcPassed = (p.created ?? 0) + (p.updated ?? 0);
+        const svcProcessed = svcPassed + (p.skipped ?? 0) + (p.errors ?? 0);
+        resumePassedPages += svcPassed;
+        resumeProcessedPages += svcProcessed;
+      } else if (p.status === "running") {
+        settings.progress[i] = { ...p, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 };
+      }
+    });
+  }
+
+  const basePassedPages = resumePassedPages;
+  const baseProcessedPages = resumeProcessedPages;
 
   const totalPages = services.length * targets.length;
   await storage.updateGenerationJob(jobId, { totalPages });
+
+  if (completedServiceSet.size > 0) {
+    console.log(`[bulk-background] Resuming job ${jobId} — ${completedServiceSet.size}/${services.length} services already done, skipping them`);
+  }
 
   const blueprintTemplate = blueprint ? {
     titleTemplate: blueprint.titleTemplate,
@@ -174,6 +194,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
+    if (completedServiceSet.has(si)) continue;
+
     // Check for cancellation before starting each service so Cancel actually stops the job.
     // Without this check the worker runs through all services even after the user cancels.
     const liveJob = await storage.getGenerationJob(jobId);
@@ -327,9 +349,11 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           await storage.syncWebsitePublishedCount(job.websiteId);
           return;
         }
+        const rawProcessed = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
+        const rawPassed = basePassedPages + totalCreated + totalUpdated;
         await storage.updateGenerationJob(jobId, {
-          processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
-          passedPages: basePassedPages + totalCreated + totalUpdated,
+          processedPages: Math.min(rawProcessed, totalPages),
+          passedPages: Math.min(rawPassed, totalPages),
           failedPages: totalFailed,
         });
       }
@@ -339,21 +363,25 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     await flushInsertBatch();
 
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
+    const rawProcessed2 = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
+    const rawPassed2 = basePassedPages + totalCreated + totalUpdated;
     await storage.updateGenerationJob(jobId, {
       settings: settings as any,
-      processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
-      passedPages: basePassedPages + totalCreated + totalUpdated,
+      processedPages: Math.min(rawProcessed2, totalPages),
+      passedPages: Math.min(rawPassed2, totalPages),
       failedPages: totalFailed,
     });
   }
 
   // Final sync and sitemap
   await storage.syncWebsitePublishedCount(job.websiteId);
+  const rawFinal = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
+  const rawPassedFinal = basePassedPages + totalCreated + totalUpdated;
   await storage.updateGenerationJob(jobId, {
     status: "completed",
     completedAt: new Date(),
-    processedPages: baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped,
-    passedPages: basePassedPages + totalCreated + totalUpdated,
+    processedPages: Math.min(rawFinal, totalPages),
+    passedPages: Math.min(rawPassedFinal, totalPages),
     failedPages: totalFailed,
   });
 
