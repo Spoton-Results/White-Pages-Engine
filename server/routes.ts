@@ -1783,5 +1783,68 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ leads: items });
   });
 
+  // ── One-time admin fix: rewrite Related Services links to match blueprint slug format ──
+  app.post("/api/admin/fix-related-links/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const stateMap: Record<string, string> = {
+      al:"alabama",ak:"alaska",az:"arizona",ar:"arkansas",ca:"california",
+      co:"colorado",ct:"connecticut",de:"delaware",fl:"florida",ga:"georgia",
+      hi:"hawaii",id:"idaho",il:"illinois",in:"indiana",ia:"iowa",
+      ks:"kansas",ky:"kentucky",la:"louisiana",me:"maine",md:"maryland",
+      ma:"massachusetts",mi:"michigan",mn:"minnesota",ms:"mississippi",mo:"missouri",
+      mt:"montana",ne:"nebraska",nv:"nevada",nh:"new-hampshire",nj:"new-jersey",
+      nm:"new-mexico",ny:"new-york",nc:"north-carolina",nd:"north-dakota",oh:"ohio",
+      ok:"oklahoma",or:"oregon",pa:"pennsylvania",ri:"rhode-island",sc:"south-carolina",
+      sd:"south-dakota",tn:"tennessee",tx:"texas",ut:"utah",vt:"vermont",
+      va:"virginia",wa:"washington",wv:"west-virginia",wi:"wisconsin",wy:"wyoming",
+    };
+
+    res.json({ status: "started", message: "Fixing Related Services links in background..." });
+
+    const { pool } = await import("./db");
+    let totalUpdated = 0;
+    const BATCH = 500;
+
+    for (const [abbr, fullName] of Object.entries(stateMap)) {
+      let batchCount = 0;
+      let stateTotal = 0;
+      do {
+        try {
+          const result = await pool.query(`
+            UPDATE page_versions
+            SET content_html = regexp_replace(
+              content_html,
+              '(href="/[^"]*-in-[^"]*)-${abbr}"',
+              E'\\\\1-${fullName}"',
+              'g'
+            )
+            WHERE id IN (
+              SELECT pv.id FROM page_versions pv
+              JOIN pages p ON p.id = pv.page_id
+              WHERE p.website_id = '${websiteId}' AND p.status = 'published'
+              AND pv.is_active = true
+              AND pv.content_html LIKE '%Related Services%'
+              AND pv.content_html LIKE '%-${abbr}"%'
+              LIMIT ${BATCH}
+            )
+          `);
+          batchCount = result.rowCount ?? 0;
+          stateTotal += batchCount;
+        } catch (err) {
+          console.error(`[fix-related-links] Error fixing ${abbr}:`, err);
+          batchCount = 0;
+        }
+      } while (batchCount >= BATCH);
+      if (stateTotal > 0) {
+        totalUpdated += stateTotal;
+        console.log(`[fix-related-links] ${abbr} → ${fullName}: ${stateTotal} pages updated`);
+      }
+    }
+    console.log(`[fix-related-links] Done for website ${websiteId}. Total pages updated: ${totalUpdated}`);
+  });
+
   return httpServer;
 }
