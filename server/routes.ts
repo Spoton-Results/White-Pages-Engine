@@ -1805,45 +1805,45 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     res.json({ status: "started", message: "Fixing Related Services links in background..." });
 
     const { pool } = await import("./db");
+    const PAGE_BATCH = 200;
     let totalUpdated = 0;
-    const BATCH = 500;
+    let cursor = '';
 
-    for (const [abbr, fullName] of Object.entries(stateMap)) {
-      let batchCount = 0;
-      let stateTotal = 0;
-      do {
-        try {
+    const stateEntries = Object.entries(stateMap);
+
+    (async () => {
+      try {
+        while (true) {
+          const pageRes = await pool.query(
+            `SELECT id FROM pages WHERE website_id = $1 AND status = 'published' AND id > $2 ORDER BY id LIMIT $3`,
+            [websiteId, cursor, PAGE_BATCH]
+          );
+          if (pageRes.rows.length === 0) break;
+          const pageIds = pageRes.rows.map((r: any) => r.id);
+          cursor = pageIds[pageIds.length - 1];
+
+          let setExpr = 'content_html';
+          for (const [abbr, fullName] of stateEntries) {
+            setExpr = `regexp_replace(${setExpr}, '(href="/[^"]*-in-[^"]*)-${abbr}"', E'\\\\1-${fullName}"', 'g')`;
+          }
+
           const result = await pool.query(`
             UPDATE page_versions
-            SET content_html = regexp_replace(
-              content_html,
-              '(href="/[^"]*-in-[^"]*)-${abbr}"',
-              E'\\\\1-${fullName}"',
-              'g'
-            )
-            WHERE id IN (
-              SELECT pv.id FROM page_versions pv
-              JOIN pages p ON p.id = pv.page_id
-              WHERE p.website_id = '${websiteId}' AND p.status = 'published'
-              AND pv.is_active = true
-              AND pv.content_html LIKE '%Related Services%'
-              AND pv.content_html LIKE '%-${abbr}"%'
-              LIMIT ${BATCH}
-            )
-          `);
-          batchCount = result.rowCount ?? 0;
-          stateTotal += batchCount;
-        } catch (err) {
-          console.error(`[fix-related-links] Error fixing ${abbr}:`, err);
-          batchCount = 0;
+            SET content_html = ${setExpr}
+            WHERE is_active = true
+            AND page_id = ANY($1::text[])
+          `, [pageIds]);
+          totalUpdated += result.rowCount ?? 0;
+
+          if (totalUpdated % 5000 < PAGE_BATCH) {
+            console.log(`[fix-related-links] Progress: ${totalUpdated} page versions processed so far...`);
+          }
         }
-      } while (batchCount >= BATCH);
-      if (stateTotal > 0) {
-        totalUpdated += stateTotal;
-        console.log(`[fix-related-links] ${abbr} → ${fullName}: ${stateTotal} pages updated`);
+        console.log(`[fix-related-links] Done for website ${websiteId}. Total page versions updated: ${totalUpdated}`);
+      } catch (err) {
+        console.error(`[fix-related-links] Fatal error:`, err);
       }
-    }
-    console.log(`[fix-related-links] Done for website ${websiteId}. Total pages updated: ${totalUpdated}`);
+    })();
   });
 
   return httpServer;
