@@ -1805,41 +1805,43 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     res.json({ status: "started", message: "Fixing Related Services links in background..." });
 
     const { pool } = await import("./db");
-    const PAGE_BATCH = 200;
+    const PAGE_BATCH = 500;
     let totalUpdated = 0;
-    let cursor = '';
-
-    const stateEntries = Object.entries(stateMap);
 
     (async () => {
       try {
-        while (true) {
-          const pageRes = await pool.query(
-            `SELECT id FROM pages WHERE website_id = $1 AND status = 'published' AND id > $2 ORDER BY id LIMIT $3`,
-            [websiteId, cursor, PAGE_BATCH]
-          );
-          if (pageRes.rows.length === 0) break;
-          const pageIds = pageRes.rows.map((r: any) => r.id);
-          cursor = pageIds[pageIds.length - 1];
+        for (const [abbr, fullName] of Object.entries(stateMap)) {
+          let cursor = '';
+          let stateTotal = 0;
+          while (true) {
+            const pageRes = await pool.query(
+              `SELECT id FROM pages WHERE website_id = $1 AND status = 'published' AND id > $2 ORDER BY id LIMIT $3`,
+              [websiteId, cursor, PAGE_BATCH]
+            );
+            if (pageRes.rows.length === 0) break;
+            const pageIds = pageRes.rows.map((r: any) => r.id);
+            cursor = pageIds[pageIds.length - 1];
 
-          let setExpr = 'content_html';
-          for (const [abbr, fullName] of stateEntries) {
-            setExpr = `regexp_replace(${setExpr}, '(href="/[^"]*-in-[^"]*)-${abbr}"', E'\\\\1-${fullName}"', 'g')`;
+            const result = await pool.query(`
+              UPDATE page_versions
+              SET content_html = regexp_replace(
+                content_html,
+                '(href="/[^"]*-in-[^"]*)-${abbr}"',
+                E'\\\\1-${fullName}"',
+                'g'
+              )
+              WHERE is_active = true
+              AND page_id = ANY($1::text[])
+              AND content_html LIKE $2
+            `, [pageIds, `%-${abbr}"%`]);
+            stateTotal += result.rowCount ?? 0;
           }
-
-          const result = await pool.query(`
-            UPDATE page_versions
-            SET content_html = ${setExpr}
-            WHERE is_active = true
-            AND page_id = ANY($1::text[])
-          `, [pageIds]);
-          totalUpdated += result.rowCount ?? 0;
-
-          if (totalUpdated % 5000 < PAGE_BATCH) {
-            console.log(`[fix-related-links] Progress: ${totalUpdated} page versions processed so far...`);
+          if (stateTotal > 0) {
+            totalUpdated += stateTotal;
+            console.log(`[fix-related-links] ${abbr} → ${fullName}: ${stateTotal} pages`);
           }
         }
-        console.log(`[fix-related-links] Done for website ${websiteId}. Total page versions updated: ${totalUpdated}`);
+        console.log(`[fix-related-links] Done for website ${websiteId}. Total: ${totalUpdated}`);
       } catch (err) {
         console.error(`[fix-related-links] Fatal error:`, err);
       }
