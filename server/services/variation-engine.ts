@@ -121,6 +121,7 @@ export function buildVariationPage(
   citiesInState?: Array<{ name: string }>,
   relatedServices?: Array<{ name: string; slug: string }>,
   websiteDomain?: string,
+  blueprintSlugTemplate?: string,
 ): VariationPageResult {
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
@@ -178,7 +179,11 @@ export function buildVariationPage(
   if (locationType === "city" && relatedServices && relatedServices.length > 0) {
     const others = relatedServices.filter(s => s.slug !== serviceSlug);
     if (others.length > 0) {
-      const locationSlug = `${slugify(city)}-${stateAbbr.toLowerCase()}`;
+      const bpUsesFullState = blueprintSlugTemplate
+        ? /\{state\}/.test(blueprintSlugTemplate) && !/\{state_abbr\}/.test(blueprintSlugTemplate)
+        : false;
+      const statePart = bpUsesFullState ? slugify(stateName) : stateAbbr.toLowerCase();
+      const locationSlug = `${slugify(city)}-${statePart}`;
       const items = others
         .map(s => {
           const pageSlug = `${s.slug}-in-${locationSlug}`;

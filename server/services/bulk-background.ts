@@ -276,6 +276,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           citiesInState,
           allRelatedServices,
           website.domain,
+          blueprintTemplate?.slugTemplate,
         );
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
