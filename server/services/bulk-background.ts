@@ -49,11 +49,16 @@ function applyBlueprintTemplates(
       .replace(/\{industry[^}]*\}/gi, "")
       .replace(/-{2,}/g, "-").replace(/\s{2,}/g, " ").trim();
   const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  let rawSlug = slugify(interp(blueprint.slugTemplate));
+  const stateLower = vars.state.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  if (stateLower && rawSlug.endsWith(`-${stateLower}-${stateLower}`)) {
+    rawSlug = rawSlug.slice(0, rawSlug.length - stateLower.length - 1);
+  }
   return {
     title: interp(blueprint.titleTemplate),
     h1: interp(blueprint.h1Template),
     metaDescription: interp(blueprint.metaDescTemplate),
-    slug: slugify(interp(blueprint.slugTemplate)),
+    slug: rawSlug,
   };
 }
 
