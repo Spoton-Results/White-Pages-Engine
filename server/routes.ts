@@ -1861,7 +1861,6 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found" });
 
-    const account = website.accountId ? await storage.getAccount(website.accountId) : null;
     const serviceName = req.query.service as string | undefined;
 
     const { pool } = await import("./db");
@@ -1877,15 +1876,17 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       services = svcRes.rows.map((r: any) => r.service);
     }
 
-    const { writeVariationsForService } = await import("./services/variation-writer");
-    type BrandCtx = import("./services/variation-writer").BrandContext;
-
-    const brandCtx: BrandCtx = {
-      brandName: account?.companyName || website.name,
-      brandDescription: account?.brandDescription || undefined,
-      voiceAndTone: account?.voiceAndTone || undefined,
-      industryName: account?.industryName || undefined,
-      industryDescription: account?.industryDescription || undefined,
+    const [brand, industries] = await Promise.all([
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    const industry = industries[0];
+    const brandCtx: BrandContext = {
+      brandName: brand?.name,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: industry?.description ?? undefined,
     };
 
     const results: Record<string, string> = {};
@@ -1893,11 +1894,8 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     for (const svc of services) {
       try {
-        await pool.query(
-          `DELETE FROM content_variation_banks WHERE website_id = $1 AND service = $2`,
-          [websiteId, svc]
-        );
-        await writeVariationsForService(svc, website.accountId || websiteId, websiteId, brandCtx);
+        await storage.deleteVariationBanks(websiteId, svc);
+        await writeVariationsForService(svc, website.accountId, websiteId, brandCtx);
         results[svc] = "regenerated";
         done++;
       } catch (err: any) {
