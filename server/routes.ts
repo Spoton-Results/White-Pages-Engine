@@ -1032,6 +1032,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(updated);
   });
 
+  app.delete("/api/jobs/:id", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.id as string);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    if (job.status === "running" || job.status === "pending") {
+      return res.status(400).json({ message: "Cannot delete a running or pending job. Cancel it first." });
+    }
+    await storage.deleteGenerationJob(req.params.id as string);
+    return res.json({ message: "Job deleted" });
+  });
+
   // ── Sitemaps ──────────────────────────────────────────────────────────────
 
   app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {

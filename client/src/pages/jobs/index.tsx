@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, Play, Square, Plus, RefreshCw, Zap, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertCircle, Play, Square, Plus, RefreshCw, Zap, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -144,6 +144,17 @@ export default function JobsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/jobs"] });
       toast({ title: "Job cancelled" });
+    },
+  });
+
+  const deleteJob = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/jobs/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: "Job deleted" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Cannot delete", description: err.message, variant: "destructive" });
     },
   });
 
@@ -348,11 +359,18 @@ export default function JobsPage() {
                     )}
                   </div>
 
-                  {job.status === "running" && (
-                    <Button variant="outline" size="sm" className="shrink-0" onClick={() => cancel.mutate(job.id)}>
-                      <Square className="size-3 mr-1" />Cancel
-                    </Button>
-                  )}
+                  <div className="flex flex-col gap-1 shrink-0">
+                    {job.status === "running" && (
+                      <Button variant="outline" size="sm" onClick={() => cancel.mutate(job.id)} data-testid={`button-cancel-${job.id}`}>
+                        <Square className="size-3 mr-1" />Cancel
+                      </Button>
+                    )}
+                    {(job.status === "completed" || job.status === "cancelled" || job.status === "error") && (
+                      <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => deleteJob.mutate(job.id)} data-testid={`button-delete-${job.id}`}>
+                        <Trash2 className="size-3 mr-1" />Remove
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))}

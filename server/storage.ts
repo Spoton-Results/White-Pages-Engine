@@ -484,6 +484,10 @@ export async function updateGenerationJob(id: string, data: Partial<InsertGenera
   return row;
 }
 
+export async function deleteGenerationJob(id: string): Promise<void> {
+  await db.delete(generationJobs).where(eq(generationJobs.id, id));
+}
+
 // ─── Sitemaps ─────────────────────────────────────────────────────────────────
 
 // Sort numerically by chunk number (sitemap-1, sitemap-2 ... sitemap-10, sitemap-11)
