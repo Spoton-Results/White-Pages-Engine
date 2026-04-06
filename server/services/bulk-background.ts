@@ -113,7 +113,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   }
 
   const brand = await storage.getBrandProfile(website.brandProfileId as string);
-  const brandName = brand?.name ?? website.domain;
+  const brandName = brand?.name || website.name || website.domain;
 
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await storage.getBlueprint(effectiveBlueprintId) : null;

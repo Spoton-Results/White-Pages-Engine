@@ -1886,6 +1886,47 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
   });
 
+  // ── Admin: fix brand name in titles, meta descriptions, and content ──
+  app.post("/api/admin/fix-brand-name/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const oldName = (req.query.old as string) || website.domain;
+    const brand = await storage.getBrandProfile(website.brandProfileId as string);
+    const newName = (req.query.new as string) || brand?.name || website.name || website.domain;
+    if (oldName === newName) return res.json({ message: "Nothing to change", oldName, newName });
+
+    const { pool } = await import("./db");
+    res.json({ message: "Started brand name fix in background", oldName, newName, websiteId });
+
+    (async () => {
+      try {
+        const r1 = await pool.query(
+          `UPDATE pages SET title = REPLACE(title, $1, $2), meta_description = REPLACE(meta_description, $1, $2) WHERE website_id = $3 AND (title LIKE $4 OR meta_description LIKE $4)`,
+          [oldName, newName, websiteId, `%${oldName}%`]
+        );
+        console.log(`[fix-brand-name] Updated ${r1.rowCount} page titles/descriptions`);
+
+        const batchSize = 5000;
+        let totalContent = 0;
+        let hasMore = true;
+        while (hasMore) {
+          const r2 = await pool.query(
+            `UPDATE page_versions SET content_html = REPLACE(content_html, $1, $2) WHERE id IN (SELECT pv.id FROM page_versions pv JOIN pages p ON pv.page_id = p.id WHERE p.website_id = $3 AND pv.content_html LIKE $4 LIMIT $5)`,
+            [oldName, newName, websiteId, `%${oldName}%`, batchSize]
+          );
+          totalContent += r2.rowCount;
+          console.log(`[fix-brand-name] Content batch: ${r2.rowCount} versions (total: ${totalContent})`);
+          hasMore = r2.rowCount === batchSize;
+        }
+        console.log(`[fix-brand-name] Done. Pages: ${r1.rowCount}, Content versions: ${totalContent}`);
+      } catch (err: any) {
+        console.error(`[fix-brand-name] Error:`, err.message);
+      }
+    })();
+  });
+
   // ── Admin: regenerate variation banks for a website ──
   app.post("/api/admin/regenerate-banks/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     const { websiteId } = req.params;
