@@ -172,8 +172,8 @@ export default function WebsitesPage() {
                 <TableRow key={w.id} data-testid={`row-website-${w.id}`}>
                   <TableCell>
                     <div className="flex items-center gap-2 font-mono text-sm">
-                      {w.domain}
-                      <a href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer">
+                      {w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ""}` : w.domain}
+                      <a href={w.settings?.parentDomain ? `https://${w.settings.parentDomain}${w.settings.proxyPath || ""}` : `https://${w.domain}`} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="size-3 text-muted-foreground hover:text-primary" />
                       </a>
                     </div>

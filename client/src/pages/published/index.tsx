@@ -103,8 +103,13 @@ export default function PublishedPagesPage() {
   );
 
   const platformBase = window.location.origin;
-  const pageUrl = (page: any) =>
-    currentWebsite ? `https://${currentWebsite.domain}/${page.slug}` : null;
+  const pageUrl = (page: any) => {
+    if (!currentWebsite) return null;
+    const pDomain = currentWebsite.settings?.parentDomain;
+    const pPath = currentWebsite.settings?.proxyPath || "";
+    if (pDomain) return `https://${pDomain}${pPath}/${page.slug}`;
+    return `https://${currentWebsite.domain}/${page.slug}`;
+  };
 
   const copyUrl = (page: any) => {
     const url = pageUrl(page);
