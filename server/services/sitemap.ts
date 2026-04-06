@@ -41,8 +41,8 @@ function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
-export async function generateSitemapsForWebsite(websiteId: string, domain: string): Promise<string[]> {
-  const baseUrl = `https://${domain}`;
+export async function generateSitemapsForWebsite(websiteId: string, domain: string, canonicalBaseOverride?: string): Promise<string[]> {
+  const baseUrl = canonicalBaseOverride || `https://${domain}`;
   const sitemapKeys: string[] = [];
   const today = new Date().toISOString().split("T")[0];
 

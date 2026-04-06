@@ -389,7 +389,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   try {
     const { generateSitemapsForWebsite } = await import("./sitemap");
-    await generateSitemapsForWebsite(job.websiteId, website.domain);
+    const pDomain = (website.settings as any)?.parentDomain;
+    const pPath = (website.settings as any)?.proxyPath || "";
+    const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+    await generateSitemapsForWebsite(job.websiteId, website.domain, canonBase);
   } catch { /* non-critical */ }
 
   // Ping Google to re-crawl the sitemap immediately after job completion

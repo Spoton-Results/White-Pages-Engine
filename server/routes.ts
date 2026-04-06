@@ -144,8 +144,11 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const demoBannerSubtext = (website.settings as any)?.demoBannerSubtext || "This page was generated automatically. Want 100,000+ pages like it for your business?";
   const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
-  const pageUrl = `https://${website.domain}/${page.slug}`;
-  const baseUrl = `https://${website.domain}`;
+  const parentDomain = (website.settings as any)?.parentDomain;
+  const proxyPath = (website.settings as any)?.proxyPath || "";
+  const canonicalBase = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
+  const pageUrl = `${canonicalBase}/${page.slug}`;
+  const baseUrl = canonicalBase;
 
   // Extract service name and location from title (e.g. "Merchant Services in Dallas, TX | Brand")
   const titleMatch = page.title.match(/^(.+?)\s+in\s+(.+?)(?:\s*\|.*)?$/i);
@@ -1042,7 +1045,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // Clear chunk cache so regenerated content is served immediately
     invalidateSitemapCache(req.params.websiteId as string);
-    const keys = await generateSitemapsForWebsite((req.params.websiteId as string), website.domain);
+    const pDomain = (website.settings as any)?.parentDomain;
+    const pPath = (website.settings as any)?.proxyPath || "";
+    const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+    const keys = await generateSitemapsForWebsite((req.params.websiteId as string), website.domain, canonBase);
     return res.json({ message: "Sitemaps generated", keys });
   });
 
@@ -1060,7 +1066,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { rows, total } = await storage.getPagesForIndexing(websiteId, offset, BATCH);
     if (rows.length === 0) return res.json({ submitted: 0, nextOffset: offset, total, done: true });
 
-    const urls = rows.map(p => `https://${website.domain}/${p.slug}`);
+    const pDom = (website.settings as any)?.parentDomain;
+    const pPth = (website.settings as any)?.proxyPath || "";
+    const idxBase = pDom ? `https://${pDom}${pPth}` : `https://${website.domain}`;
+    const urls = rows.map(p => `${idxBase}/${p.slug}`);
     const { submitUrlsToGoogle } = await import("./services/gsc-indexing");
     await submitUrlsToGoogle(urls);
 
