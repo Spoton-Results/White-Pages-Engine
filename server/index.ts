@@ -70,6 +70,11 @@ app.use((req, res, next) => {
     const { sql } = await import("drizzle-orm");
     await db.execute(sql`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`);
     console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_status ON pages(website_id, status)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`);
+    console.log("[startup] Database indexes ensured.");
   } catch (err) {
     console.error("[startup] Schema migration failed (non-fatal):", err);
   }

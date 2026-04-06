@@ -11,9 +11,11 @@
 import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
 import { submitUrlsToGoogle } from "./gsc-indexing";
+import { pool } from "../db";
 
 const INSERT_BATCH_SIZE = 100; // pages per bulk INSERT statement
 const PAGE_BATCH_SIZE = 200;  // flush job counters to DB every N pages
+const OVERWRITE_BATCH_SIZE = 50; // overwrite updates per batch SQL
 
 export interface BulkJobSettings {
   services: string[];
@@ -246,6 +248,53 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const pendingPageData: Parameters<typeof storage.createPage>[0][] = [];
     const pendingContent: string[] = [];
 
+    // Pending batch for overwrites
+    const pendingOverwrites: Array<{
+      slug: string; title: string; h1: string; meta: string;
+      wordCount: number; blueprintId: string | null; contentHtml: string;
+    }> = [];
+
+    const flushOverwriteBatch = async () => {
+      if (pendingOverwrites.length === 0) return;
+      const batch = pendingOverwrites.splice(0);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const item of batch) {
+          const pgRes = await client.query(
+            `UPDATE pages SET title=$1, h1=$2, meta_description=$3, word_count=$4, blueprint_id=$5, updated_at=NOW()
+             WHERE website_id=$6 AND slug=$7 RETURNING id`,
+            [item.title, item.h1, item.meta, item.wordCount, item.blueprintId, job.websiteId, item.slug]
+          );
+          if (pgRes.rows.length > 0) {
+            const pageId = pgRes.rows[0].id;
+            const verRes = await client.query(
+              `SELECT COALESCE(MAX(version), 0) + 1 AS next_ver FROM page_versions WHERE page_id=$1`,
+              [pageId]
+            );
+            const nextVer = verRes.rows[0].next_ver;
+            await client.query(
+              `UPDATE page_versions SET is_active=false WHERE page_id=$1`,
+              [pageId]
+            );
+            await client.query(
+              `INSERT INTO page_versions(id, page_id, version, content_html, is_active)
+               VALUES(gen_random_uuid(), $1, $2, $3, true)`,
+              [pageId, nextVer, item.contentHtml]
+            );
+          }
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+      svcUpdated += batch.length;
+      totalUpdated += batch.length;
+    };
+
     let pagesSinceLastFlush = 0;
 
     const flushInsertBatch = async () => {
@@ -303,21 +352,15 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             svcSkipped++;
             totalSkipped++;
           } else {
-            // Flush pending batch before overwrite ops (need consistent state)
-            await flushInsertBatch();
-            const existingPage = await storage.getPageBySlug(job.websiteId, finalSlug);
-            if (existingPage) {
-              await storage.updatePage(existingPage.id, {
-                title: finalTitle, h1: finalH1, metaDescription: finalMeta,
-                wordCount: result.wordCount, blueprintId: effectiveBlueprintId || null,
-              });
-              const existingVersions = await storage.getPageVersions(existingPage.id);
-              const nextVersion = (existingVersions.length > 0 ? Math.max(...existingVersions.map((v: any) => v.version)) : 0) + 1;
-              const pv = await storage.createPageVersion({ pageId: existingPage.id, version: nextVersion, contentHtml: result.contentHtml, isActive: true });
-              await storage.setActivePageVersion(existingPage.id, pv.id);
+            pendingOverwrites.push({
+              slug: finalSlug, title: finalTitle, h1: finalH1, meta: finalMeta,
+              wordCount: result.wordCount, blueprintId: effectiveBlueprintId || null,
+              contentHtml: result.contentHtml,
+            });
+            if (pendingOverwrites.length >= OVERWRITE_BATCH_SIZE) {
+              await flushInsertBatch();
+              await flushOverwriteBatch();
             }
-            svcUpdated++;
-            totalUpdated++;
           }
         } else {
           // Mark slug used immediately so within-batch duplicates are caught
@@ -348,6 +391,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
         await flushInsertBatch();
+        await flushOverwriteBatch();
         // Check cancellation every PAGE_BATCH_SIZE pages — reuses the same DB
         // round-trip window so we don't add extra overhead per page.
         const liveJob = await storage.getGenerationJob(jobId);
@@ -368,6 +412,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     // Flush remaining pages in batch before marking service done
     await flushInsertBatch();
+    await flushOverwriteBatch();
 
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
     const rawProcessed2 = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
