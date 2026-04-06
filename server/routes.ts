@@ -1907,8 +1907,23 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         await writeVariationsForService(svc, website.accountId, websiteId, brandCtx);
         results[svc] = "regenerated";
         done++;
+        await new Promise(r => setTimeout(r, 15000));
       } catch (err: any) {
-        results[svc] = `error: ${err.message}`;
+        if (err.message?.includes("429")) {
+          console.log(`[regenerate-banks] Rate limited on "${svc}", waiting 60s...`);
+          await new Promise(r => setTimeout(r, 60000));
+          try {
+            await storage.deleteVariationBanks(websiteId, svc);
+            await writeVariationsForService(svc, website.accountId, websiteId, brandCtx);
+            results[svc] = "regenerated (retry)";
+            done++;
+            await new Promise(r => setTimeout(r, 15000));
+          } catch (retryErr: any) {
+            results[svc] = `error: ${retryErr.message}`;
+          }
+        } else {
+          results[svc] = `error: ${err.message}`;
+        }
       }
     }
 
