@@ -284,6 +284,26 @@ export default function JobsPage() {
                       ) : null;
                     })()}
 
+                    {job.settings && (() => {
+                      const s = job.settings as any;
+                      const svcCount = s.services?.length ?? 0;
+                      const modeLabel = s.mode === "all_states" ? "All 50 states"
+                        : s.mode === "specific_states" ? `${s.states?.length ?? 0} state(s): ${(s.states ?? []).slice(0, 8).join(", ")}${(s.states?.length ?? 0) > 8 ? ` +${s.states.length - 8} more` : ""}`
+                        : s.mode === "specific_cities" ? `${s.cities?.length ?? 0} city/cities`
+                        : "—";
+                      const flags: string[] = [];
+                      if (s.overwrite) flags.push("Overwrite");
+                      if (s.blueprintId) flags.push("Blueprint");
+                      return (
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground" data-testid={`text-job-details-${job.id}`}>
+                          <span>{svcCount} service(s)</span>
+                          <span>·</span>
+                          <span>{modeLabel}</span>
+                          {flags.length > 0 && <><span>·</span><span>{flags.join(", ")}</span></>}
+                        </div>
+                      );
+                    })()}
+
                     {job.totalPages > 0 && (
                       <div className="mt-2">
                         <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
