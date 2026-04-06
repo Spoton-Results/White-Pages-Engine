@@ -1855,5 +1855,58 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
   });
 
+  // ── Admin: regenerate variation banks for a website ──
+  app.post("/api/admin/regenerate-banks/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const account = website.accountId ? await storage.getAccount(website.accountId) : null;
+    const serviceName = req.query.service as string | undefined;
+
+    const { pool } = await import("./db");
+
+    let services: string[];
+    if (serviceName) {
+      services = [serviceName];
+    } else {
+      const svcRes = await pool.query(
+        `SELECT DISTINCT service FROM content_variation_banks WHERE website_id = $1 ORDER BY service`,
+        [websiteId]
+      );
+      services = svcRes.rows.map((r: any) => r.service);
+    }
+
+    const { writeVariationsForService } = await import("./services/variation-writer");
+    type BrandCtx = import("./services/variation-writer").BrandContext;
+
+    const brandCtx: BrandCtx = {
+      brandName: account?.companyName || website.name,
+      brandDescription: account?.brandDescription || undefined,
+      voiceAndTone: account?.voiceAndTone || undefined,
+      industryName: account?.industryName || undefined,
+      industryDescription: account?.industryDescription || undefined,
+    };
+
+    const results: Record<string, string> = {};
+    let done = 0;
+
+    for (const svc of services) {
+      try {
+        await pool.query(
+          `DELETE FROM content_variation_banks WHERE website_id = $1 AND service = $2`,
+          [websiteId, svc]
+        );
+        await writeVariationsForService(svc, website.accountId || websiteId, websiteId, brandCtx);
+        results[svc] = "regenerated";
+        done++;
+      } catch (err: any) {
+        results[svc] = `error: ${err.message}`;
+      }
+    }
+
+    res.json({ status: "done", regenerated: done, total: services.length, results });
+  });
+
   return httpServer;
 }
