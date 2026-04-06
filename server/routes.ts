@@ -1037,6 +1037,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ message: `Removed ${deleted} job(s)`, deleted });
   });
 
+  app.post("/api/jobs/delete-batch", requireAuth, async (req: Request, res: Response) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: "Provide job ids" });
+    const deleted = await storage.deleteJobsByIds(ids);
+    return res.json({ message: `Removed ${deleted} job(s)`, deleted });
+  });
+
   app.delete("/api/jobs/:id", requireAuth, async (req: Request, res: Response) => {
     const job = await storage.getGenerationJob(req.params.id as string);
     if (!job) return res.status(404).json({ message: "Job not found" });

@@ -490,7 +490,30 @@ export async function deleteGenerationJob(id: string): Promise<void> {
 
 export async function deleteCompletedJobs(): Promise<number> {
   const result = await db.delete(generationJobs)
-    .where(inArray(generationJobs.status, ["completed", "cancelled", "error"] as any))
+    .where(
+      or(
+        eq(generationJobs.status, "completed" as any),
+        eq(generationJobs.status, "cancelled" as any),
+        eq(generationJobs.status, "failed" as any),
+      )
+    )
+    .returning({ id: generationJobs.id });
+  return result.length;
+}
+
+export async function deleteJobsByIds(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const result = await db.delete(generationJobs)
+    .where(
+      and(
+        inArray(generationJobs.id, ids),
+        or(
+          eq(generationJobs.status, "completed" as any),
+          eq(generationJobs.status, "cancelled" as any),
+          eq(generationJobs.status, "failed" as any),
+        )
+      )
+    )
     .returning({ id: generationJobs.id });
   return result.length;
 }

@@ -31,6 +31,7 @@ export default function JobsPage() {
   const [locFilter, setLocFilter] = useState("");
   const [locTypeFilter, setLocTypeFilter] = useState<"all" | "state" | "city">("state");
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
 
   // Guards so auto-select fires once per dialog session and never overrides explicit user edits
   const didAutoSelectServices = useRef(false);
@@ -162,9 +163,31 @@ export default function JobsPage() {
     mutationFn: () => api.delete<{ deleted: number }>("/api/jobs/completed"),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setSelectedJobs(new Set());
       toast({ title: `Cleared ${data.deleted} job(s)` });
     },
   });
+
+  const deleteSelected = useMutation({
+    mutationFn: (ids: string[]) => api.post<{ deleted: number }>("/api/jobs/delete-batch", { ids }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      setSelectedJobs(new Set());
+      toast({ title: `Removed ${data.deleted} job(s)` });
+    },
+  });
+
+  const finishedJobs = jobs.filter((j: any) => j.status === "completed" || j.status === "cancelled" || j.status === "error");
+  const toggleJobSelect = (id: string) => {
+    setSelectedJobs(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const selectAllFinished = () => {
+    setSelectedJobs(new Set(finishedJobs.map((j: any) => j.id)));
+  };
 
   const toggleSelection = (field: keyof typeof emptyForm, id: string) => {
     setForm(prev => {
@@ -241,10 +264,20 @@ export default function JobsPage() {
             <h1 className="text-2xl font-bold tracking-tight">Generation Jobs</h1>
             <p className="text-muted-foreground text-sm mt-0.5">Create and monitor AI page generation workflows.</p>
           </div>
-          <div className="flex gap-2">
-            {jobs.some((j: any) => j.status === "completed" || j.status === "cancelled" || j.status === "error") && (
-              <Button variant="outline" size="sm" className="text-muted-foreground" onClick={() => clearCompleted.mutate()} data-testid="button-clear-completed">
-                <Trash2 className="size-4 mr-2" />Clear finished
+          <div className="flex gap-2 flex-wrap justify-end">
+            {selectedJobs.size > 0 && (
+              <Button variant="destructive" size="sm" onClick={() => deleteSelected.mutate([...selectedJobs])} data-testid="button-delete-selected">
+                <Trash2 className="size-4 mr-2" />Delete {selectedJobs.size} selected
+              </Button>
+            )}
+            {finishedJobs.length > 0 && selectedJobs.size === 0 && (
+              <Button variant="outline" size="sm" className="text-muted-foreground" onClick={selectAllFinished} data-testid="button-select-all">
+                <CheckCircle className="size-4 mr-2" />Select all finished ({finishedJobs.length})
+              </Button>
+            )}
+            {selectedJobs.size > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setSelectedJobs(new Set())} data-testid="button-deselect">
+                Deselect
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/jobs"] })} disabled={jobsFetching}>
@@ -286,7 +319,16 @@ export default function JobsPage() {
             {jobs.map((job: any) => (
               <Card key={job.id} data-testid={`card-job-${job.id}`}>
                 <CardContent className="p-4 flex items-start gap-3">
-                  <div className="mt-0.5">{statusIcon(job.status)}</div>
+                  {(job.status === "completed" || job.status === "cancelled" || job.status === "error") ? (
+                    <Checkbox
+                      checked={selectedJobs.has(job.id)}
+                      onCheckedChange={() => toggleJobSelect(job.id)}
+                      className="mt-1"
+                      data-testid={`checkbox-job-${job.id}`}
+                    />
+                  ) : (
+                    <div className="mt-0.5">{statusIcon(job.status)}</div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="font-semibold text-sm truncate">{job.name}</h3>
@@ -372,18 +414,11 @@ export default function JobsPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-col gap-1 shrink-0">
-                    {job.status === "running" && (
-                      <Button variant="outline" size="sm" onClick={() => cancel.mutate(job.id)} data-testid={`button-cancel-${job.id}`}>
-                        <Square className="size-3 mr-1" />Cancel
-                      </Button>
-                    )}
-                    {(job.status === "completed" || job.status === "cancelled" || job.status === "error") && (
-                      <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => deleteJob.mutate(job.id)} data-testid={`button-delete-${job.id}`}>
-                        <Trash2 className="size-3 mr-1" />Remove
-                      </Button>
-                    )}
-                  </div>
+                  {job.status === "running" && (
+                    <Button variant="outline" size="sm" className="shrink-0" onClick={() => cancel.mutate(job.id)} data-testid={`button-cancel-${job.id}`}>
+                      <Square className="size-3 mr-1" />Cancel
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ))}
