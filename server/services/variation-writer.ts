@@ -34,6 +34,8 @@ const SECTION_PROMPTS: Record<Section, (service: string, ctx?: BrandContext) => 
 Each intro = 2 HTML paragraphs (~120-150 words total). Use EXACTLY these placeholders:
 {{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}}
 
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced. Do not mention any real city, state, region, or landmark by name — always use {{city}}, {{state}}, {{state_abbr}}, or {{landmark}} instead.
+
 Each variation must open differently: vary tone, hook, and angle. No filler phrases like "In today's world".
 ${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}
 
@@ -58,6 +60,8 @@ Format EXACTLY as shown — no text outside delimiters:
 
 Each section = 3 HTML paragraphs (~180-220 words total). Use EXACTLY these placeholders:
 {{service}} {{city}} {{state}} {{brand}} {{business_count}}
+
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
 
 Describe the process from first contact to implementation. Each variation must use a different structure or emphasis.
 ${ctx?.industryName ? `This is for the ${ctx.industryName} industry — make the process steps accurate for this industry.` : ""}
@@ -88,6 +92,8 @@ Format EXACTLY as shown — no text outside delimiters:
 
 Each section = 4 HTML paragraphs with bold lead sentences (~200-240 words total). Use EXACTLY:
 {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
+
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
 
 Each paragraph should highlight a different benefit. Vary which benefits are featured.
 ${ctx?.industryName ? `Focus on benefits that matter most to ${ctx.industryName} businesses.` : ""}
@@ -124,6 +130,8 @@ Format EXACTLY as shown — no text outside delimiters:
 Each FAQ section = 5 questions with answers (~240-280 words total). Use EXACTLY:
 {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
 
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
+
 Use different questions across variations. Format each pair as:
 <p><strong>Q: Question?</strong></p>
 <p>Answer.</p>
@@ -155,6 +163,8 @@ Format EXACTLY as shown — no text outside delimiters:
 
 Each CTA = 1 HTML paragraph (~60-80 words). Use EXACTLY:
 {{service}} {{city}} {{state}} {{brand}}
+
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
 
 Each must end with a strong action prompt. Vary the angle: urgency, trust, value, ease, results.
 ${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}

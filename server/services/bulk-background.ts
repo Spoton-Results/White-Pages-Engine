@@ -41,12 +41,13 @@ function applyBlueprintTemplates(
     t.replace(/\{service[^}]*\}/gi, vars.service)
       .replace(/\{location[^}]*\}/gi, vars.location)
       .replace(/\{city[^}]*\}/gi, vars.location)
-      .replace(/\{state[^}]*\}/gi, vars.state)
+      .replace(/\{state_abbr\}/gi, vars.stateAbbr)
+      .replace(/\{abbr\}/gi, vars.stateAbbr)
+      .replace(/\{state\}/gi, vars.state)
       .replace(/\{brand[^}]*\}/gi, vars.brand)
       .replace(/\{keyword[^}]*\}/gi, vars.service)
-      .replace(/\{state_abbr[^}]*\}/gi, vars.stateAbbr)
-      .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
-      .replace(/-{2,}/g, "-").trim();
+      .replace(/\{industry[^}]*\}/gi, "")
+      .replace(/-{2,}/g, "-").replace(/\s{2,}/g, " ").trim();
   const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return {
     title: interp(blueprint.titleTemplate),
