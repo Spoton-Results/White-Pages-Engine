@@ -158,6 +158,14 @@ export default function JobsPage() {
     },
   });
 
+  const clearCompleted = useMutation({
+    mutationFn: () => api.delete<{ deleted: number }>("/api/jobs/completed"),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({ title: `Cleared ${data.deleted} job(s)` });
+    },
+  });
+
   const toggleSelection = (field: keyof typeof emptyForm, id: string) => {
     setForm(prev => {
       const arr = (prev[field] as string[]) || [];
@@ -234,6 +242,11 @@ export default function JobsPage() {
             <p className="text-muted-foreground text-sm mt-0.5">Create and monitor AI page generation workflows.</p>
           </div>
           <div className="flex gap-2">
+            {jobs.some((j: any) => j.status === "completed" || j.status === "cancelled" || j.status === "error") && (
+              <Button variant="outline" size="sm" className="text-muted-foreground" onClick={() => clearCompleted.mutate()} data-testid="button-clear-completed">
+                <Trash2 className="size-4 mr-2" />Clear finished
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/jobs"] })} disabled={jobsFetching}>
               <RefreshCw className={`size-4 mr-2 ${jobsFetching ? "animate-spin" : ""}`} />Refresh
             </Button>

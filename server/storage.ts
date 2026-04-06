@@ -488,6 +488,13 @@ export async function deleteGenerationJob(id: string): Promise<void> {
   await db.delete(generationJobs).where(eq(generationJobs.id, id));
 }
 
+export async function deleteCompletedJobs(): Promise<number> {
+  const result = await db.delete(generationJobs)
+    .where(inArray(generationJobs.status, ["completed", "cancelled", "error"] as any))
+    .returning({ id: generationJobs.id });
+  return result.length;
+}
+
 // ─── Sitemaps ─────────────────────────────────────────────────────────────────
 
 // Sort numerically by chunk number (sitemap-1, sitemap-2 ... sitemap-10, sitemap-11)
