@@ -1149,12 +1149,147 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── System Info ───────────────────────────────────────────────────────────
 
   // ── Public Page Serving ──────────────────────────────────────────────────
-  // Serves published pages at /sites/:domain/:slug as full HTML
+  // Serves sitemaps, robots.txt and pages at /sites/:domain/:file
+  app.get("/sites/:domain/sitemap.xml", async (req: Request, res: Response) => {
+    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    if (!website) return res.status(404).send(notFoundHtml("Website not found"));
+    const pd = (website.settings as any)?.parentDomain;
+    const pp = (website.settings as any)?.proxyPath || "";
+    const base = pd ? `https://${pd}${pp}` : `https://${website.domain}`;
+    const sitemapList = await storage.getSitemapsMeta(website.id);
+    const today = new Date().toISOString().split("T")[0];
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    if (sitemapList.length === 0) {
+      const publishedPages = await storage.getPages(website.id, { status: "published", limit: 50000 });
+      const urls = publishedPages.map((p) => ({ loc: `${base}/${p.slug}`, lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0], priority: "0.7" }));
+      const { buildSitemapXml } = await import("./services/sitemap");
+      return res.send(buildSitemapXml(urls));
+    }
+    const { buildSitemapIndexXml } = await import("./services/sitemap");
+    return res.send(buildSitemapIndexXml(sitemapList.map((sm) => ({ loc: `${base}/${sm.slug}.xml`, lastmod: today }))));
+  });
+
+  app.get("/sites/:domain/sitemap-:num.xml", async (req: Request, res: Response) => {
+    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    if (!website) return res.status(404).send(notFoundHtml("Website not found"));
+    const pd = (website.settings as any)?.parentDomain;
+    const pp = (website.settings as any)?.proxyPath || "";
+    const base = pd ? `https://${pd}${pp}` : `https://${website.domain}`;
+    const chunkIndex = parseInt(req.params.num, 10) - 1;
+    const chunkSlug = `sitemap-${req.params.num}`;
+    const cacheKey = `${website.id}:${chunkIndex}`;
+    const cached = sitemapChunkCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(cached.xml);
+    }
+    const record = await storage.getSitemapBySlug(website.id, chunkSlug);
+    if (record?.xmlContent) {
+      sitemapChunkCache.set(cacheKey, { xml: record.xmlContent, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(record.xmlContent);
+    }
+    const offset = chunkIndex * URLS_PER_SITEMAP;
+    const chunk = await storage.getPages(website.id, { status: "published", limit: URLS_PER_SITEMAP, offset });
+    const urls = chunk.map((p) => ({ loc: `${base}/${p.slug}`, lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0], priority: (p as any).pageType === "state_hub" ? "0.9" : (p as any).pageType === "city_hub" ? "0.8" : "0.7" }));
+    const { buildSitemapXml } = await import("./services/sitemap");
+    const xml = buildSitemapXml(urls);
+    sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+    storage.updateSitemapXml(website.id, chunkSlug, xml).catch(() => {});
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.send(xml);
+  });
+
+  app.get("/sites/:domain/robots.txt", async (req: Request, res: Response) => {
+    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    if (!website) return res.status(404).send(notFoundHtml("Website not found"));
+    const pd = (website.settings as any)?.parentDomain;
+    const pp = (website.settings as any)?.proxyPath || "";
+    const sitemapUrl = pd ? `https://${pd}${pp}/sitemap.xml` : `https://${website.domain}/sitemap.xml`;
+    const robotsContent = website.robotsTxt || generateRobotsTxt(website.domain, sitemapUrl);
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.send(robotsContent);
+  });
+
   app.get("/sites/:domain/:slug", async (req: Request, res: Response) => {
     const website = await storage.getWebsiteByDomain((req.params.domain as string));
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
 
-    const page = await storage.getPageBySlug(website.id, (req.params.slug as string));
+    const slug = req.params.slug as string;
+    const parentDomain = (website.settings as any)?.parentDomain;
+    const proxyPath = (website.settings as any)?.proxyPath || "";
+    const canonicalBase = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
+
+    // Sitemap index
+    if (slug === "sitemap.xml" || slug === "sitemap_index.xml" || slug === "sitemap") {
+      const sitemapList = await storage.getSitemapsMeta(website.id);
+      const today = new Date().toISOString().split("T")[0];
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      if (sitemapList.length === 0) {
+        const publishedPages = await storage.getPages(website.id, { status: "published", limit: 50000 });
+        const urls = publishedPages.map((p) => ({
+          loc: `${canonicalBase}/${p.slug}`,
+          lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+          priority: "0.7",
+        }));
+        const { buildSitemapXml } = await import("./services/sitemap");
+        return res.send(buildSitemapXml(urls));
+      }
+      const { buildSitemapIndexXml } = await import("./services/sitemap");
+      return res.send(buildSitemapIndexXml(
+        sitemapList.map((sm) => ({ loc: `${canonicalBase}/${sm.slug}.xml`, lastmod: today }))
+      ));
+    }
+
+    // Sitemap chunk (e.g. sitemap-1.xml)
+    const sitemapChunkMatch = slug.match(/^(sitemap-(\d+))\.xml$/);
+    if (sitemapChunkMatch) {
+      const chunkIndex = parseInt(sitemapChunkMatch[2], 10) - 1;
+      const chunkSlug = sitemapChunkMatch[1];
+      const cacheKey = `${website.id}:${chunkIndex}`;
+      const cached = sitemapChunkCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.send(cached.xml);
+      }
+      const record = await storage.getSitemapBySlug(website.id, chunkSlug);
+      if (record?.xmlContent) {
+        sitemapChunkCache.set(cacheKey, { xml: record.xmlContent, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.send(record.xmlContent);
+      }
+      const offset = chunkIndex * URLS_PER_SITEMAP;
+      const chunk = await storage.getPages(website.id, { status: "published", limit: URLS_PER_SITEMAP, offset });
+      const urls = chunk.map((p) => ({
+        loc: `${canonicalBase}/${p.slug}`,
+        lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
+        priority: (p as any).pageType === "state_hub" ? "0.9" : (p as any).pageType === "city_hub" ? "0.8" : "0.7",
+      }));
+      const { buildSitemapXml } = await import("./services/sitemap");
+      const xml = buildSitemapXml(urls);
+      sitemapChunkCache.set(cacheKey, { xml, expiresAt: Date.now() + SITEMAP_CACHE_TTL_MS });
+      storage.updateSitemapXml(website.id, chunkSlug, xml).catch(() => {});
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(xml);
+    }
+
+    // Robots.txt
+    if (slug === "robots.txt") {
+      const robotsContent = website.robotsTxt
+        || generateRobotsTxt(website.domain, `${canonicalBase}/sitemap.xml`);
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.send(robotsContent);
+    }
+
+    const page = await storage.getPageBySlug(website.id, slug);
     if (!page || page.status !== "published") {
       return res.status(404).send(notFoundHtml("Page not found or not yet published"));
     }
@@ -1258,7 +1393,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
         const sitemapList = await storage.getSitemapsMeta(website.id);
-        const baseUrl = `https://${website.domain}`;
+        const parentDomain = (website.settings as any)?.parentDomain;
+        const proxyPath = (website.settings as any)?.proxyPath || "";
+        const baseUrl = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
         const today = new Date().toISOString().split("T")[0];
         res.setHeader("Content-Type", "application/xml; charset=utf-8");
         res.setHeader("Cache-Control", "public, max-age=3600");
@@ -1305,7 +1442,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // 3. Not yet stored — build from pages (slow, one-time), then persist to DB for future
         const offset = chunkIndex * URLS_PER_SITEMAP;
         const chunk = await storage.getPages(website.id, { status: "published", limit: URLS_PER_SITEMAP, offset });
-        const baseUrl = `https://${website.domain}`;
+        const pDomain = (website.settings as any)?.parentDomain;
+        const pPath = (website.settings as any)?.proxyPath || "";
+        const baseUrl = pDomain ? `https://${pDomain}${pPath}` : `https://${website.domain}`;
         const urls = chunk.map((p) => ({
           loc: `${baseUrl}/${p.slug}`,
           lastmod: (p.publishedAt || p.updatedAt).toISOString().split("T")[0],
@@ -1322,8 +1461,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Robots.txt — serve inline (no redirect; Google does not follow redirects for robots.txt)
       if (rawSlug === "robots.txt") {
+        const rPd = (website.settings as any)?.parentDomain;
+        const rPp = (website.settings as any)?.proxyPath || "";
+        const sitemapBase = rPd ? `https://${rPd}${rPp}` : `https://${website.domain}`;
         const robotsContent = website.robotsTxt
-          || generateRobotsTxt(website.domain, `https://${website.domain}/sitemap.xml`);
+          || generateRobotsTxt(website.domain, `${sitemapBase}/sitemap.xml`);
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         return res.send(robotsContent);
       }
