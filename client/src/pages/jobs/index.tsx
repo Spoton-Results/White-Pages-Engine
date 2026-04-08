@@ -462,7 +462,7 @@ export default function JobsPage() {
                 <Select value={form.websiteId} onValueChange={v => setForm(p => ({ ...p, websiteId: v }))} disabled={!selectedAccountId}>
                   <SelectTrigger data-testid="select-website"><SelectValue placeholder="Select website" /></SelectTrigger>
                   <SelectContent>
-                    {accountWebsites.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.domain}</SelectItem>)}
+                    {accountWebsites.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>)}
                   </SelectContent>
                 </Select>
               )}

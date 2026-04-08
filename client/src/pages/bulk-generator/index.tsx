@@ -394,7 +394,7 @@ export default function BulkGeneratorPage() {
               <SelectContent>
                 {websites.map((w: any) => (
                   <SelectItem key={w.id} value={w.id} data-testid={`option-website-${w.id}`}>
-                    {w.domain}
+                    {w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}
                   </SelectItem>
                 ))}
               </SelectContent>
