@@ -106,7 +106,7 @@ export default function SitemapsPage() {
             </SelectTrigger>
             <SelectContent>
               {websites.map((w: any) => (
-                <SelectItem key={w.id} value={w.id}>{w.domain}</SelectItem>
+                <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>
               ))}
             </SelectContent>
           </Select>
