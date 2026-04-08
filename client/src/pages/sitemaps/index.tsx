@@ -128,26 +128,31 @@ export default function SitemapsPage() {
           )}
         </div>
 
-        {currentWebsite && (
-          <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-blue-700 mb-1">Google Search Console — Submit this URL</p>
-              <p className="font-mono text-sm text-blue-900 truncate" data-testid="text-sitemap-url">
-                https://{currentWebsite.domain}/sitemap.xml
-              </p>
+        {currentWebsite && (() => {
+          const pd = currentWebsite.settings?.parentDomain;
+          const pp = currentWebsite.settings?.proxyPath || "";
+          const sitemapUrl = pd ? `https://${pd}${pp}/sitemap.xml` : `https://${currentWebsite.domain}/sitemap.xml`;
+          return (
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-blue-700 mb-1">Google Search Console — Submit this URL</p>
+                <p className="font-mono text-sm text-blue-900 truncate" data-testid="text-sitemap-url">
+                  {sitemapUrl}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100"
+                onClick={() => copySitemapUrl(sitemapUrl)}
+                data-testid="button-copy-sitemap-url"
+              >
+                {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
+                {copied ? "Copied!" : "Copy"}
+              </Button>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0 gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100"
-              onClick={() => copySitemapUrl(`https://${currentWebsite.domain}/sitemap.xml`)}
-              data-testid="button-copy-sitemap-url"
-            >
-              {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
-              {copied ? "Copied!" : "Copy"}
-            </Button>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Google Indexing API — batch submit existing pages */}
         {selectedWebsite && (
