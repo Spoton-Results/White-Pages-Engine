@@ -332,6 +332,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           allRelatedServices,
           website.domain,
           blueprintTemplate?.slugTemplate,
+          (website.settings as any)?.proxyPath || "",
         );
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {

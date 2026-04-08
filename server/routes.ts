@@ -2069,6 +2069,43 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     })();
   });
 
+  // ── Admin: fix internal links to include proxy path prefix ──
+  app.post("/api/admin/fix-link-prefix/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const prefix = (website.settings as any)?.proxyPath || "";
+    if (!prefix) return res.json({ message: "No proxyPath configured, nothing to fix" });
+
+    const { pool } = await import("./db");
+    res.json({ message: "Started link prefix fix in background", prefix, websiteId });
+
+    (async () => {
+      try {
+        const oldPattern = 'href="/';
+        const newPattern = `href="${prefix}/`;
+        const likeMatch = `%href="/%`;
+        const alreadyFixed = `%href="${prefix}/%`;
+        const batchSize = 5000;
+        let totalUpdated = 0;
+        let hasMore = true;
+        while (hasMore) {
+          const r = await pool.query(
+            `UPDATE page_versions SET content_html = REPLACE(content_html, $1, $2) WHERE id IN (SELECT pv.id FROM page_versions pv JOIN pages p ON pv.page_id = p.id WHERE p.website_id = $3 AND pv.content_html LIKE $4 AND pv.content_html NOT LIKE $5 LIMIT $6)`,
+            [oldPattern, newPattern, websiteId, likeMatch, alreadyFixed, batchSize]
+          );
+          totalUpdated += r.rowCount;
+          console.log(`[fix-link-prefix] Batch: ${r.rowCount} versions (total: ${totalUpdated})`);
+          hasMore = r.rowCount === batchSize;
+        }
+        console.log(`[fix-link-prefix] Done. Total updated: ${totalUpdated}`);
+      } catch (err: any) {
+        console.error(`[fix-link-prefix] Error:`, err.message);
+      }
+    })();
+  });
+
   // ── Admin: regenerate variation banks for a website ──
   app.post("/api/admin/regenerate-banks/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     const { websiteId } = req.params;

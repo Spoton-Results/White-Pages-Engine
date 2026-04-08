@@ -122,7 +122,9 @@ export function buildVariationPage(
   relatedServices?: Array<{ name: string; slug: string }>,
   websiteDomain?: string,
   blueprintSlugTemplate?: string,
+  proxyPath?: string,
 ): VariationPageResult {
+  const linkPrefix = proxyPath || "";
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
   const stateDisplay = stateName;
@@ -168,7 +170,7 @@ export function buildVariationPage(
     const items = citiesInState
       .map(c => {
         const citySlug = `${serviceSlug}-in-${slugify(c.name)}-${stateAbbr.toLowerCase()}`;
-        return `<li style="break-inside:avoid"><a href="/${citySlug}" style="color:#2563eb;text-decoration:none">${c.name}, ${stateAbbr}</a></li>`;
+        return `<li style="break-inside:avoid"><a href="${linkPrefix}/${citySlug}" style="color:#2563eb;text-decoration:none">${c.name}, ${stateAbbr}</a></li>`;
       })
       .join("\n");
     citiesSection = `<h2 ${h2Style}>Cities We Serve in ${stateName}</h2>\n<ul style="columns:3;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
@@ -187,7 +189,7 @@ export function buildVariationPage(
       const items = others
         .map(s => {
           const pageSlug = `${s.slug}-in-${locationSlug}`;
-          return `<li style="break-inside:avoid"><a href="/${pageSlug}" style="color:#2563eb;text-decoration:none">${s.name} in ${city}, ${stateAbbr}</a></li>`;
+          return `<li style="break-inside:avoid"><a href="${linkPrefix}/${pageSlug}" style="color:#2563eb;text-decoration:none">${s.name} in ${city}, ${stateAbbr}</a></li>`;
         })
         .join("\n");
       relatedServicesSection = `<h2 ${h2Style}>Related Services in ${city}, ${stateAbbr}</h2>\n<ul style="columns:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
