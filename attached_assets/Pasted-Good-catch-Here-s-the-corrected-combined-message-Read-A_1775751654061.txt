@@ -1,0 +1,69 @@
+Good catch. Here's the corrected combined message:
+
+---
+
+Read `AGENT_RULES.md` before doing anything.
+
+**Do not delete or change anything. Surgical additions only.**
+
+I need two things done together in this order:
+
+---
+
+**PART 1 — Fix population data first**
+
+**Step 1 — Check current state:**
+`SELECT city, state, population, city_tier FROM locations WHERE type = 'city' AND account_id = '70ec4b1c-80b2-4c17-9d22-f63275d21310' ORDER BY population DESC LIMIT 20`
+
+**Step 2 — Check how many cities have null or zero population:**
+`SELECT COUNT(*) FROM locations WHERE type = 'city' AND (population IS NULL OR population = 0) AND account_id = '70ec4b1c-80b2-4c17-9d22-f63275d21310'`
+
+**Step 3 — Add population and city_tier columns if they don't exist:**
+`ALTER TABLE locations ADD COLUMN IF NOT EXISTS population integer`
+`ALTER TABLE locations ADD COLUMN IF NOT EXISTS city_tier integer`
+
+**Step 4 — Update ALL cities with correct 2026 population estimates** based on the most recent US Census Bureau data and post-2020 growth projections. Use verified accurate population numbers for every city in the database. Do not use 2020 or 2024 data — use the most current 2026 estimates available.
+
+**Step 5 — Recalculate city_tier for every city after population is set:**
+`UPDATE locations SET city_tier = CASE WHEN population >= 500000 THEN 1 WHEN population >= 100000 THEN 2 ELSE 3 END WHERE type = 'city'`
+
+**Step 6 — Confirm top 20 cities ordered by population:**
+`SELECT city, state, population, city_tier FROM locations WHERE type = 'city' ORDER BY population DESC LIMIT 20`
+
+---
+
+**PART 2 — Build the Top Cities filter UI**
+
+After population data is confirmed accurate build the following on the Locations page and every city selector in the app including Bulk Generator and Generation Jobs:
+
+**Add a Top Cities quick select dropdown with these exact options:**
+- Top 20
+- Top 50
+- Top 100
+- Top 250
+- Top 500
+- Top 750
+- Top 1000
+- Top 2500
+- Top 5000
+- All Cities
+
+**How it works:**
+- Clicking Top 100 instantly selects the 100 cities with highest population from the database
+- Selection updates city list in real time
+- Shows count like 100 cities selected after clicking
+- Works alongside existing alphabet letter buttons
+- Has Clear Selection button
+
+**Also add city tier quick filter buttons:**
+- Tier 1 Cities (500K+ population)
+- Tier 2 Cities (100K to 500K)
+- Tier 3 Cities (below 100K)
+
+**This must work on:**
+- Locations page
+- Bulk Generator city selector
+- Generation Jobs city selector
+- Anywhere else cities are selected in the app
+
+Show me Step 1 and Step 2 results before doing anything else. Do not build the UI until population data is confirmed accurate.
