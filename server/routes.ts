@@ -125,6 +125,9 @@ async function tryGenerateDynamicPage(
   slug: string, website: any, brand: any,
 ): Promise<{ html: string } | { redirect: string } | null> {
   try {
+    // Hard limit: never dynamically generate pages with very long slugs
+    if (slug.length > 200) return null;
+
     const inIdx = slug.lastIndexOf("-in-");
     if (inIdx < 1) return null;
 
@@ -450,6 +453,8 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 
   <main>
     ${(version?.contentHtml || "<p>Content coming soon.</p>")
+      // Remove links whose href is longer than 200 chars (bad long-slug service links)
+      .replace(/<li[^>]*>\s*<a\s+href="[^"]{200,}"[^>]*>[^<]*<\/a>\s*<\/li>\n?/g, "")
       // Strip " in City, ST" from service link text in Related Services lists
       .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
         (_, open, name, close) => `${open}${name.trim()}${close}`)
@@ -2322,6 +2327,28 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
 
     res.json({ status: "done", regenerated: done, total: services.length, results });
+  });
+
+  // ── Admin: delete variation banks with service names longer than maxLen ───
+  app.post("/api/admin/delete-long-service-banks/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const maxLen = parseInt((req.query.maxLen as string) || "100", 10);
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { pool } = await import("./db");
+    const found = await pool.query(
+      `SELECT DISTINCT service, length(service) AS len FROM content_variation_banks WHERE website_id = $1 AND length(service) > $2 ORDER BY len DESC`,
+      [websiteId, maxLen]
+    );
+    if (found.rows.length === 0) return res.json({ deleted: 0, message: "No banks found with service name longer than " + maxLen });
+
+    await pool.query(
+      `DELETE FROM content_variation_banks WHERE website_id = $1 AND length(service) > $2`,
+      [websiteId, maxLen]
+    );
+    console.log(`[delete-long-banks] Deleted banks for ${found.rows.length} long-name services in website ${websiteId}`);
+    res.json({ deleted: found.rows.length, services: found.rows.map((r: any) => r.service.slice(0, 80) + "..."), websiteId });
   });
 
   // ── Admin: delete pages with slugs longer than minLength ──────────────────
