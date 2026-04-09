@@ -366,6 +366,10 @@ export const hubPages = pgTable("hub_pages", {
   tier: integer("tier").notNull().default(1),
   qualityScore: integer("quality_score"),
   status: text("status").notNull().default("draft"),
+  content: text("content"),
+  parentSlug: text("parent_slug"),
+  maxChildLinks: integer("max_child_links").notNull().default(30),
+  metaDescription: text("meta_description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

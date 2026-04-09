@@ -60,6 +60,7 @@ import BulkGeneratorPage from "@/pages/bulk-generator";
 import LeadsPage from "@/pages/leads";
 import SearchControlPage from "@/pages/search-control";
 import BankHealthPage from "@/pages/bank-health";
+import HubPagesPage from "@/pages/hub-pages";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -175,6 +176,9 @@ function Router() {
       </Route>
       <Route path="/search-control">
         <AuthGuard><SearchControlPage /></AuthGuard>
+      </Route>
+      <Route path="/hub-pages">
+        <AuthGuard><HubPagesPage /></AuthGuard>
       </Route>
       <Route path="/bank-health">
         <AuthGuard><BankHealthPage /></AuthGuard>

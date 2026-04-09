@@ -4,7 +4,7 @@ import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
   generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
-  fallbackHitLogs, variationBankCompleteness,
+  fallbackHitLogs, variationBankCompleteness, hubPages,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -24,6 +24,7 @@ import {
   type Lead, type InsertLead,
   type FallbackHitLog,
   type VariationBankCompleteness, type InsertVariationBankCompleteness,
+  type HubPage, type InsertHubPage,
 } from "@shared/schema";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
@@ -965,6 +966,74 @@ export async function getScoreDistribution(websiteId: string): Promise<Array<{ b
     ORDER BY bucket
   `);
   return (result as any).rows ?? [];
+}
+
+// ─── Hub Pages ────────────────────────────────────────────────────────────────
+
+export async function getHubPages(websiteId: string): Promise<HubPage[]> {
+  return db.select()
+    .from(hubPages)
+    .where(eq(hubPages.websiteId, websiteId))
+    .orderBy(asc(hubPages.hubType), asc(hubPages.name));
+}
+
+export async function getHubPage(id: string): Promise<HubPage | undefined> {
+  const [row] = await db.select().from(hubPages).where(eq(hubPages.id, id));
+  return row;
+}
+
+export async function getHubPageBySlug(websiteId: string, slug: string): Promise<HubPage | undefined> {
+  const [row] = await db.select()
+    .from(hubPages)
+    .where(and(eq(hubPages.websiteId, websiteId), eq(hubPages.slug, slug)));
+  return row;
+}
+
+export async function createHubPage(data: InsertHubPage): Promise<HubPage> {
+  const [row] = await db.insert(hubPages).values(data).returning();
+  return row;
+}
+
+export async function updateHubPage(id: string, data: Partial<InsertHubPage>): Promise<HubPage | undefined> {
+  const [row] = await db.update(hubPages)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(hubPages.id, id))
+    .returning();
+  return row;
+}
+
+export async function deleteHubPage(id: string): Promise<void> {
+  await db.delete(hubPages).where(eq(hubPages.id, id));
+}
+
+/**
+ * Get the top N child pages for a hub, ordered by quality_score DESC.
+ * - service hub → pages whose title/slug match the service keyword
+ * - state hub   → pages whose slug contains the state keyword
+ * - city hub    → pages whose slug contains the city keyword
+ */
+export async function getChildPagesForHub(
+  websiteId: string,
+  hubType: string,
+  keyword: string,
+  limit: number,
+): Promise<Array<{ title: string; slug: string; qualityScore: number | null; tier: number | null }>> {
+  const kw = keyword.toLowerCase().replace(/\s+/g, "-");
+  // Build a LIKE pattern that matches the keyword anywhere in the slug
+  const pattern = `%${kw}%`;
+  const rows = await db
+    .select({ title: pages.title, slug: pages.slug, qualityScore: pages.qualityScore, tier: pages.tier })
+    .from(pages)
+    .where(
+      and(
+        eq(pages.websiteId, websiteId),
+        eq(pages.status, "published"),
+        sql`lower(${pages.slug}) LIKE ${pattern}`,
+      ),
+    )
+    .orderBy(desc(pages.qualityScore))
+    .limit(limit);
+  return rows;
 }
 
 // Re-export IStorage interface for backwards compatibility

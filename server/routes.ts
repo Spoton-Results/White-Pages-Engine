@@ -1481,6 +1481,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const brandProfiles = await storage.getBrandProfiles(website.accountId);
     const brand = brandProfiles[0];
     if (!page || page.status !== "published") {
+      // Check hub pages first
+      const hubPage = await storage.getHubPageBySlug(website.id, slug);
+      if (hubPage && hubPage.status === "published" && hubPage.content) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.send(hubPage.content);
+      }
       const dynamic = await tryGenerateDynamicPage(slug, website, brand);
       if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
       if (dynamic && "html" in dynamic) {
@@ -1688,6 +1695,14 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const brandProfiles = await storage.getBrandProfiles(website.accountId);
       const brand = brandProfiles[0];
       if (!page || page.status !== "published") {
+        // Check hub pages before dynamic fallback
+        const hubPage = await storage.getHubPageBySlug(website.id, rawSlug);
+        if (hubPage && hubPage.status === "published" && hubPage.content) {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          console.log(`[hub-page] 200 ${host}/${rawSlug}`);
+          return res.send(hubPage.content);
+        }
         const dynamic = await tryGenerateDynamicPage(rawSlug, website, brand);
         if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
         if (dynamic && "html" in dynamic) {
@@ -2299,6 +2314,97 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const status = err?.status ?? 500;
       return res.status(status >= 400 && status < 600 ? status : 500).json({ error: err?.message ?? "Failed" });
     }
+  });
+
+  // ── Hub Pages (Phase 5) ────────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/hub-pages", requireAuth, async (req: Request, res: Response) => {
+    const hubs = await storage.getHubPages(req.params.id as string);
+    return res.json(hubs);
+  });
+
+  app.post("/api/websites/:id/hub-pages", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const { hubType, name, slug, parentSlug, maxChildLinks, metaDescription } = req.body as any;
+    if (!hubType || !name || !slug) return res.status(400).json({ error: "hubType, name, and slug are required" });
+    const hub = await storage.createHubPage({
+      websiteId,
+      accountId: website.accountId,
+      hubType,
+      name,
+      slug,
+      parentSlug: parentSlug || null,
+      maxChildLinks: maxChildLinks ?? 30,
+      metaDescription: metaDescription || null,
+      status: "draft",
+      tier: 1,
+    });
+    return res.status(201).json(hub);
+  });
+
+  app.patch("/api/websites/:id/hub-pages/:hubId", requireAuth, async (req: Request, res: Response) => {
+    const { hubId } = req.params as any;
+    const { name, slug, parentSlug, maxChildLinks, metaDescription, status, tier } = req.body as any;
+    const hub = await storage.updateHubPage(hubId, {
+      ...(name !== undefined && { name }),
+      ...(slug !== undefined && { slug }),
+      ...(parentSlug !== undefined && { parentSlug }),
+      ...(maxChildLinks !== undefined && { maxChildLinks }),
+      ...(metaDescription !== undefined && { metaDescription }),
+      ...(status !== undefined && { status }),
+      ...(tier !== undefined && { tier }),
+    });
+    if (!hub) return res.status(404).json({ error: "Hub page not found" });
+    return res.json(hub);
+  });
+
+  app.delete("/api/websites/:id/hub-pages/:hubId", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteHubPage(req.params.hubId as string);
+    return res.json({ ok: true });
+  });
+
+  // Preview child links that would be included in a hub
+  app.get("/api/websites/:id/hub-pages/:hubId/child-links", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const hub = await storage.getHubPage(req.params.hubId as string);
+    if (!hub) return res.status(404).json({ error: "Hub page not found" });
+    const childLinks = await storage.getChildPagesForHub(websiteId, hub.hubType, hub.name, hub.maxChildLinks);
+    return res.json(childLinks);
+  });
+
+  // Generate (or re-generate) the HTML content for a hub page and set status to "published"
+  app.post("/api/websites/:id/hub-pages/:hubId/generate", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const hub = await storage.getHubPage(req.params.hubId as string);
+    if (!hub) return res.status(404).json({ error: "Hub page not found" });
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const brandProfiles = await storage.getBrandProfiles(website.accountId);
+    const brand = brandProfiles[0];
+    const childLinks = await storage.getChildPagesForHub(websiteId, hub.hubType, hub.name, hub.maxChildLinks);
+
+    const { renderHubPageHtml } = await import("./services/hub-pages");
+    const content = renderHubPageHtml({
+      hubType: hub.hubType as any,
+      name: hub.name,
+      slug: hub.slug,
+      metaDescription: hub.metaDescription,
+      parentSlug: hub.parentSlug,
+      childLinks,
+      website: { domain: website.domain, settings: (website.settings ?? {}) as any },
+      brand: brand ? {
+        name: brand.name,
+        primaryColor: brand.primaryColor ?? undefined,
+        phone: brand.phone ?? undefined,
+        tagline: brand.tagline ?? undefined,
+        customFields: (brand.customFields ?? {}) as any,
+      } : null,
+    });
+
+    const updated = await storage.updateHubPage(hub.id, { content, status: "published" });
+    return res.json({ ok: true, hub: updated, childCount: childLinks.length });
   });
 
   // ── Leads Admin ───────────────────────────────────────────────────────────
