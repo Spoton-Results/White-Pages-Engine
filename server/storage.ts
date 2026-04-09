@@ -1185,7 +1185,7 @@ export async function getChildPagesForHub(
   keyword: string,
   limit: number,
 ): Promise<Array<{ title: string; slug: string; qualityScore: number | null; tier: number | null }>> {
-  const kw = keyword.toLowerCase().replace(/\s+/g, "-");
+  const kw = keyword.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
   // Build a LIKE pattern that matches the keyword anywhere in the slug
   const pattern = `%${kw}%`;
   const rows = await db
