@@ -62,6 +62,7 @@ import SearchControlPage from "@/pages/search-control";
 import BankHealthPage from "@/pages/bank-health";
 import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
+import AutomationPage from "@/pages/automation";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -183,6 +184,9 @@ function Router() {
       </Route>
       <Route path="/internal-links">
         <AuthGuard><InternalLinksPage /></AuthGuard>
+      </Route>
+      <Route path="/automation">
+        <AuthGuard><AutomationPage /></AuthGuard>
       </Route>
       <Route path="/bank-health">
         <AuthGuard><BankHealthPage /></AuthGuard>

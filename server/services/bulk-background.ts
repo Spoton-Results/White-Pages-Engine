@@ -495,4 +495,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   try {
     await submitUrlsToGoogle(newPageUrls);
   } catch { /* non-critical — GSC indexing is best-effort */ }
+
+  // Auto 1 + 2 + 3 + 4: Score pages, assign tiers, regen sitemap, submit T1 to Google
+  try {
+    const { triggerPostGenerationScoring } = await import("./automation");
+    await triggerPostGenerationScoring(job.websiteId, website);
+  } catch (err) {
+    console.error("[auto1] Post-generation automation failed (non-fatal):", err);
+  }
 }

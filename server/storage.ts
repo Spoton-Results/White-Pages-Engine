@@ -5,6 +5,7 @@ import {
   queryClusters, blueprints, pages, pageVersions, internalLinks,
   generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
   fallbackHitLogs, variationBankCompleteness, hubPages,
+  adminNotifications, demotionLogs,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -25,6 +26,8 @@ import {
   type FallbackHitLog,
   type VariationBankCompleteness, type InsertVariationBankCompleteness,
   type HubPage, type InsertHubPage,
+  type AdminNotification, type InsertAdminNotification,
+  type DemotionLog, type InsertDemotionLog,
 } from "@shared/schema";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
@@ -852,7 +855,7 @@ export async function getUnscoredPages(websiteId: string, limit = 500): Promise<
     .limit(limit) as any;
 }
 
-export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number }> {
+export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number; promotedSlugs: string[] }> {
   const result = await db.execute(sql`
     UPDATE pages
     SET tier = 1, updated_at = NOW()
@@ -860,9 +863,10 @@ export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: numb
       AND status = 'published'
       AND quality_score >= ${tierThreshold}
       AND tier != 1
-    RETURNING id
+    RETURNING slug
   `);
-  return { promoted: (result as any).rowCount ?? 0 };
+  const rows = (result as any).rows ?? [];
+  return { promoted: (result as any).rowCount ?? 0, promotedSlugs: rows.map((r: any) => r.slug) };
 }
 
 export async function bulkSetTier3(websiteId: string, scoreThreshold: number): Promise<{ demoted: number }> {
@@ -1140,6 +1144,154 @@ export async function getChildPagesForHub(
     .orderBy(desc(pages.qualityScore))
     .limit(limit);
   return rows;
+}
+
+// ─── Admin Notifications (Auto 5, 6, 7) ──────────────────────────────────────
+
+export async function createAdminNotification(data: Omit<InsertAdminNotification, "readAt">): Promise<AdminNotification> {
+  const [row] = await db.insert(adminNotifications).values({ ...data, readAt: null } as any).returning();
+  return row;
+}
+
+export async function getAdminNotifications(websiteId: string, limit = 50, unreadOnly = false): Promise<AdminNotification[]> {
+  const conditions = [eq(adminNotifications.websiteId, websiteId)];
+  if (unreadOnly) conditions.push(isNull(adminNotifications.readAt));
+  return db.select().from(adminNotifications).where(and(...conditions)).orderBy(desc(adminNotifications.createdAt)).limit(limit);
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await db.update(adminNotifications).set({ readAt: new Date() } as any).where(eq(adminNotifications.id, id));
+}
+
+export async function getNotificationByMeta(websiteId: string, type: string, key: string): Promise<AdminNotification | undefined> {
+  const [row] = await db.select().from(adminNotifications)
+    .where(and(
+      eq(adminNotifications.websiteId, websiteId),
+      eq(adminNotifications.type, type),
+      sql`metadata->>'slug' = ${key} OR metadata->>'service' = ${key}`,
+    ))
+    .limit(1);
+  return row;
+}
+
+export async function getUnreadNotificationCount(websiteId: string): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(adminNotifications)
+    .where(and(eq(adminNotifications.websiteId, websiteId), isNull(adminNotifications.readAt)));
+  return row?.n ?? 0;
+}
+
+// ─── Fallback Hit – single-row lookup (Auto 5) ────────────────────────────────
+
+export async function getFallbackHit(websiteId: string, slug: string): Promise<FallbackHitLog | undefined> {
+  const [row] = await db.select().from(fallbackHitLogs)
+    .where(and(eq(fallbackHitLogs.websiteId, websiteId), eq(fallbackHitLogs.slug, slug)));
+  return row;
+}
+
+export async function getPromotionQueue(websiteId: string, minHits = 10, windowDays = 30): Promise<FallbackHitLog[]> {
+  const since = new Date();
+  since.setDate(since.getDate() - windowDays);
+  return db.select().from(fallbackHitLogs)
+    .where(and(
+      eq(fallbackHitLogs.websiteId, websiteId),
+      eq(fallbackHitLogs.promoted, false),
+      gte(fallbackHitLogs.hitCount, minHits),
+      gte(fallbackHitLogs.lastSeenAt, since),
+    ))
+    .orderBy(desc(fallbackHitLogs.hitCount))
+    .limit(100) as any;
+}
+
+export async function markFallbackPromoted(id: string): Promise<void> {
+  await db.update(fallbackHitLogs).set({ promoted: true, promotedAt: new Date() } as any).where(eq(fallbackHitLogs.id, id));
+}
+
+// ─── Demotion Logs (Auto 6) ───────────────────────────────────────────────────
+
+export async function createDemotionLog(data: InsertDemotionLog): Promise<DemotionLog> {
+  const [row] = await db.insert(demotionLogs).values(data as any).returning();
+  return row;
+}
+
+export async function getDemotionLogs(websiteId: string, limit = 50): Promise<DemotionLog[]> {
+  return db.select().from(demotionLogs)
+    .where(eq(demotionLogs.websiteId, websiteId))
+    .orderBy(desc(demotionLogs.createdAt))
+    .limit(limit);
+}
+
+// ─── Zero-impression Tier 1 candidates (Auto 6) ───────────────────────────────
+
+export async function getZeroImpressionTier1Pages(
+  websiteId: string,
+  zeroImpressionDays: number,
+): Promise<Array<{ id: string; slug: string; title: string }>> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - zeroImpressionDays);
+  // Pages that are Tier 1 published, have no metrics row at all, and were published before the cutoff
+  const rows = await db.execute(sql`
+    SELECT p.id, p.slug, p.title
+    FROM pages p
+    WHERE p.website_id = ${websiteId}
+      AND p.tier = 1
+      AND p.status = 'published'
+      AND p.published_at < ${cutoff}
+      AND NOT EXISTS (
+        SELECT 1 FROM page_metrics pm
+        WHERE pm.page_id = p.id AND pm.impressions > 0
+      )
+    LIMIT 500
+  `);
+  return (rows as any).rows ?? [];
+}
+
+// ─── Weekly summary stats (Auto 8) ───────────────────────────────────────────
+
+export async function getWeeklySummaryStats(websiteId: string): Promise<{
+  pagesGeneratedLastWeek: number;
+  pagesPromotedToTier1: number;
+  pagesDemoted: number;
+  topFallbackHits: Array<{ slug: string; hitCount: number }>;
+  thinBanks: Array<{ service: string; completenessScore: number }>;
+  avgQualityScore: number | null;
+}> {
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  const [genRow] = await db.select({ n: count() }).from(pages)
+    .where(and(eq(pages.websiteId, websiteId), gte(pages.createdAt, weekAgo)));
+
+  const [promRow] = await db.select({ n: count() }).from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.tier, 1), gte(pages.updatedAt, weekAgo)));
+
+  const demotedCount = await db.select({ n: count() }).from(demotionLogs)
+    .where(and(eq(demotionLogs.websiteId, websiteId), gte(demotionLogs.createdAt, weekAgo)));
+
+  const topFallback = await db.select({ slug: fallbackHitLogs.slug, hitCount: fallbackHitLogs.hitCount })
+    .from(fallbackHitLogs).where(eq(fallbackHitLogs.websiteId, websiteId))
+    .orderBy(desc(fallbackHitLogs.hitCount)).limit(5);
+
+  const thinBankRows = await db.select({ service: variationBankCompleteness.service, completenessScore: variationBankCompleteness.completenessScore })
+    .from(variationBankCompleteness)
+    .where(and(eq(variationBankCompleteness.websiteId, websiteId), lt(variationBankCompleteness.completenessScore, 60)))
+    .orderBy(asc(variationBankCompleteness.completenessScore))
+    .limit(5);
+
+  const [avgRow] = await db.execute(sql`
+    SELECT ROUND(AVG(quality_score), 1) AS avg_score
+    FROM pages
+    WHERE website_id = ${websiteId} AND quality_score IS NOT NULL AND status = 'published'
+  `);
+  const avgScore = (avgRow as any)?.avg_score ? parseFloat((avgRow as any).avg_score) : null;
+
+  return {
+    pagesGeneratedLastWeek: genRow?.n ?? 0,
+    pagesPromotedToTier1: promRow?.n ?? 0,
+    pagesDemoted: demotedCount[0]?.n ?? 0,
+    topFallbackHits: topFallback as any,
+    thinBanks: thinBankRows as any,
+    avgQualityScore: avgScore,
+  };
 }
 
 // Re-export IStorage interface for backwards compatibility

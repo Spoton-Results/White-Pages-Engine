@@ -121,4 +121,12 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   });
 
   console.log(`[bank-write] Job ${jobId} complete — ${done} done, ${failed} failed`);
+
+  // Auto 7: Flag thin banks after every bank write
+  try {
+    const { checkThinBanksAfterUpdate } = await import("./automation");
+    await checkThinBanksAfterUpdate(job.websiteId);
+  } catch (err) {
+    console.error("[auto7] Thin bank check failed (non-fatal):", err);
+  }
 }

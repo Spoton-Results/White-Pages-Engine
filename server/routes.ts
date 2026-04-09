@@ -274,6 +274,15 @@ async function tryGenerateDynamicPage(
     // Log fallback hit (fire-and-forget — never block page rendering)
     storage.logFallbackHit(website.id, slug).catch(() => {});
 
+    // Auto 5: Check if this fallback URL has crossed the promotion threshold
+    setImmediate(async () => {
+      try {
+        const { checkFallbackPromotion, getAutomationSettings } = await import("./services/automation");
+        const autoSettings = getAutomationSettings(website);
+        await checkFallbackPromotion(website.id, slug, autoSettings);
+      } catch { /* never block */ }
+    });
+
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
     console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
     return { html: renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
@@ -2471,7 +2480,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         }
 
         // 2. Apply tier assignments
-        const { promoted } = await storage.bulkUpdatePageTiers(websiteId, tier1Threshold);
+        const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(websiteId, tier1Threshold);
         let demoted = 0;
         if (applyTier3) {
           const r = await storage.bulkSetTier3(websiteId, tier3Threshold);
@@ -2479,6 +2488,29 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         }
 
         console.log(`[score-and-promote] Done — scored:${scored} promoted:${promoted} demoted:${demoted}`);
+
+        // Auto 3: Debounced sitemap regen after tier changes
+        if (promoted > 0 || demoted > 0) {
+          try {
+            const { scheduleSitemapRegen, getAutomationSettings } = await import("./services/automation");
+            const autoSettings = getAutomationSettings(website);
+            const pDomain = (website.settings as any)?.parentDomain;
+            const pPath = (website.settings as any)?.proxyPath || "";
+            const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+            scheduleSitemapRegen(websiteId, website.domain, canonBase, autoSettings.sitemapRegenDebounceMinutes * 60 * 1000);
+          } catch { /* non-critical */ }
+        }
+
+        // Auto 4: Submit newly promoted Tier 1 URLs to Google Indexing API
+        if (promotedSlugs.length > 0) {
+          try {
+            const { submitTier1UrlsToGoogle, getAutomationSettings } = await import("./services/automation");
+            const autoSettings = getAutomationSettings(website);
+            if (autoSettings.googleIndexingEnabled) {
+              submitTier1UrlsToGoogle(websiteId, promotedSlugs, website).catch(() => {});
+            }
+          } catch { /* non-critical */ }
+        }
       } catch (e) {
         console.error("[score-and-promote] error:", e);
       }
@@ -2852,6 +2884,64 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     console.log(`[delete-long-slugs] Deleted ${count} pages with slug length >= ${minLength} for website ${websiteId}`);
     res.json({ deleted: count, minLength, websiteId });
+  });
+
+  // ── Automation Settings (per-tenant) ─────────────────────────────────────────
+
+  app.get("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const { getAutomationSettings, DEFAULT_AUTOMATION_SETTINGS } = await import("./services/automation");
+    return res.json({ settings: getAutomationSettings(website), defaults: DEFAULT_AUTOMATION_SETTINGS });
+  });
+
+  app.put("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const current = (website.settings as any) || {};
+    const merged = { ...current, automation: { ...(current.automation || {}), ...req.body } };
+    const updated = await storage.updateWebsite(req.params.id as string, { settings: merged } as any);
+    const { getAutomationSettings } = await import("./services/automation");
+    return res.json({ ok: true, settings: getAutomationSettings(updated) });
+  });
+
+  // ── Admin Notifications (Auto 5, 6, 7) ────────────────────────────────────────
+
+  app.get("/api/websites/:id/notifications", requireAuth, async (req: Request, res: Response) => {
+    const unreadOnly = req.query.unreadOnly === "true";
+    const limit = Math.min(parseInt((req.query.limit as string) || "50"), 200);
+    const notifications = await storage.getAdminNotifications(req.params.id as string, limit, unreadOnly);
+    const unreadCount = await storage.getUnreadNotificationCount(req.params.id as string);
+    return res.json({ notifications, unreadCount });
+  });
+
+  app.post("/api/notifications/:id/read", requireAuth, async (req: Request, res: Response) => {
+    await storage.markNotificationRead(req.params.id as string);
+    return res.json({ ok: true });
+  });
+
+  // ── Promotion Queue (Auto 5) ──────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/promotion-queue", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const { getAutomationSettings } = await import("./services/automation");
+    const autoSettings = getAutomationSettings(website);
+    const queue = await storage.getPromotionQueue(req.params.id as string, autoSettings.fallbackHitThreshold, autoSettings.fallbackHitWindowDays);
+    return res.json({ queue });
+  });
+
+  app.post("/api/websites/:id/promotion-queue/:logId/dismiss", requireAuth, async (req: Request, res: Response) => {
+    await storage.markFallbackPromoted(req.params.logId as string);
+    return res.json({ ok: true });
+  });
+
+  // ── Demotion Logs (Auto 6) ────────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/demotion-logs", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "50"), 200);
+    const logs = await storage.getDemotionLogs(req.params.id as string, limit);
+    return res.json({ logs });
   });
 
   return httpServer;

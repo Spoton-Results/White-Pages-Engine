@@ -228,6 +228,37 @@ app.use((req, res, next) => {
           console.error("[startup] Sitemap startup task failed (non-fatal):", err);
         }
       });
+
+      // Auto 6: Weekly auto-demote — run once 5 min after startup, then every 7 days
+      setTimeout(async () => {
+        try {
+          const { runWeeklyAutoDemote } = await import("./services/automation");
+          await runWeeklyAutoDemote();
+        } catch (err) {
+          console.error("[auto6] Initial auto-demote run failed (non-fatal):", err);
+        }
+        setInterval(async () => {
+          try {
+            const { runWeeklyAutoDemote } = await import("./services/automation");
+            await runWeeklyAutoDemote();
+          } catch (err) {
+            console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
+          }
+        }, 7 * 24 * 60 * 60 * 1000); // every 7 days
+      }, 5 * 60 * 1000); // 5 minutes after startup
+
+      // Auto 8: Weekly summary email — check every hour, send on Monday mornings (UTC)
+      setInterval(async () => {
+        const now = new Date();
+        if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 60) {
+          try {
+            const { sendWeeklySummaryEmails } = await import("./services/automation");
+            await sendWeeklySummaryEmails();
+          } catch (err) {
+            console.error("[auto8] Weekly email failed (non-fatal):", err);
+          }
+        }
+      }, 60 * 60 * 1000); // check every hour
     },
   );
 })();

@@ -442,3 +442,38 @@ export type VariationBankCompleteness = typeof variationBankCompleteness.$inferS
 export const insertHubPageSchema = createInsertSchema(hubPages).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertHubPage = z.infer<typeof insertHubPageSchema>;
 export type HubPage = typeof hubPages.$inferSelect;
+
+// ─── Admin Notifications ──────────────────────────────────────────────────────
+// Used by Auto 5 (fallback promotion alerts) and Auto 7 (thin bank flags)
+
+export const adminNotifications = pgTable("admin_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // "fallback_promotion" | "thin_bank" | "auto_demote"
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  metadata: jsonb("metadata"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAdminNotificationSchema = createInsertSchema(adminNotifications).omit({ id: true, createdAt: true });
+export type InsertAdminNotification = z.infer<typeof insertAdminNotificationSchema>;
+export type AdminNotification = typeof adminNotifications.$inferSelect;
+
+// ─── Demotion Logs ────────────────────────────────────────────────────────────
+// Audit trail for Auto 6 (auto-demote weak Tier 1 pages)
+
+export const demotionLogs = pgTable("demotion_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  fromTier: integer("from_tier").notNull(),
+  toTier: integer("to_tier").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertDemotionLogSchema = createInsertSchema(demotionLogs).omit({ id: true, createdAt: true });
+export type InsertDemotionLog = z.infer<typeof insertDemotionLogSchema>;
+export type DemotionLog = typeof demotionLogs.$inferSelect;
