@@ -907,12 +907,18 @@ export async function promoteFallbackSlug(websiteId: string, slug: string): Prom
 export async function upsertBankCompleteness(data: InsertVariationBankCompleteness): Promise<void> {
   await db.execute(sql`
     INSERT INTO variation_bank_completeness
-      (id, website_id, service, has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
+      (id, website_id, service,
+       has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
+       has_local_context, has_use_case, has_proof_trust, has_pain_point, has_local_stat,
        total_variations, avg_variations_per_section, completeness_score, is_eligible_for_tier1, last_computed_at)
     VALUES
-      (gen_random_uuid(), ${data.websiteId}, ${data.service}, ${data.hasIntro}, ${data.hasHowItWorks},
-       ${data.hasBenefits}, ${data.hasFaq}, ${data.hasCta}, ${data.totalVariations},
-       ${data.avgVariationsPerSection}, ${data.completenessScore}, ${data.isEligibleForTier1}, NOW())
+      (gen_random_uuid(), ${data.websiteId}, ${data.service},
+       ${data.hasIntro}, ${data.hasHowItWorks}, ${data.hasBenefits}, ${data.hasFaq}, ${data.hasCta},
+       ${(data as any).hasLocalContext ?? false}, ${(data as any).hasUseCase ?? false},
+       ${(data as any).hasProofTrust ?? false}, ${(data as any).hasPainPoint ?? false},
+       ${(data as any).hasLocalStat ?? false},
+       ${data.totalVariations}, ${data.avgVariationsPerSection},
+       ${data.completenessScore}, ${data.isEligibleForTier1}, NOW())
     ON CONFLICT (website_id, service)
     DO UPDATE SET
       has_intro = EXCLUDED.has_intro,
@@ -920,6 +926,11 @@ export async function upsertBankCompleteness(data: InsertVariationBankCompletene
       has_benefits = EXCLUDED.has_benefits,
       has_faq = EXCLUDED.has_faq,
       has_cta = EXCLUDED.has_cta,
+      has_local_context = EXCLUDED.has_local_context,
+      has_use_case = EXCLUDED.has_use_case,
+      has_proof_trust = EXCLUDED.has_proof_trust,
+      has_pain_point = EXCLUDED.has_pain_point,
+      has_local_stat = EXCLUDED.has_local_stat,
       total_variations = EXCLUDED.total_variations,
       avg_variations_per_section = EXCLUDED.avg_variations_per_section,
       completeness_score = EXCLUDED.completeness_score,

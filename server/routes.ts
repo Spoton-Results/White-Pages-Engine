@@ -5,7 +5,7 @@ import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices, generateQueryClusters } from "./services/claude";
 import { buildVariationPage } from "./services/variation-engine";
-import { writeVariationsForService, BrandContext } from "./services/variation-writer";
+import { writeVariationsForService, fillMissingSectionsForService, BrandContext } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt, URLS_PER_SITEMAP } from "./services/sitemap";
 import { isR2Configured } from "./services/r2";
 import {
@@ -2243,13 +2243,62 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       await storage.upsertBankCompleteness({
         websiteId, service: svc,
         hasIntro: result.hasIntro, hasHowItWorks: result.hasHowItWorks, hasBenefits: result.hasBenefits,
-        hasFaq: result.hasFaq, hasCta: result.hasCta, totalVariations: result.totalVariations,
+        hasFaq: result.hasFaq, hasCta: result.hasCta,
+        hasLocalContext: result.hasLocalContext, hasUseCase: result.hasUseCase,
+        hasProofTrust: result.hasProofTrust, hasPainPoint: result.hasPainPoint,
+        hasLocalStat: result.hasLocalStat,
+        totalVariations: result.totalVariations,
         avgVariationsPerSection: result.avgVariationsPerSection, completenessScore: result.completenessScore,
         isEligibleForTier1: result.isEligibleForTier1,
-      });
+      } as any);
       computed++;
     }
     return res.json({ ok: true, computed });
+  });
+
+  // Fill only missing sections for a single service (does not touch existing sections)
+  app.post("/api/websites/:id/variation-banks/fill-missing", requireAuth, async (req: Request, res: Response) => {
+    const { service } = z.object({ service: z.string().min(1) }).parse(req.body);
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const [brand, industries] = await Promise.all([
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    const industry = industries[0];
+    const ctx: BrandContext = {
+      brandName: brand?.name,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: industry?.description ?? undefined,
+    };
+
+    try {
+      const result = await fillMissingSectionsForService(service, website.accountId, websiteId, ctx);
+      // Recompute completeness after filling
+      const { computeBankCompleteness } = await import("./services/scoring");
+      const banks = await storage.getVariationBanks(websiteId, service);
+      const completeness = computeBankCompleteness(banks);
+      await storage.upsertBankCompleteness({
+        websiteId, service,
+        hasIntro: completeness.hasIntro, hasHowItWorks: completeness.hasHowItWorks,
+        hasBenefits: completeness.hasBenefits, hasFaq: completeness.hasFaq, hasCta: completeness.hasCta,
+        hasLocalContext: completeness.hasLocalContext, hasUseCase: completeness.hasUseCase,
+        hasProofTrust: completeness.hasProofTrust, hasPainPoint: completeness.hasPainPoint,
+        hasLocalStat: completeness.hasLocalStat,
+        totalVariations: completeness.totalVariations,
+        avgVariationsPerSection: completeness.avgVariationsPerSection,
+        completenessScore: completeness.completenessScore,
+        isEligibleForTier1: completeness.isEligibleForTier1,
+      } as any);
+      return res.json({ ok: true, ...result, completenessScore: completeness.completenessScore });
+    } catch (err: any) {
+      const status = err?.status ?? 500;
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ error: err?.message ?? "Failed" });
+    }
   });
 
   // ── Leads Admin ───────────────────────────────────────────────────────────

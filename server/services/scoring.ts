@@ -42,11 +42,19 @@ export interface ScoreBreakdown {
 }
 
 export interface BankCompletenessResult {
+  // Core sections
   hasIntro:               boolean;
   hasHowItWorks:          boolean;
   hasBenefits:            boolean;
   hasFaq:                 boolean;
   hasCta:                 boolean;
+  // Extended sections
+  hasLocalContext:        boolean;
+  hasUseCase:             boolean;
+  hasProofTrust:          boolean;
+  hasPainPoint:           boolean;
+  hasLocalStat:           boolean;
+  // Aggregate metrics
   totalVariations:        number;
   avgVariationsPerSection: number;
   completenessScore:      number;
@@ -200,19 +208,33 @@ export function computeBankCompleteness(
   banks:             ContentVariationBank[],
   minScoreForTier1 = 80,
 ): BankCompletenessResult {
-  const hasIntro      = banks.some(b => b.sectionName === "intro"         && (b.variations as string[]).length > 0);
-  const hasHowItWorks = banks.some(b => b.sectionName === "how_it_works"  && (b.variations as string[]).length > 0);
-  const hasBenefits   = banks.some(b => b.sectionName === "benefits"      && (b.variations as string[]).length > 0);
-  const hasFaq        = banks.some(b => b.sectionName === "faq"           && (b.variations as string[]).length > 0);
-  const hasCta        = banks.some(b => b.sectionName === "cta"           && (b.variations as string[]).length > 0);
+  const has = (name: string) =>
+    banks.some(b => b.sectionName === name && (b.variations as string[]).length > 0);
+
+  // Core sections (original 5)
+  const hasIntro      = has("intro");
+  const hasHowItWorks = has("how_it_works");
+  const hasBenefits   = has("benefits");
+  const hasFaq        = has("faq");
+  const hasCta        = has("cta");
+
+  // Extended sections (Phase 3 additions)
+  const hasLocalContext = has("local_context");
+  const hasUseCase      = has("use_case");
+  const hasProofTrust   = has("proof_trust");
+  const hasPainPoint    = has("pain_point");
+  const hasLocalStat    = has("local_stat");
 
   const totalVariations = banks.reduce((s, b) => s + (b.variations as string[]).length, 0);
   const avgVariationsPerSection = banks.length > 0
     ? Math.round(totalVariations / banks.length)
     : 0;
 
-  // Completeness: section presence (5 × 10 = 50) + variation depth (50 max)
-  const sectionScore = [hasIntro, hasHowItWorks, hasBenefits, hasFaq, hasCta].filter(Boolean).length * 10;
+  // Core completeness score: core section presence (5 × 6 = 30) + extended (5 × 4 = 20) + depth (50 max)
+  // Backward-safe: existing banks with only 5 core sections can still score up to 80
+  const corePresent = [hasIntro, hasHowItWorks, hasBenefits, hasFaq, hasCta].filter(Boolean).length;
+  const extPresent  = [hasLocalContext, hasUseCase, hasProofTrust, hasPainPoint, hasLocalStat].filter(Boolean).length;
+  const sectionScore = corePresent * 6 + extPresent * 4;
   const depthScore =
     avgVariationsPerSection >= 10 ? 50 :
     avgVariationsPerSection >= 5  ? 35 :
@@ -220,7 +242,8 @@ export function computeBankCompleteness(
     avgVariationsPerSection >= 1  ? 10 : 0;
   const completenessScore = Math.min(sectionScore + depthScore, 100);
 
-  // Eligible for Tier 1 if all 5 sections present AND avg ≥ 5 variations
+  // Eligible for Tier 1 if all 5 core sections present AND avg ≥ 5 variations
+  // (extended sections improve score but don't block eligibility)
   const isEligibleForTier1 =
     hasIntro && hasHowItWorks && hasBenefits && hasFaq && hasCta &&
     avgVariationsPerSection >= 5;
@@ -231,6 +254,11 @@ export function computeBankCompleteness(
     hasBenefits,
     hasFaq,
     hasCta,
+    hasLocalContext,
+    hasUseCase,
+    hasProofTrust,
+    hasPainPoint,
+    hasLocalStat,
     totalVariations,
     avgVariationsPerSection,
     completenessScore,

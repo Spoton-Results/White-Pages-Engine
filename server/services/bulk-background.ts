@@ -250,11 +250,16 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         hasBenefits: completeness.hasBenefits,
         hasFaq: completeness.hasFaq,
         hasCta: completeness.hasCta,
+        hasLocalContext: completeness.hasLocalContext,
+        hasUseCase: completeness.hasUseCase,
+        hasProofTrust: completeness.hasProofTrust,
+        hasPainPoint: completeness.hasPainPoint,
+        hasLocalStat: completeness.hasLocalStat,
         totalVariations: completeness.totalVariations,
         avgVariationsPerSection: completeness.avgVariationsPerSection,
         completenessScore: completeness.completenessScore,
         isEligibleForTier1: completeness.isEligibleForTier1,
-      });
+      } as any);
     } catch { /* non-critical — completeness tracking is best-effort */ }
 
     // Determine the min score for Tier 1 from the blueprint (default 80)
