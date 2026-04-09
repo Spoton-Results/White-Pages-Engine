@@ -428,6 +428,8 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
   const [generateAI, setGenerateAI] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cityTopN, setCityTopN] = useState<number | "all" | null>(null);
+  const [cityTierFilter, setCityTierFilter] = useState<number | null>(null);
 
   const servicesQ = useQuery<any[]>({
     queryKey: ["/api/accounts", accountId, "services"],
@@ -463,7 +465,17 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
 
   const services: string[] = (servicesQ.data || []).map((s: any) => s.name);
   const states: string[] = [...new Set((locationsQ.data || []).filter((l: any) => l.type === "state").map((l: any) => l.name as string))].sort();
-  const cities: string[] = [...new Set((locationsQ.data || []).filter((l: any) => l.type === "city").map((l: any) => l.name as string))].sort();
+  const allCityLocs: any[] = (locationsQ.data || []).filter((l: any) => l.type === "city");
+  const filteredCityLocs: any[] = (() => {
+    let result = [...allCityLocs];
+    if (cityTierFilter !== null) result = result.filter((l: any) => l.cityTier === cityTierFilter);
+    result.sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+    if (cityTopN !== null && cityTopN !== "all") result = result.slice(0, cityTopN as number);
+    return result;
+  })();
+  const cities: string[] = (cityTopN !== null || cityTierFilter !== null)
+    ? filteredCityLocs.map((l: any) => l.name)
+    : allCityLocs.map((l: any) => l.name).sort();
   const items = hubType === "service" ? services : hubType === "state" ? states : cities;
 
   const toggleAll = () => {
@@ -502,6 +514,7 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
   const handleClose = () => {
     setOpen(false); setJobId(null); setSelected(new Set());
     setHubType("service"); setMaxChildLinks(30); setGenerateAI(false);
+    setCityTopN(null); setCityTierFilter(null);
   };
 
   const btnStyle = (active: boolean) => ({
@@ -529,7 +542,7 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
                   <label style={{ display: "block", fontWeight: 600, marginBottom: 6, fontSize: ".85rem", color: "#374151" }}>Hub Type</label>
                   <div style={{ display: "flex", gap: 8 }}>
                     {(["service", "state", "city"] as const).map(t => (
-                      <button key={t} onClick={() => { setHubType(t); setSelected(new Set()); }} style={btnStyle(hubType === t)}>
+                      <button key={t} onClick={() => { setHubType(t); setSelected(new Set()); setCityTopN(null); setCityTierFilter(null); }} style={btnStyle(hubType === t)}>
                         {t === "service" ? "Service Hub" : t === "state" ? "State Hub" : "City Hub"}
                       </button>
                     ))}
@@ -544,6 +557,57 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
                       {selected.size === items.length && items.length > 0 ? "Deselect All" : "Select All"}
                     </button>
                   </div>
+                  {hubType === "city" && (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                      <select
+                        data-testid="select-hub-city-top-n"
+                        value={cityTopN === null ? "" : String(cityTopN)}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setCityTierFilter(null);
+                          setCityTopN(v === "" ? null : v === "all" ? "all" : Number(v));
+                          setSelected(new Set());
+                        }}
+                        style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: ".78rem", color: "#374151", background: "#fff", cursor: "pointer" }}
+                      >
+                        <option value="">Top Cities…</option>
+                        {[20, 50, 100, 250, 500, 750, 1000, 2500, 5000].map(n => (
+                          <option key={n} value={String(n)}>Top {n.toLocaleString()}</option>
+                        ))}
+                        <option value="all">All Cities</option>
+                      </select>
+                      {([1, 2, 3] as const).map(tier => (
+                        <button
+                          key={tier}
+                          type="button"
+                          data-testid={`button-hub-city-tier-${tier}`}
+                          onClick={() => {
+                            setCityTopN(null);
+                            setCityTierFilter(cityTierFilter === tier ? null : tier);
+                            setSelected(new Set());
+                          }}
+                          style={{
+                            padding: "4px 10px", borderRadius: 6, border: "1px solid", fontSize: ".78rem", fontWeight: 600, cursor: "pointer",
+                            borderColor: cityTierFilter === tier ? "#2563eb" : "#d1d5db",
+                            background: cityTierFilter === tier ? "#eff6ff" : "#fff",
+                            color: cityTierFilter === tier ? "#1d4ed8" : "#374151",
+                          }}
+                        >
+                          Tier {tier}
+                        </button>
+                      ))}
+                      {(cityTopN !== null || cityTierFilter !== null) && (
+                        <button
+                          type="button"
+                          data-testid="button-hub-city-clear-filter"
+                          onClick={() => { setCityTopN(null); setCityTierFilter(null); setSelected(new Set()); }}
+                          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: ".78rem", fontWeight: 500, cursor: "pointer", background: "#fff", color: "#6b7280" }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 200, overflow: "auto", padding: "6px 0" }}>
                     {items.length === 0 ? (
                       <div style={{ textAlign: "center", color: "#9ca3af", padding: "1rem", fontSize: ".85rem" }}>
