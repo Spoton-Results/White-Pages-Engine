@@ -157,6 +157,10 @@ export const blueprints = pgTable("blueprints", {
   isActive: boolean("is_active").notNull().default(true),
   defaultTier: integer("default_tier").notNull().default(2),
   minScoreForTier1: integer("min_score_for_tier1").notNull().default(80),
+  cityTierRules: jsonb("city_tier_rules"),
+  minBankCompleteness: integer("min_bank_completeness").notNull().default(70),
+  maxCitiesPerState: integer("max_cities_per_state"),
+  stateAllowlist: text("state_allowlist").array(),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -193,6 +197,8 @@ export const pages = pgTable("pages", {
   indexStatus: text("index_status").notNull().default("queued"),
   fallbackHitCount: integer("fallback_hit_count").notNull().default(0),
   lastEvaluatedAt: timestamp("last_evaluated_at"),
+  rolloutPhase: text("rollout_phase"),
+  promotionStatus: text("promotion_status").notNull().default("default"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -340,6 +346,22 @@ export const variationBankCompleteness = pgTable("variation_bank_completeness", 
   lastComputedAt: timestamp("last_computed_at").notNull().defaultNow(),
 });
 
+// ─── Hub Pages ────────────────────────────────────────────────────────────────
+
+export const hubPages = pgTable("hub_pages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  hubType: text("hub_type").notNull(), // 'service' | 'state' | 'city'
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  tier: integer("tier").notNull().default(1),
+  qualityScore: integer("quality_score"),
+  status: text("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ─── Insert Schemas & Types ───────────────────────────────────────────────────
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true, updatedAt: true });
@@ -404,3 +426,7 @@ export type FallbackHitLog = typeof fallbackHitLogs.$inferSelect;
 export const insertVariationBankCompletenessSchema = createInsertSchema(variationBankCompleteness).omit({ id: true, lastComputedAt: true });
 export type InsertVariationBankCompleteness = z.infer<typeof insertVariationBankCompletenessSchema>;
 export type VariationBankCompleteness = typeof variationBankCompleteness.$inferSelect;
+
+export const insertHubPageSchema = createInsertSchema(hubPages).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertHubPage = z.infer<typeof insertHubPageSchema>;
+export type HubPage = typeof hubPages.$inferSelect;
