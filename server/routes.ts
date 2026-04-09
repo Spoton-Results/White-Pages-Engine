@@ -120,6 +120,81 @@ function titleCase(slug: string): string {
   return slug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
+// Resolve location data from a location slug segment (handles both abbr and full-name formats)
+async function resolveLocation(locationSlug: string): Promise<{
+  cityName: string; stateAbbr: string; stateName: string; locationType: "city" | "state"; stateData: any; canonicalCitySlug: string;
+} | null> {
+  // Abbreviation format: {city-slug}-{2-char-state}
+  const abbrMatch = locationSlug.match(/^(.+)-([a-z]{2})$/);
+  if (abbrMatch && US_STATE_ABBRS.has(abbrMatch[2])) {
+    const stateData = await storage.getStateDataByAbbr(abbrMatch[2].toUpperCase());
+    if (stateData) {
+      return {
+        cityName: titleCase(abbrMatch[1]),
+        stateAbbr: stateData.stateAbbr,
+        stateName: stateData.stateName,
+        locationType: "city",
+        stateData,
+        canonicalCitySlug: abbrMatch[1],
+      };
+    }
+  }
+  // Full state name: check if it's a pure state slug
+  const asName = titleCase(locationSlug);
+  let stateData = await storage.getStateDataByName(asName);
+  if (stateData) {
+    return { cityName: stateData.stateName, stateAbbr: stateData.stateAbbr, stateName: stateData.stateName, locationType: "state", stateData, canonicalCitySlug: "" };
+  }
+  // Full name city format: {city-slug}-{full-state-slug}
+  if (locationSlug.includes("-")) {
+    const parts = locationSlug.split("-");
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const stateCandidate = parts.slice(i).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      stateData = await storage.getStateDataByName(stateCandidate);
+      if (stateData) {
+        const citySlug = parts.slice(0, i).join("-");
+        return {
+          cityName: titleCase(citySlug),
+          stateAbbr: stateData.stateAbbr,
+          stateName: stateData.stateName,
+          locationType: "city",
+          stateData,
+          canonicalCitySlug: citySlug,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// Find best matching service and its variation banks for a service slug
+async function resolveServiceBanks(websiteId: string, serviceSlugFromUrl: string): Promise<{ serviceName: string; banks: any[] }> {
+  const bankServices = await storage.getVariationBankServices(websiteId);
+  if (!bankServices.length) return { serviceName: titleCase(serviceSlugFromUrl), banks: [] };
+
+  // 1. Exact slug match
+  const exact = bankServices.find(s => slugify(s) === serviceSlugFromUrl);
+  if (exact) {
+    const banks = await storage.getVariationBanks(websiteId, exact);
+    if (banks.length) return { serviceName: exact, banks };
+  }
+
+  // 2. Best word-overlap match
+  const urlWords = new Set(serviceSlugFromUrl.split("-").filter(w => w.length > 2));
+  let bestScore = 0;
+  let bestService = bankServices[0];
+  for (const s of bankServices) {
+    if (s.length > 120) continue; // skip bad/long service names
+    const sWords = slugify(s).split("-");
+    const overlap = sWords.filter(w => urlWords.has(w)).length;
+    if (overlap > bestScore) { bestScore = overlap; bestService = s; }
+  }
+  // Use best match even if score is 0 (fall back to first valid service)
+  const fallbackService = bestScore > 0 ? bestService : bankServices.find(s => s.length <= 120) || bankServices[0];
+  const banks = await storage.getVariationBanks(websiteId, fallbackService);
+  return { serviceName: titleCase(serviceSlugFromUrl), banks };
+}
+
 // Returns { html } to serve content or { redirect } to redirect, or null for true 404
 async function tryGenerateDynamicPage(
   slug: string, website: any, brand: any,
@@ -137,106 +212,67 @@ async function tryGenerateDynamicPage(
 
     const proxyPath = (website.settings as any)?.proxyPath || "";
 
-    // ── Step 1: abbreviation format? try to find/redirect to full-name version ──
-    const cityMatch = locationSlug.match(/^(.+)-([a-z]{2})$/);
-    if (cityMatch && US_STATE_ABBRS.has(cityMatch[2])) {
-      const stateAbbr = cityMatch[2].toUpperCase();
-      const stateRec = await storage.getStateDataByAbbr(stateAbbr);
-      if (stateRec) {
-        const citySlug = cityMatch[1];
-        const fullNameSlug = `${serviceSlugFromUrl}-in-${citySlug}-${slugify(stateRec.stateName)}`;
-        const existingPage = await storage.getPageBySlug(website.id, fullNameSlug);
-        if (existingPage?.status === "published") {
-          // Redirect to the canonical full-name URL
-          return { redirect: `${proxyPath}/${fullNameSlug}` };
-        }
+    // ── Step 1: resolve location ──────────────────────────────────────────────
+    const loc = await resolveLocation(locationSlug);
+    if (!loc) return null; // Not a recognisable US location → true 404
 
-        // No full-name page either — try generating dynamically
-        const bankServices = await storage.getVariationBankServices(website.id);
-        const matchedService = bankServices.find(s => slugify(s) === serviceSlugFromUrl)
-          || bankServices.find(s => serviceSlugFromUrl.startsWith(slugify(s).slice(0, 12)));
-        if (matchedService) {
-          const banks = await storage.getVariationBanks(website.id, matchedService);
-          if (banks.length) {
-            const cityName = titleCase(citySlug);
-            const result = buildVariationPage(
-              matchedService, slugify(matchedService), cityName, "city",
-              stateRec.stateName, stateAbbr,
-              brand?.name || website.name || website.domain,
-              banks, stateRec, null, undefined, undefined, website.domain, undefined, proxyPath,
-            );
-            // Use full-name slug as canonical
-            const canonicalSlug = `${serviceSlugFromUrl}-in-${citySlug}-${slugify(stateRec.stateName)}`;
-            const syntheticPage = {
-              id: "dynamic-" + canonicalSlug, slug: canonicalSlug,
-              title: result.title, h1: result.h1, metaDescription: result.metaDescription,
-              pageType: "service_city", websiteId: website.id, status: "published",
-              publishedAt: new Date(), updatedAt: new Date(),
-            };
-            const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
-            return { html: renderPageHtml(syntheticPage, { contentHtml: result.contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
-          }
+    // ── Step 2: if abbreviation format, try to redirect to canonical full-name ─
+    if (loc.locationType === "city") {
+      const fullNameSlug = `${serviceSlugFromUrl}-in-${loc.canonicalCitySlug}-${slugify(loc.stateName)}`;
+      if (fullNameSlug !== slug) {
+        const existing = await storage.getPageBySlug(website.id, fullNameSlug);
+        if (existing?.status === "published") {
+          return { redirect: `${proxyPath}/${fullNameSlug}` };
         }
       }
     }
 
-    // ── Step 2: full state-name format — no page in DB, try to generate ────────
-    const stateRec = await storage.getStateDataByName(titleCase(locationSlug))
-      || (locationSlug.includes("-")
-        ? await (async () => {
-            // Try matching last word(s) as state name
-            const parts = locationSlug.split("-");
-            for (let i = 1; i < parts.length; i++) {
-              const candidate = parts.slice(i).join(" ");
-              const r = await storage.getStateDataByName(
-                candidate.replace(/\b\w/g, c => c.toUpperCase())
-              );
-              if (r) return r;
-            }
-            return undefined;
-          })()
-        : undefined);
+    // ── Step 3: find or fall back to best service banks ───────────────────────
+    const { serviceName, banks } = await resolveServiceBanks(website.id, serviceSlugFromUrl);
 
-    if (!stateRec) return null;
+    const brandName = brand?.name || website.name || website.domain;
+    const locationName = loc.locationType === "city" ? loc.cityName : loc.stateName;
+    const canonicalSlug = loc.locationType === "city"
+      ? `${serviceSlugFromUrl}-in-${loc.canonicalCitySlug}-${slugify(loc.stateName)}`
+      : slug;
 
-    // For city pages with full state name: extract city = everything before state slug
-    const stateSlug = slugify(stateRec.stateName);
-    let cityName: string;
-    let locationType: "city" | "state";
-    if (locationSlug === stateSlug) {
-      locationType = "state";
-      cityName = stateRec.stateName;
-    } else if (locationSlug.endsWith(`-${stateSlug}`)) {
-      locationType = "city";
-      cityName = titleCase(locationSlug.slice(0, -(stateSlug.length + 1)));
+    let contentHtml: string;
+    let title: string;
+    let h1: string;
+    let metaDescription: string;
+
+    if (banks.length) {
+      const result = buildVariationPage(
+        serviceName, serviceSlugFromUrl, locationName, loc.locationType,
+        loc.stateName, loc.stateAbbr, brandName, banks, loc.stateData,
+        null, undefined, undefined, website.domain, undefined, proxyPath,
+      );
+      contentHtml = result.contentHtml;
+      title = result.title;
+      h1 = result.h1;
+      metaDescription = result.metaDescription;
     } else {
-      return null;
+      // No banks at all — build a clean minimal page from scratch
+      const loc2 = loc.locationType === "city" ? `${locationName}, ${loc.stateAbbr}` : loc.stateName;
+      title = `${serviceName} in ${loc2} | ${brandName}`;
+      h1 = `${serviceName} in ${loc2}`;
+      metaDescription = `${brandName} provides ${serviceName} to businesses in ${loc2}. Contact us today to learn how we can help.`;
+      contentHtml = `<p>Looking for <strong>${serviceName}</strong> in ${loc2}? <strong>${brandName}</strong> serves local businesses with professional solutions. Contact us today to get started.</p>`;
     }
 
-    const bankServices = await storage.getVariationBankServices(website.id);
-    const matchedService = bankServices.find(s => slugify(s) === serviceSlugFromUrl)
-      || bankServices.find(s => serviceSlugFromUrl.startsWith(slugify(s).slice(0, 12)));
-    if (!matchedService) return null;
-
-    const banks = await storage.getVariationBanks(website.id, matchedService);
-    if (!banks.length) return null;
-
-    const locationName = locationType === "city" ? cityName : stateRec.stateName;
-    const result = buildVariationPage(
-      matchedService, slugify(matchedService), locationName, locationType,
-      stateRec.stateName, stateRec.stateAbbr,
-      brand?.name || website.name || website.domain,
-      banks, stateRec, null, undefined, undefined, website.domain, undefined, proxyPath,
-    );
     const syntheticPage = {
-      id: "dynamic-" + slug, slug,
-      title: result.title, h1: result.h1, metaDescription: result.metaDescription,
-      pageType: locationType === "city" ? "service_city" : "state_hub",
+      id: "dynamic-" + canonicalSlug,
+      slug: canonicalSlug !== slug ? canonicalSlug : slug,
+      title, h1, metaDescription,
+      pageType: loc.locationType === "city" ? "service_city" : "state_hub",
       websiteId: website.id, status: "published",
       publishedAt: new Date(), updatedAt: new Date(),
     };
+
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
-    return { html: renderPageHtml(syntheticPage, { contentHtml: result.contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
+    console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
+    return { html: renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
+
   } catch (err) {
     console.error("[dynamic-page] error for slug", slug, err);
     return null;
