@@ -1674,8 +1674,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Strip port from host header
-      const host = (req.headers.host || "").split(":")[0].toLowerCase().trim();
+      // Use req.hostname which respects X-Forwarded-Host from trusted proxies (Cloudflare/Replit)
+      // Fall back to parsing the raw Host header if hostname is unavailable
+      const host = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
 
       // Log every non-API, non-asset request to diagnose custom domain routing
       if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__")) {
