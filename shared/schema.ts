@@ -155,6 +155,8 @@ export const blueprints = pgTable("blueprints", {
   faqEnabled: boolean("faq_enabled").notNull().default(true),
   schemaTypes: text("schema_types").array().default(["LocalBusiness", "FAQPage"]),
   isActive: boolean("is_active").notNull().default(true),
+  defaultTier: integer("default_tier").notNull().default(2),
+  minScoreForTier1: integer("min_score_for_tier1").notNull().default(80),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -307,6 +309,37 @@ export const leads = pgTable("leads", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Fallback Hit Logs ────────────────────────────────────────────────────────
+
+export const fallbackHitLogs = pgTable("fallback_hit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  hitCount: integer("hit_count").notNull().default(1),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  promoted: boolean("promoted").notNull().default(false),
+  promotedAt: timestamp("promoted_at"),
+});
+
+// ─── Variation Bank Completeness ──────────────────────────────────────────────
+
+export const variationBankCompleteness = pgTable("variation_bank_completeness", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  service: text("service").notNull(),
+  hasIntro: boolean("has_intro").notNull().default(false),
+  hasHowItWorks: boolean("has_how_it_works").notNull().default(false),
+  hasBenefits: boolean("has_benefits").notNull().default(false),
+  hasFaq: boolean("has_faq").notNull().default(false),
+  hasCta: boolean("has_cta").notNull().default(false),
+  totalVariations: integer("total_variations").notNull().default(0),
+  avgVariationsPerSection: integer("avg_variations_per_section").notNull().default(0),
+  completenessScore: integer("completeness_score").notNull().default(0),
+  isEligibleForTier1: boolean("is_eligible_for_tier1").notNull().default(false),
+  lastComputedAt: timestamp("last_computed_at").notNull().defaultNow(),
+});
+
 // ─── Insert Schemas & Types ───────────────────────────────────────────────────
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true, updatedAt: true });
@@ -363,3 +396,11 @@ export type StateData = typeof stateData.$inferSelect;
 export const insertLeadSchema = createInsertSchema(leads).omit({ id: true, createdAt: true });
 export type InsertLead = z.infer<typeof insertLeadSchema>;
 export type Lead = typeof leads.$inferSelect;
+
+export const insertFallbackHitLogSchema = createInsertSchema(fallbackHitLogs).omit({ id: true, firstSeenAt: true, lastSeenAt: true });
+export type InsertFallbackHitLog = z.infer<typeof insertFallbackHitLogSchema>;
+export type FallbackHitLog = typeof fallbackHitLogs.$inferSelect;
+
+export const insertVariationBankCompletenessSchema = createInsertSchema(variationBankCompleteness).omit({ id: true, lastComputedAt: true });
+export type InsertVariationBankCompleteness = z.infer<typeof insertVariationBankCompletenessSchema>;
+export type VariationBankCompleteness = typeof variationBankCompleteness.$inferSelect;

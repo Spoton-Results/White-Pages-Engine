@@ -11,6 +11,7 @@
 import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
 import { submitUrlsToGoogle } from "./gsc-indexing";
+import { scorePageContent, computeBankCompleteness } from "./scoring";
 import { pool } from "../db";
 
 const INSERT_BATCH_SIZE = 100; // pages per bulk INSERT statement
@@ -238,6 +239,27 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       continue;
     }
 
+    // Compute and persist bank completeness once per service
+    try {
+      const completeness = computeBankCompleteness(banks);
+      await storage.upsertBankCompleteness({
+        websiteId: job.websiteId,
+        service: svc,
+        hasIntro: completeness.hasIntro,
+        hasHowItWorks: completeness.hasHowItWorks,
+        hasBenefits: completeness.hasBenefits,
+        hasFaq: completeness.hasFaq,
+        hasCta: completeness.hasCta,
+        totalVariations: completeness.totalVariations,
+        avgVariationsPerSection: completeness.avgVariationsPerSection,
+        completenessScore: completeness.completenessScore,
+        isEligibleForTier1: completeness.isEligibleForTier1,
+      });
+    } catch { /* non-critical — completeness tracking is best-effort */ }
+
+    // Determine the min score for Tier 1 from the blueprint (default 80)
+    const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+
     settings.progress[si] = { service: svc, status: "running", created: 0, updated: 0, skipped: 0, errors: 0 };
     await storage.updateGenerationJob(jobId, { settings: settings as any });
 
@@ -348,6 +370,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         const finalH1 = bpOverride?.h1 || result.h1;
         const finalMeta = bpOverride?.metaDescription || result.metaDescription;
 
+        // Score this page at generation time
+        const pageScore = scorePageContent(
+          result.contentHtml, finalMeta, finalTitle, result.wordCount, banks, minScoreForTier1,
+        );
+        const pageTier = pageScore.recommendedTier;
+
         if (existingSlugSet.has(finalSlug)) {
           if (!overwrite) {
             svcSkipped++;
@@ -372,7 +400,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             slug: finalSlug, title: finalTitle, h1: finalH1, metaDescription: finalMeta,
             status: "published", pageType: t.locationType === "state" ? "state_hub" : "service_city",
             wordCount: result.wordCount,
-          });
+            tier: pageTier,
+            qualityScore: pageScore.total,
+            scoreBreakdown: pageScore as any,
+            indexStatus: "queued",
+            lastEvaluatedAt: new Date(),
+          } as any);
           pendingContent.push(result.contentHtml);
 
           if (pendingPageData.length >= INSERT_BATCH_SIZE) {

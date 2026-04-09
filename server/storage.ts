@@ -1,9 +1,10 @@
 import { db } from "./db";
-import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte } from "drizzle-orm";
+import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte, isNull, lt, lte } from "drizzle-orm";
 import {
   accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
   generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
+  fallbackHitLogs, variationBankCompleteness,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -21,6 +22,8 @@ import {
   type ContentVariationBank, type InsertContentVariationBank,
   type StateData, type InsertStateData,
   type Lead, type InsertLead,
+  type FallbackHitLog,
+  type VariationBankCompleteness, type InsertVariationBankCompleteness,
 } from "@shared/schema";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
@@ -772,6 +775,185 @@ export async function getLeadCount(websiteId: string): Promise<number> {
 
 export async function getAllLeads(limit = 100, offset = 0): Promise<Lead[]> {
   return db.select().from(leads).orderBy(desc(leads.createdAt)).limit(limit).offset(offset);
+}
+
+// ─── Tier & Score Management ──────────────────────────────────────────────────
+
+export async function updatePageScore(
+  pageId: string,
+  qualityScore: number,
+  scoreBreakdown: Record<string, unknown>,
+  tier?: number,
+): Promise<void> {
+  const update: Record<string, unknown> = {
+    qualityScore,
+    scoreBreakdown,
+    lastEvaluatedAt: new Date(),
+    updatedAt: new Date(),
+  };
+  if (tier !== undefined) update.tier = tier;
+  await db.update(pages).set(update as any).where(eq(pages.id, pageId));
+}
+
+export async function updatePageTier(pageId: string, tier: number): Promise<void> {
+  await db.update(pages).set({ tier, updatedAt: new Date() } as any).where(eq(pages.id, pageId));
+}
+
+export async function getTierDistribution(websiteId: string): Promise<{
+  tier1: number; tier2: number; tier3: number;
+  unscored: number; total: number;
+  avgScore: number | null;
+}> {
+  const rows = await db
+    .select({
+      tier: pages.tier,
+      qualityScore: pages.qualityScore,
+    })
+    .from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published")));
+
+  let tier1 = 0, tier2 = 0, tier3 = 0, unscored = 0;
+  let scoreSum = 0, scoreCount = 0;
+
+  for (const r of rows) {
+    if (r.qualityScore === null || r.qualityScore === undefined) {
+      unscored++;
+    } else {
+      scoreSum += r.qualityScore;
+      scoreCount++;
+    }
+    const t = (r as any).tier ?? 2;
+    if (t === 1) tier1++;
+    else if (t === 3) tier3++;
+    else tier2++;
+  }
+
+  return {
+    tier1, tier2, tier3, unscored,
+    total: rows.length,
+    avgScore: scoreCount > 0 ? Math.round(scoreSum / scoreCount) : null,
+  };
+}
+
+export async function getPagesByTier(websiteId: string, tier: number, limit: number, offset: number): Promise<Page[]> {
+  return db.select().from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), eq(pages.tier as any, tier)))
+    .orderBy(desc(pages.updatedAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function getUnscoredPages(websiteId: string, limit = 500): Promise<Array<{id: string; wordCount: number | null; metaDescription: string | null; title: string; tier: number}>> {
+  return db
+    .select({ id: pages.id, wordCount: pages.wordCount, metaDescription: pages.metaDescription, title: pages.title, tier: pages.tier as any })
+    .from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), isNull(pages.qualityScore)))
+    .limit(limit) as any;
+}
+
+export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number }> {
+  const result = await db.execute(sql`
+    UPDATE pages
+    SET tier = 1, updated_at = NOW()
+    WHERE website_id = ${websiteId}
+      AND status = 'published'
+      AND quality_score >= ${tierThreshold}
+      AND tier != 1
+    RETURNING id
+  `);
+  return { promoted: (result as any).rowCount ?? 0 };
+}
+
+export async function bulkSetTier3(websiteId: string, scoreThreshold: number): Promise<{ demoted: number }> {
+  const result = await db.execute(sql`
+    UPDATE pages
+    SET tier = 3, updated_at = NOW()
+    WHERE website_id = ${websiteId}
+      AND status = 'published'
+      AND quality_score IS NOT NULL
+      AND quality_score < ${scoreThreshold}
+      AND tier != 3
+    RETURNING id
+  `);
+  return { demoted: (result as any).rowCount ?? 0 };
+}
+
+// ─── Fallback Hit Logs ────────────────────────────────────────────────────────
+
+export async function logFallbackHit(websiteId: string, slug: string): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO fallback_hit_logs (id, website_id, slug, hit_count, first_seen_at, last_seen_at, promoted, promoted_at)
+    VALUES (gen_random_uuid(), ${websiteId}, ${slug}, 1, NOW(), NOW(), false, NULL)
+    ON CONFLICT (website_id, slug)
+    DO UPDATE SET hit_count = fallback_hit_logs.hit_count + 1, last_seen_at = NOW()
+  `);
+}
+
+export async function getFallbackHits(websiteId: string, limit = 50): Promise<FallbackHitLog[]> {
+  return db.select().from(fallbackHitLogs)
+    .where(eq(fallbackHitLogs.websiteId, websiteId))
+    .orderBy(desc(fallbackHitLogs.hitCount))
+    .limit(limit) as any;
+}
+
+export async function promoteFallbackSlug(websiteId: string, slug: string): Promise<void> {
+  await db.update(fallbackHitLogs)
+    .set({ promoted: true, promotedAt: new Date() })
+    .where(and(eq(fallbackHitLogs.websiteId, websiteId), eq(fallbackHitLogs.slug, slug)));
+}
+
+// ─── Variation Bank Completeness ──────────────────────────────────────────────
+
+export async function upsertBankCompleteness(data: InsertVariationBankCompleteness): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO variation_bank_completeness
+      (id, website_id, service, has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
+       total_variations, avg_variations_per_section, completeness_score, is_eligible_for_tier1, last_computed_at)
+    VALUES
+      (gen_random_uuid(), ${data.websiteId}, ${data.service}, ${data.hasIntro}, ${data.hasHowItWorks},
+       ${data.hasBenefits}, ${data.hasFaq}, ${data.hasCta}, ${data.totalVariations},
+       ${data.avgVariationsPerSection}, ${data.completenessScore}, ${data.isEligibleForTier1}, NOW())
+    ON CONFLICT (website_id, service)
+    DO UPDATE SET
+      has_intro = EXCLUDED.has_intro,
+      has_how_it_works = EXCLUDED.has_how_it_works,
+      has_benefits = EXCLUDED.has_benefits,
+      has_faq = EXCLUDED.has_faq,
+      has_cta = EXCLUDED.has_cta,
+      total_variations = EXCLUDED.total_variations,
+      avg_variations_per_section = EXCLUDED.avg_variations_per_section,
+      completeness_score = EXCLUDED.completeness_score,
+      is_eligible_for_tier1 = EXCLUDED.is_eligible_for_tier1,
+      last_computed_at = NOW()
+  `);
+}
+
+export async function getBankCompleteness(websiteId: string): Promise<VariationBankCompleteness[]> {
+  return db.select().from(variationBankCompleteness)
+    .where(eq(variationBankCompleteness.websiteId, websiteId))
+    .orderBy(asc(variationBankCompleteness.service)) as any;
+}
+
+export async function getScoreDistribution(websiteId: string): Promise<Array<{ bucket: string; count: number }>> {
+  const result = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN quality_score IS NULL THEN 'unscored'
+        WHEN quality_score >= 90 THEN '90-100'
+        WHEN quality_score >= 80 THEN '80-89'
+        WHEN quality_score >= 70 THEN '70-79'
+        WHEN quality_score >= 60 THEN '60-69'
+        WHEN quality_score >= 50 THEN '50-59'
+        WHEN quality_score >= 40 THEN '40-49'
+        ELSE '0-39'
+      END as bucket,
+      COUNT(*)::int as count
+    FROM pages
+    WHERE website_id = ${websiteId} AND status = 'published'
+    GROUP BY bucket
+    ORDER BY bucket
+  `);
+  return (result as any).rows ?? [];
 }
 
 // Re-export IStorage interface for backwards compatibility

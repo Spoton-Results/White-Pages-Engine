@@ -267,7 +267,12 @@ async function tryGenerateDynamicPage(
       pageType: loc.locationType === "city" ? "service_city" : "state_hub",
       websiteId: website.id, status: "published",
       publishedAt: new Date(), updatedAt: new Date(),
+      tier: 2,
+      _noindex: true,
     };
+
+    // Log fallback hit (fire-and-forget — never block page rendering)
+    storage.logFallbackHit(website.id, slug).catch(() => {});
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
     console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
@@ -372,6 +377,9 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   // ── Schema: FAQPage (extracted from content HTML) ─────────────────────────
   const faqSchema = extractFaqSchema(version?.contentHtml || "", pageUrl);
 
+  const pageTier: number = (page as any).tier ?? 2;
+  const isNoindex: boolean = pageTier === 3 || (page as any)._noindex === true;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -380,6 +388,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   <title>${page.title}</title>
   <meta name="description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
   <link rel="canonical" href="${pageUrl}" />
+  ${isNoindex ? '<meta name="robots" content="noindex,nofollow" />' : '<meta name="robots" content="index,follow" />'}
   <meta property="og:title" content="${page.title}" />
   <meta property="og:description" content="${(page.metaDescription || "").replace(/"/g, "&quot;")}" />
   <meta property="og:type" content="website" />
@@ -2127,6 +2136,120 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       console.error("[contact] error:", err);
       return res.status(500).json({ success: false, message: "Server error. Please try again." });
     }
+  });
+
+  // ── SEO Control: Tier & Quality Score APIs ────────────────────────────────
+
+  app.get("/api/websites/:id/tier-stats", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const [tierDist, scoreDist] = await Promise.all([
+      storage.getTierDistribution(websiteId),
+      storage.getScoreDistribution(websiteId),
+    ]);
+    return res.json({ ...tierDist, scoreDistribution: scoreDist });
+  });
+
+  // Background scoring job — scores all unscored pages for a website
+  app.post("/api/websites/:id/score-pages", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    // Return immediately — scoring runs in background
+    res.json({ ok: true, message: "Scoring job started" });
+
+    setImmediate(async () => {
+      const { scorePageContent } = await import("./services/scoring");
+      let processed = 0;
+      const BATCH = 500;
+      const blueprint = (website.settings as any)?.defaultBlueprintId
+        ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+        : null;
+      const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+
+      while (true) {
+        const unscored = await storage.getUnscoredPages(websiteId, BATCH);
+        if (unscored.length === 0) break;
+        for (const p of unscored) {
+          try {
+            const version = await storage.getActivePageVersion(p.id);
+            const banks = await storage.getVariationBanks(websiteId, p.title.split(" in ")[0] || "");
+            const scoreResult = scorePageContent(
+              version?.contentHtml || "",
+              p.metaDescription || "",
+              p.title,
+              p.wordCount || 0,
+              banks,
+              minScoreForTier1,
+            );
+            await storage.updatePageScore(p.id, scoreResult.total, scoreResult as any, scoreResult.recommendedTier);
+            processed++;
+          } catch { /* skip individual failures */ }
+        }
+        if (unscored.length < BATCH) break;
+      }
+      console.log(`[score-pages] Done: scored ${processed} pages for website ${websiteId}`);
+    });
+  });
+
+  // Bulk apply tier assignments based on scores
+  app.post("/api/websites/:id/apply-tiers", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { tier1Threshold = 80, tier3Threshold = 50, applyTier3 = false } = req.body;
+    const { promoted } = await storage.bulkUpdatePageTiers(websiteId, tier1Threshold);
+    let demoted = 0;
+    if (applyTier3) {
+      const result = await storage.bulkSetTier3(websiteId, tier3Threshold);
+      demoted = result.demoted;
+    }
+    return res.json({ ok: true, promoted, demoted });
+  });
+
+  // Set a single page's tier
+  app.patch("/api/pages/:id/tier", requireAuth, async (req: Request, res: Response) => {
+    const { tier } = z.object({ tier: z.number().int().min(1).max(3) }).parse(req.body);
+    await storage.updatePageTier(req.params.id as string, tier);
+    return res.json({ ok: true });
+  });
+
+  // ── SEO Control: Fallback Hits ─────────────────────────────────────────────
+
+  app.get("/api/websites/:id/fallback-hits", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "50"), 200);
+    return res.json(await storage.getFallbackHits(req.params.id as string, limit));
+  });
+
+  app.post("/api/websites/:id/fallback-hits/promote", requireAuth, async (req: Request, res: Response) => {
+    const { slug } = z.object({ slug: z.string().min(1) }).parse(req.body);
+    await storage.promoteFallbackSlug(req.params.id as string, slug);
+    return res.json({ ok: true });
+  });
+
+  // ── SEO Control: Bank Completeness ────────────────────────────────────────
+
+  app.get("/api/websites/:id/bank-completeness", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getBankCompleteness(req.params.id as string));
+  });
+
+  // Recompute completeness for all services of a website
+  app.post("/api/websites/:id/bank-completeness/recompute", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { computeBankCompleteness } = await import("./services/scoring");
+    const services = await storage.getVariationBankServices(websiteId);
+    let computed = 0;
+    for (const svc of services) {
+      const banks = await storage.getVariationBanks(websiteId, svc);
+      const result = computeBankCompleteness(banks);
+      await storage.upsertBankCompleteness({
+        websiteId, service: svc,
+        hasIntro: result.hasIntro, hasHowItWorks: result.hasHowItWorks, hasBenefits: result.hasBenefits,
+        hasFaq: result.hasFaq, hasCta: result.hasCta, totalVariations: result.totalVariations,
+        avgVariationsPerSection: result.avgVariationsPerSection, completenessScore: result.completenessScore,
+        isEligibleForTier1: result.isEligibleForTier1,
+      });
+      computed++;
+    }
+    return res.json({ ok: true, computed });
   });
 
   // ── Leads Admin ───────────────────────────────────────────────────────────
