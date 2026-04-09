@@ -449,7 +449,11 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   </div>
 
   <main>
-    ${version?.contentHtml || "<p>Content coming soon.</p>"}
+    ${(version?.contentHtml || "<p>Content coming soon.</p>")
+      // Strip " in City, ST" from service link text in Related Services lists
+      .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
+        (_, open, name, close) => `${open}${name.trim()}${close}`)
+    }
 
     <div class="contact-section">
       <h2>${ctaHeading}</h2>

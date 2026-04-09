@@ -187,12 +187,13 @@ export function buildVariationPage(
       const statePart = bpUsesFullState ? slugify(stateName) : stateAbbr.toLowerCase();
       const locationSlug = `${slugify(city)}-${statePart}`;
       const items = others
+        .slice(0, 30)
         .map(s => {
           const pageSlug = `${s.slug}-in-${locationSlug}`;
-          return `<li style="break-inside:avoid"><a href="${linkPrefix}/${pageSlug}" style="color:#2563eb;text-decoration:none">${s.name} in ${city}, ${stateAbbr}</a></li>`;
+          return `<li style="break-inside:avoid;margin-bottom:.35rem"><a href="${linkPrefix}/${pageSlug}" style="color:#2563eb;text-decoration:none;font-size:.95rem">${s.name}</a></li>`;
         })
         .join("\n");
-      relatedServicesSection = `<h2 ${h2Style}>Related Services in ${city}, ${stateAbbr}</h2>\n<ul style="columns:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:2.2;margin:0">\n${items}\n</ul>`;
+      relatedServicesSection = `<h2 ${h2Style}>Related Services in ${city}, ${stateAbbr}</h2>\n<ul style="column-count:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:1.8;margin:0">\n${items}\n</ul>`;
     }
   }
 
