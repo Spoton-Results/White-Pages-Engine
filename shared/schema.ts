@@ -185,6 +185,12 @@ export const pages = pgTable("pages", {
   publishedAt: timestamp("published_at"),
   pruneReason: text("prune_reason"),
   r2Key: text("r2_key"),
+  tier: integer("tier").notNull().default(2),
+  qualityScore: integer("quality_score"),
+  scoreBreakdown: jsonb("score_breakdown"),
+  indexStatus: text("index_status").notNull().default("queued"),
+  fallbackHitCount: integer("fallback_hit_count").notNull().default(0),
+  lastEvaluatedAt: timestamp("last_evaluated_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
