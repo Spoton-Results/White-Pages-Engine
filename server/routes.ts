@@ -1589,7 +1589,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return next(); // unknown domain — fall through to admin app
       }
 
-      const rawSlug = req.path.replace(/^\//, "").replace(/\/$/, "");
+      // Strip the proxyPath prefix (e.g. /pages) from incoming URLs before slug matching
+      const rawProxyPath = ((website.settings as any)?.proxyPath || "").replace(/\/$/, "");
+      let effectivePath = req.path;
+      if (rawProxyPath && req.path.startsWith(rawProxyPath + "/")) {
+        effectivePath = req.path.slice(rawProxyPath.length);
+      } else if (rawProxyPath && (req.path === rawProxyPath || req.path === rawProxyPath + "/")) {
+        effectivePath = "/";
+      }
+      const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
 
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
