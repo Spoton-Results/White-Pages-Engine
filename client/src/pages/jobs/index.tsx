@@ -31,6 +31,8 @@ export default function JobsPage() {
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [locFilter, setLocFilter] = useState("");
   const [locTypeFilter, setLocTypeFilter] = useState<"all" | "state" | "city">("state");
+  const [topCitiesLimit, setTopCitiesLimit] = useState<number | "all" | null>(null);
+  const [cityTierFilter, setCityTierFilter] = useState<number | null>(null);
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
 
@@ -202,11 +204,17 @@ export default function JobsPage() {
   const selectNone = (field: keyof typeof emptyForm) =>
     setForm(p => ({ ...p, [field]: [] }));
 
-  const filteredLocations = locations.filter((loc: any) => {
-    const matchType = locTypeFilter === "all" || loc.type === locTypeFilter;
-    const matchSearch = !locFilter || loc.name.toLowerCase().includes(locFilter.toLowerCase()) || (loc.stateCode || "").toLowerCase().includes(locFilter.toLowerCase());
-    return matchType && matchSearch;
-  });
+  const filteredLocations = (() => {
+    const base = (locations as any[]).filter((loc: any) => {
+      const matchType = locTypeFilter === "all" || loc.type === locTypeFilter;
+      const matchSearch = !locFilter || loc.name.toLowerCase().includes(locFilter.toLowerCase()) || (loc.stateCode || "").toLowerCase().includes(locFilter.toLowerCase());
+      return matchType && matchSearch;
+    });
+    if (locTypeFilter === "city" && (topCitiesLimit !== null || cityTierFilter !== null)) {
+      return [...base].sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+    }
+    return base;
+  })();
 
   const selectedLocSet = useMemo(() => new Set(form.locationIds), [form.locationIds]);
 
@@ -243,6 +251,29 @@ export default function JobsPage() {
       g.forEach((loc: any) => (allSel ? ids.delete(loc.id) : ids.add(loc.id)));
       return { ...prev, locationIds: Array.from(ids) };
     });
+  }
+
+  function applyTopCitiesJobs(v: string) {
+    setCityTierFilter(null);
+    const cityLocs = [...(locations as any[]).filter((l: any) => l.type === "city")]
+      .sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+    const selected = v === "all" ? cityLocs : cityLocs.slice(0, Number(v));
+    setTopCitiesLimit(v === "all" ? "all" : Number(v));
+    const nonCityIds = form.locationIds.filter(id => (locations as any[]).find((l: any) => l.id === id && l.type !== "city"));
+    setForm(p => ({ ...p, locationIds: [...nonCityIds, ...selected.map((l: any) => l.id)] }));
+  }
+
+  function applyTierFilterJobs(tier: number) {
+    const newTier = cityTierFilter === tier ? null : tier;
+    setCityTierFilter(newTier);
+    setTopCitiesLimit(null);
+    const nonCityIds = form.locationIds.filter(id => (locations as any[]).find((l: any) => l.id === id && l.type !== "city"));
+    if (newTier === null) {
+      setForm(p => ({ ...p, locationIds: nonCityIds }));
+      return;
+    }
+    const selected = (locations as any[]).filter((l: any) => l.type === "city" && l.cityTier === newTier);
+    setForm(p => ({ ...p, locationIds: [...nonCityIds, ...selected.map((l: any) => l.id)] }));
   }
 
   const totalPages = form.locationIds.length * form.serviceIds.length;
@@ -427,7 +458,7 @@ export default function JobsPage() {
         )}
       </div>
 
-      <Dialog open={showCreate} onOpenChange={open => { setShowCreate(open); if (!open) { setForm({ ...emptyForm }); setLocFilter(""); setLocTypeFilter("state"); didAutoSelectServices.current = false; didAutoSelectLocations.current = false; } }}>
+      <Dialog open={showCreate} onOpenChange={open => { setShowCreate(open); if (!open) { setForm({ ...emptyForm }); setLocFilter(""); setLocTypeFilter("state"); setTopCitiesLimit(null); setCityTierFilter(null); didAutoSelectServices.current = false; didAutoSelectLocations.current = false; } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Generation Job</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -550,7 +581,7 @@ export default function JobsPage() {
                     value={locFilter}
                     onChange={e => setLocFilter(e.target.value)}
                   />
-                  <Select value={locTypeFilter} onValueChange={(v: any) => setLocTypeFilter(v)}>
+                  <Select value={locTypeFilter} onValueChange={(v: any) => { setLocTypeFilter(v); setTopCitiesLimit(null); setCityTierFilter(null); }}>
                     <SelectTrigger className="h-8 text-sm w-24"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
@@ -559,6 +590,45 @@ export default function JobsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Top Cities quick select + Tier filters — only in Cities mode */}
+                {locTypeFilter === "city" && (
+                  <div className="flex items-center gap-2 flex-wrap" data-testid="div-jobs-top-cities-controls">
+                    <Select
+                      value={topCitiesLimit === null ? "" : String(topCitiesLimit)}
+                      onValueChange={applyTopCitiesJobs}
+                    >
+                      <SelectTrigger className="h-8 w-40 text-xs" data-testid="select-jobs-top-cities">
+                        <SelectValue placeholder="Quick select…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[20, 50, 100, 250, 500, 750, 1000, 2500, 5000].map(n => (
+                          <SelectItem key={n} value={String(n)}>Top {n.toLocaleString()}</SelectItem>
+                        ))}
+                        <SelectItem value="all">All Cities</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {([
+                      { tier: 1, label: "Tier 1 (500K+)" },
+                      { tier: 2, label: "Tier 2 (100K–500K)" },
+                      { tier: 3, label: "Tier 3 (<100K)" },
+                    ] as { tier: number; label: string }[]).map(({ tier, label }) => (
+                      <button
+                        key={tier}
+                        type="button"
+                        onClick={() => applyTierFilterJobs(tier)}
+                        data-testid={`button-jobs-tier-${tier}`}
+                        className={`h-8 px-3 rounded-md border text-xs font-medium transition-colors ${
+                          cityTierFilter === tier
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* Alphabet bar — only in Cities mode */}
                 {locTypeFilter === "city" && (
@@ -599,8 +669,8 @@ export default function JobsPage() {
                 <div className="border rounded-md p-2 max-h-44 overflow-y-auto space-y-0.5">
                   {filteredLocations.length === 0 ? (
                     <p className="text-xs text-muted-foreground px-1 py-2">No locations match.</p>
-                  ) : locTypeFilter === "city" && !locFilter ? (
-                    /* Grouped alphabetical view for cities */
+                  ) : locTypeFilter === "city" && !locFilter && topCitiesLimit === null && cityTierFilter === null ? (
+                    /* Grouped alphabetical view for cities (no filter active) */
                     <>
                       {Object.entries(cityLocGroups)
                         .sort(([a], [b]) => a.localeCompare(b))

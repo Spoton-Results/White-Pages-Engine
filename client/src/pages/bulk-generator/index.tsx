@@ -45,6 +45,8 @@ export default function BulkGeneratorPage() {
   const accumulatedRef = useRef({ created: 0, skipped: 0, errors: 0 });
   const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
   const [activeJobId, setActiveJobId] = useState<string>("");
+  const [topCitiesLimit, setTopCitiesLimit] = useState<number | "all" | null>(null);
+  const [cityTierFilter, setCityTierFilter] = useState<number | null>(null);
 
   const websitesQ = useQuery<any[]>({
     queryKey: ["/api/websites"],
@@ -148,6 +150,10 @@ export default function BulkGeneratorPage() {
     });
   }, [allLocations]);
 
+  const dbCitiesByPop = useMemo(() =>
+    [...dbCities].sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0)),
+  [dbCities]);
+
   const filteredStates = useMemo(() => {
     lastStateIdx.current = null;
     const f = dbStates.filter((l: any) => !stateSearch || l.name.toLowerCase().includes(stateSearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(stateSearch.toLowerCase()));
@@ -157,8 +163,11 @@ export default function BulkGeneratorPage() {
   const filteredCities = useMemo(() => {
     lastCityIdx.current = null;
     const f = dbCities.filter((l: any) => !citySearch || l.name.toLowerCase().includes(citySearch.toLowerCase()) || l.stateCode?.toLowerCase().includes(citySearch.toLowerCase()));
+    if (topCitiesLimit !== null || cityTierFilter !== null) {
+      return [...f].sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+    }
     return [...f].sort((a: any, b: any) => a.name.localeCompare(b.name) || a.stateCode?.localeCompare(b.stateCode));
-  }, [dbCities, citySearch]);
+  }, [dbCities, citySearch, topCitiesLimit, cityTierFilter]);
 
   // Auto-select default blueprint when website changes
   useEffect(() => {
@@ -305,6 +314,32 @@ export default function BulkGeneratorPage() {
 
   function clearAllCities(): void {
     setSelectedCitySlugs(new Set());
+    setTopCitiesLimit(null);
+    setCityTierFilter(null);
+  }
+
+  function applyTopCities(v: string) {
+    setCityTierFilter(null);
+    if (v === "all") {
+      setTopCitiesLimit("all");
+      setSelectedCitySlugs(new Set(dbCitiesByPop.map((c: any) => c.slug)));
+    } else {
+      const n = Number(v);
+      setTopCitiesLimit(n);
+      setSelectedCitySlugs(new Set(dbCitiesByPop.slice(0, n).map((c: any) => c.slug)));
+    }
+  }
+
+  function applyTierFilter(tier: number) {
+    const newTier = cityTierFilter === tier ? null : tier;
+    setCityTierFilter(newTier);
+    setTopCitiesLimit(null);
+    if (newTier === null) {
+      setSelectedCitySlugs(new Set());
+      return;
+    }
+    const selected = dbCitiesByPop.filter((c: any) => c.cityTier === newTier);
+    setSelectedCitySlugs(new Set(selected.map((c: any) => c.slug)));
   }
 
   function handleCityClick(e: React.MouseEvent, idx: number, slug: string) {
@@ -610,6 +645,43 @@ export default function BulkGeneratorPage() {
                         </Button>
                       </div>
 
+                      {/* Top Cities quick select + Tier filters */}
+                      <div className="flex items-center gap-2 flex-wrap" data-testid="div-top-cities-controls">
+                        <Select
+                          value={topCitiesLimit === null ? "" : String(topCitiesLimit)}
+                          onValueChange={applyTopCities}
+                        >
+                          <SelectTrigger className="h-8 w-40 text-xs" data-testid="select-top-cities">
+                            <SelectValue placeholder="Quick select…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[20, 50, 100, 250, 500, 750, 1000, 2500, 5000].map(n => (
+                              <SelectItem key={n} value={String(n)}>Top {n.toLocaleString()}</SelectItem>
+                            ))}
+                            <SelectItem value="all">All Cities</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {([
+                          { tier: 1, label: "Tier 1 (500K+)" },
+                          { tier: 2, label: "Tier 2 (100K–500K)" },
+                          { tier: 3, label: "Tier 3 (<100K)" },
+                        ] as { tier: number; label: string }[]).map(({ tier, label }) => (
+                          <button
+                            key={tier}
+                            type="button"
+                            onClick={() => applyTierFilter(tier)}
+                            data-testid={`button-tier-${tier}`}
+                            className={`h-8 px-3 rounded-md border text-xs font-medium transition-colors ${
+                              cityTierFilter === tier
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "border-border hover:bg-muted"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
                       {/* Alphabet bar */}
                       <div className="overflow-x-auto">
                         <div className="flex gap-0.5 min-w-max pb-0.5" data-testid="div-alphabet-bar">
@@ -644,9 +716,9 @@ export default function BulkGeneratorPage() {
                         <span className="text-muted-foreground font-normal"> of {dbCities.length.toLocaleString()} &nbsp;·&nbsp; Shift-click to select a range</span>
                       </p>
 
-                      {/* City list — grouped when not searching, flat when searching */}
+                      {/* City list — grouped when not searching/filtering, flat when searching or filter active */}
                       <ScrollArea className="h-64 border rounded-md p-2">
-                        {citySearch ? (
+                        {citySearch || topCitiesLimit !== null || cityTierFilter !== null ? (
                           <div className="space-y-0.5">
                             {filteredCities.map((loc: any, idx: number) => (
                               <label key={loc.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer select-none" data-testid={`label-city-${loc.slug}`}

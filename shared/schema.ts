@@ -91,6 +91,7 @@ export const locations = pgTable("locations", {
   stateCode: text("state_code"),
   stateName: text("state_name"),
   population: integer("population"),
+  cityTier: integer("city_tier"),
   lat: decimal("lat", { precision: 10, scale: 7 }),
   lng: decimal("lng", { precision: 10, scale: 7 }),
   parentId: varchar("parent_id"),

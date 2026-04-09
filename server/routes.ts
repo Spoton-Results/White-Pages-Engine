@@ -851,7 +851,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
     const type = req.query.type as string | undefined;
-    return res.json(await storage.getLocations((req.params.accountId as string), type));
+    const orderBy = req.query.orderBy as string | undefined;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    return res.json(await storage.getLocations((req.params.accountId as string), type, orderBy, limit));
   });
 
   app.post("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {

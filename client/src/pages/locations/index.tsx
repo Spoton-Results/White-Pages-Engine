@@ -45,6 +45,8 @@ export default function LocationsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [displayTopN, setDisplayTopN] = useState<number | "all" | null>(null);
+  const [displayTierFilter, setDisplayTierFilter] = useState<number | null>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
 
   const { data: accounts = [] } = useQuery({
@@ -90,10 +92,19 @@ export default function LocationsPage() {
     },
   });
 
-  const filtered = (locations as any[]).filter((l: any) =>
-    !searchText || l.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    l.stateCode?.toLowerCase().includes(searchText.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    let result = (locations as any[]).filter((l: any) =>
+      !searchText || l.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      l.stateCode?.toLowerCase().includes(searchText.toLowerCase())
+    );
+    if (displayTopN !== null || displayTierFilter !== null) {
+      result = result.filter((l: any) => l.type === "city");
+      if (displayTierFilter !== null) result = result.filter((l: any) => l.cityTier === displayTierFilter);
+      result = [...result].sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+      if (displayTopN !== null && displayTopN !== "all") result = result.slice(0, displayTopN as number);
+    }
+    return result;
+  }, [locations, searchText, displayTopN, displayTierFilter]);
 
   return (
     <DashboardLayout>
@@ -133,6 +144,53 @@ export default function LocationsPage() {
             </div>
           )}
           {selectedAccount && <span className="text-sm text-muted-foreground" data-testid="text-location-count">{locations.length} locations</span>}
+          {selectedAccount && (
+            <>
+              <Select
+                value={displayTopN === null ? "" : String(displayTopN)}
+                onValueChange={v => { setDisplayTierFilter(null); setDisplayTopN(v === "all" ? "all" : Number(v)); }}
+              >
+                <SelectTrigger className="h-8 w-40 text-xs" data-testid="select-locations-top-cities">
+                  <SelectValue placeholder="Top Cities…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[20, 50, 100, 250, 500, 750, 1000, 2500, 5000].map(n => (
+                    <SelectItem key={n} value={String(n)}>Top {n.toLocaleString()}</SelectItem>
+                  ))}
+                  <SelectItem value="all">All Cities</SelectItem>
+                </SelectContent>
+              </Select>
+              {([
+                { tier: 1, label: "Tier 1" },
+                { tier: 2, label: "Tier 2" },
+                { tier: 3, label: "Tier 3" },
+              ] as { tier: number; label: string }[]).map(({ tier, label }) => (
+                <button
+                  key={tier}
+                  type="button"
+                  onClick={() => { setDisplayTopN(null); setDisplayTierFilter(displayTierFilter === tier ? null : tier); }}
+                  data-testid={`button-locations-tier-${tier}`}
+                  className={`h-8 px-3 rounded-md border text-xs font-medium transition-colors ${
+                    displayTierFilter === tier
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              {(displayTopN !== null || displayTierFilter !== null) && (
+                <button
+                  type="button"
+                  onClick={() => { setDisplayTopN(null); setDisplayTierFilter(null); }}
+                  className="h-8 px-3 rounded-md border text-xs font-medium border-border hover:bg-muted text-muted-foreground"
+                  data-testid="button-locations-clear-filter"
+                >
+                  Clear Filter
+                </button>
+              )}
+            </>
+          )}
         </div>
 
         {!selectedAccount ? (
@@ -150,18 +208,19 @@ export default function LocationsPage() {
                   <TableHead>State</TableHead>
                   <TableHead>Slug</TableHead>
                   <TableHead>Population</TableHead>
+                  <TableHead>Tier</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>{Array.from({ length: 6 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
+                    <TableRow key={i}>{Array.from({ length: 7 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
                   ))
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      {searchText ? "No locations match." : "No locations added yet. Use Bulk Import to add all US states and cities at once."}
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      {searchText || displayTopN !== null || displayTierFilter !== null ? "No locations match." : "No locations added yet. Use Bulk Import to add all US states and cities at once."}
                     </TableCell>
                   </TableRow>
                 ) : filtered.map((loc: any) => (
@@ -173,6 +232,15 @@ export default function LocationsPage() {
                     <TableCell className="text-muted-foreground">{loc.stateName || loc.stateCode || "—"}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{loc.slug}</TableCell>
                     <TableCell className="text-muted-foreground">{loc.population?.toLocaleString() || "—"}</TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {loc.type === "city" && loc.cityTier ? (
+                        <span className={`px-1.5 py-0.5 rounded font-medium ${
+                          loc.cityTier === 1 ? "bg-violet-500/10 text-violet-700" :
+                          loc.cityTier === 2 ? "bg-blue-500/10 text-blue-700" :
+                          "bg-emerald-500/10 text-emerald-700"
+                        }`}>T{loc.cityTier}</span>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
                         onClick={() => confirm("Remove location?") && remove.mutate(loc.id)}

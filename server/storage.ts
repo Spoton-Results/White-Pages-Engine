@@ -207,11 +207,17 @@ export async function deleteWebsite(id: string): Promise<void> {
 
 // ─── Locations ────────────────────────────────────────────────────────────────
 
-export async function getLocations(accountId: string, type?: string): Promise<Location[]> {
-  if (type) {
-    return db.select().from(locations).where(and(eq(locations.accountId, accountId), eq(locations.type, type as any))).orderBy(asc(locations.name));
-  }
-  return db.select().from(locations).where(eq(locations.accountId, accountId)).orderBy(asc(locations.type), asc(locations.name));
+export async function getLocations(accountId: string, type?: string, orderBy?: string, limit?: number): Promise<Location[]> {
+  const where = type
+    ? and(eq(locations.accountId, accountId), eq(locations.type, type as any))
+    : eq(locations.accountId, accountId);
+  const order = orderBy === "population"
+    ? [desc(locations.population)]
+    : type
+      ? [asc(locations.name)]
+      : [asc(locations.type), asc(locations.name)];
+  const q = db.select().from(locations).where(where).orderBy(...order);
+  return limit ? q.limit(limit) : q;
 }
 
 export async function getLocation(id: string): Promise<Location | undefined> {
