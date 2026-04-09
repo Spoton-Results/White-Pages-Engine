@@ -609,26 +609,35 @@ export async function getWebsiteMetricsSummary(websiteId: string) {
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 
 export async function getDashboardStats() {
-  const [accountCount] = await db.select({ count: count() }).from(accounts);
-  const [websiteCount] = await db.select({ count: count() }).from(websites);
-  const [publishedCount] = await db.select({ count: count() }).from(pages).where(eq(pages.status, "published"));
-  const [draftCount] = await db.select({ count: count() }).from(pages).where(eq(pages.status, "draft"));
-  const [reviewCount] = await db.select({ count: count() }).from(pages).where(eq(pages.status, "review"));
-  const [jobCount] = await db.select({ count: count() }).from(generationJobs).where(eq(generationJobs.status, "running"));
+  // Single parallel fetch: 2 cheap meta queries + 1 grouped status count + 1 job count
+  const [metaRows, statusRows, jobRows] = await Promise.all([
+    db.select({ count: count() }).from(accounts)
+      .then(async ([a]) => ({ accounts: a.count, websites: (await db.select({ count: count() }).from(websites))[0].count })),
+    db.select({ status: pages.status, count: count() }).from(pages)
+      .where(sql`${pages.status} IN ('published','draft','review')`)
+      .groupBy(pages.status),
+    db.select({ count: count() }).from(generationJobs).where(eq(generationJobs.status, "running")),
+  ]);
+
+  const statusMap: Record<string, number> = {};
+  for (const r of statusRows) statusMap[r.status] = Number(r.count);
 
   return {
-    totalAccounts: accountCount.count,
-    totalWebsites: websiteCount.count,
-    publishedPages: publishedCount.count,
-    draftPages: draftCount.count,
-    reviewPages: reviewCount.count,
-    activeJobs: jobCount.count,
+    totalAccounts: metaRows.accounts,
+    totalWebsites: metaRows.websites,
+    publishedPages: statusMap["published"] ?? 0,
+    draftPages: statusMap["draft"] ?? 0,
+    reviewPages: statusMap["review"] ?? 0,
+    activeJobs: Number(jobRows[0].count),
   };
 }
 
 export async function getRecentActivity(limit = 20) {
-  const recentJobs = await db.select().from(generationJobs).orderBy(desc(generationJobs.createdAt)).limit(limit);
-  const recentPages = await db.select().from(pages).orderBy(desc(pages.updatedAt)).limit(limit);
+  const [recentJobs, recentPages] = await Promise.all([
+    db.select().from(generationJobs).orderBy(desc(generationJobs.createdAt)).limit(limit),
+    db.select({ id: pages.id, websiteId: pages.websiteId, slug: pages.slug, title: pages.title, status: pages.status, updatedAt: pages.updatedAt })
+      .from(pages).orderBy(desc(pages.updatedAt)).limit(limit),
+  ]);
   return { recentJobs, recentPages };
 }
 

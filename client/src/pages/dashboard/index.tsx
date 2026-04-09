@@ -12,13 +12,13 @@ export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
     queryFn: () => api.get<any>("/api/dashboard/stats"),
-    refetchInterval: 10000,
+    refetchInterval: 60000,
   });
 
   const { data: activity, isLoading: activityLoading } = useQuery({
     queryKey: ["/api/dashboard/activity"],
     queryFn: () => api.get<any>("/api/dashboard/activity"),
-    refetchInterval: 10000,
+    refetchInterval: 60000,
   });
 
   return (

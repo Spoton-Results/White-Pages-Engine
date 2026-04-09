@@ -72,6 +72,8 @@ app.use((req, res, next) => {
     console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_status ON pages(website_id, status)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`);
     console.log("[startup] Database indexes ensured.");
