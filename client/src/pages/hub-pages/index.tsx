@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -417,6 +417,193 @@ function HubCard({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+// ── Fix 1: Bulk Generate Hub Dialog ───────────────────────────────────────────
+
+function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: string; accountId: string; onDone: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [hubType, setHubType] = useState<"service" | "state" | "city">("service");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [maxChildLinks, setMaxChildLinks] = useState(30);
+  const [generateAI, setGenerateAI] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const servicesQ = useQuery<any[]>({
+    queryKey: ["/api/accounts", accountId, "services"],
+    queryFn: () => fetch(`/api/accounts/${accountId}/services`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!accountId && open,
+  });
+
+  const locationsQ = useQuery<any[]>({
+    queryKey: ["/api/websites", websiteId, "locations"],
+    queryFn: () => fetch(`/api/websites/${websiteId}/locations`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!websiteId && open,
+  });
+
+  const jobQ = useQuery<any>({
+    queryKey: ["hub-bulk-job", jobId],
+    queryFn: () => fetch(`/api/websites/${websiteId}/hub-pages/bulk-job/${jobId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!jobId,
+    refetchInterval: (q: any) => {
+      const s = q.state.data?.status;
+      return s === "done" || s === "error" ? false : 1200;
+    },
+  });
+
+  const jobData = jobQ.data as any;
+  const isDone = jobData?.status === "done" || jobData?.status === "error";
+
+  useEffect(() => {
+    if (isDone && jobId) {
+      onDone();
+      toast({ title: `Created ${jobData?.created ?? 0} hub page(s)` });
+    }
+  }, [isDone, jobId]);
+
+  const services: string[] = (servicesQ.data || []).map((s: any) => s.name);
+  const states: string[] = [...new Set((locationsQ.data || []).filter((l: any) => l.type === "state").map((l: any) => l.name as string))].sort();
+  const cities: string[] = [...new Set((locationsQ.data || []).filter((l: any) => l.type === "city").map((l: any) => l.name as string))].sort();
+  const items = hubType === "service" ? services : hubType === "state" ? states : cities;
+
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items));
+  };
+
+  const toggleItem = (name: string) => {
+    const next = new Set(selected);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    setSelected(next);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const resp = await fetch(`/api/websites/${websiteId}/hub-pages/bulk-generate`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hubType,
+          services: hubType === "service" ? [...selected] : [],
+          states: hubType === "state" ? [...selected] : [],
+          cities: hubType === "city" ? [...selected] : [],
+          maxChildLinks, generateAI,
+        }),
+      });
+      const data = await resp.json();
+      if (data.jobId) setJobId(data.jobId);
+      else toast({ title: "Error", description: data.error || "Failed", variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSubmitting(false); }
+  };
+
+  const handleClose = () => {
+    setOpen(false); setJobId(null); setSelected(new Set());
+    setHubType("service"); setMaxChildLinks(30); setGenerateAI(false);
+  };
+
+  const btnStyle = (active: boolean) => ({
+    padding: "6px 16px", borderRadius: 8, border: "2px solid", cursor: "pointer", fontSize: ".85rem", fontWeight: 600,
+    borderColor: active ? "#2563eb" : "#e5e7eb",
+    background: active ? "#eff6ff" : "#fff",
+    color: active ? "#1d4ed8" : "#374151",
+  });
+
+  const pct = jobData ? Math.round((jobData.done / Math.max(jobData.total, 1)) * 100) : 0;
+
+  return (
+    <>
+      <button data-testid="btn-bulk-generate-hubs" onClick={() => setOpen(true)}
+        style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer" }}>
+        Bulk Generate
+      </button>
+      {open && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "2rem", width: "min(680px, 95vw)", maxHeight: "90vh", overflow: "auto" }}>
+            <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "#111827", marginTop: 0, marginBottom: "1.25rem" }}>Bulk Generate Hub Pages</h2>
+            {!jobId ? (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontWeight: 600, marginBottom: 6, fontSize: ".85rem", color: "#374151" }}>Hub Type</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {(["service", "state", "city"] as const).map(t => (
+                      <button key={t} onClick={() => { setHubType(t); setSelected(new Set()); }} style={btnStyle(hubType === t)}>
+                        {t === "service" ? "Service Hub" : t === "state" ? "State Hub" : "City Hub"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <label style={{ fontWeight: 600, fontSize: ".85rem", color: "#374151" }}>
+                      Select {hubType === "service" ? "Services" : hubType === "state" ? "States" : "Cities"} ({selected.size} selected)
+                    </label>
+                    <button onClick={toggleAll} style={{ fontSize: ".8rem", color: "#2563eb", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                      {selected.size === items.length && items.length > 0 ? "Deselect All" : "Select All"}
+                    </button>
+                  </div>
+                  <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 200, overflow: "auto", padding: "6px 0" }}>
+                    {items.length === 0 ? (
+                      <div style={{ textAlign: "center", color: "#9ca3af", padding: "1rem", fontSize: ".85rem" }}>
+                        {servicesQ.isLoading || locationsQ.isLoading ? "Loading…" : `No ${hubType}s found in this website`}
+                      </div>
+                    ) : items.map(name => (
+                      <label key={name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 14px", cursor: "pointer", background: selected.has(name) ? "#f0f9ff" : "transparent" }}>
+                        <input type="checkbox" checked={selected.has(name)} onChange={() => toggleItem(name)} />
+                        <span style={{ fontSize: ".88rem", color: "#1f2937" }}>{name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 18, display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <label style={{ display: "block", fontWeight: 600, fontSize: ".85rem", color: "#374151", marginBottom: 4 }}>Max Child Links</label>
+                    <input type="number" min={1} max={200} value={maxChildLinks} onChange={e => setMaxChildLinks(parseInt(e.target.value) || 30)}
+                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 80, fontSize: ".9rem" }} />
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", paddingTop: 18 }}>
+                    <input type="checkbox" checked={generateAI} onChange={e => setGenerateAI(e.target.checked)} data-testid="chk-generate-ai" />
+                    <span style={{ fontWeight: 600, fontSize: ".85rem", color: "#374151" }}>Generate AI content &amp; publish</span>
+                  </label>
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button onClick={handleClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                  <button data-testid="btn-bulk-hub-submit" onClick={handleSubmit} disabled={selected.size === 0 || submitting}
+                    style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: selected.size === 0 ? "#9ca3af" : "#111827", color: "#fff", fontWeight: 600, cursor: selected.size === 0 ? "not-allowed" : "pointer" }}>
+                    {submitting ? "Starting…" : `Generate ${selected.size} Hub${selected.size !== 1 ? "s" : ""}`}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 8, fontSize: ".9rem", color: "#374151" }}>
+                  {isDone ? (jobData?.status === "error" ? "Job failed" : "Complete!") : "Generating hub pages…"}
+                </div>
+                <div style={{ background: "#f3f4f6", borderRadius: 6, height: 12, overflow: "hidden", marginBottom: 6 }}>
+                  <div style={{ background: isDone && jobData?.status !== "error" ? "#16a34a" : "#2563eb", height: "100%", width: `${pct}%`, transition: "width .5s ease" }} />
+                </div>
+                <div style={{ fontSize: ".82rem", color: "#6b7280", marginBottom: 16 }}>
+                  {jobData ? `${jobData.done} / ${jobData.total} processed` : "Starting…"}
+                  {isDone && ` — ${jobData?.created ?? 0} created`}
+                </div>
+                {isDone && (
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button onClick={handleClose} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", fontWeight: 600, cursor: "pointer" }}>Close</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function HubPagesPage() {
   const [websiteId, setWebsiteId] = useState("");
   const qc = useQueryClient();
@@ -435,6 +622,7 @@ export default function HubPagesPage() {
 
   const websites = websitesQ.data ?? [];
   const hubs = hubsQ.data ?? [];
+  const currentWebsite = websites.find((w: any) => w.id === websiteId);
 
   const byType = (t: string) => hubs.filter(h => h.hubType === t);
 
@@ -467,6 +655,7 @@ export default function HubPagesPage() {
                 <option key={w.id} value={w.id}>{w.name} ({w.domain})</option>
               ))}
             </select>
+            {websiteId && <BulkGenerateHubDialog websiteId={websiteId} accountId={(currentWebsite as any)?.accountId || ""} onDone={refresh} />}
             {websiteId && <CreateHubForm websiteId={websiteId} onCreated={refresh} />}
           </div>
         </div>

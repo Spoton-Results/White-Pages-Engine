@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -244,6 +244,8 @@ export default function BankHealthPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [websiteId, setWebsiteId] = useState("");
+  const [thinJobId, setThinJobId] = useState<string | null>(null);
+  const [thinWriting, setThinWriting] = useState(false);
 
   const websitesQ = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -266,6 +268,43 @@ export default function BankHealthPage() {
     },
     onError: (e: any) => toast({ title: "Recompute failed", description: e.message, variant: "destructive" }),
   });
+
+  const thinJobQ = useQuery<any>({
+    queryKey: ["/api/websites", websiteId, "bank-write-job"],
+    queryFn: () => fetch(`/api/websites/${websiteId}/bank-write-job`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!thinJobId && !!websiteId,
+    refetchInterval: (q: any) => {
+      const status = q.state.data?.status;
+      return status === "done" || status === "error" || !status ? false : 1500;
+    },
+  });
+
+  useEffect(() => {
+    const status = thinJobQ.data?.status;
+    if ((status === "done" || status === "error") && thinJobId) {
+      setThinJobId(null);
+      setThinWriting(false);
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+      toast({ title: "Thin bank write complete" });
+    }
+  }, [thinJobQ.data?.status, thinJobId]);
+
+  const writeThinBanks = async () => {
+    setThinWriting(true);
+    try {
+      const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/write-thin`, { threshold: 70 });
+      if (result.started) {
+        setThinJobId(result.jobId);
+        toast({ title: `Writing ${result.total} thin bank(s)…` });
+      } else {
+        toast({ title: result.message || "No thin banks found" });
+        setThinWriting(false);
+      }
+    } catch (e: any) {
+      toast({ title: "Failed", description: e.message, variant: "destructive" });
+      setThinWriting(false);
+    }
+  };
 
   const websites = websitesQ.data ?? [];
   const banks = healthQ.data ?? [];
@@ -299,17 +338,30 @@ export default function BankHealthPage() {
               ))}
             </select>
             {websiteId && (
-              <button
-                data-testid="btn-recompute-all"
-                onClick={() => recompute.mutate()}
-                disabled={recompute.isPending}
-                style={{
-                  background: "#111827", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer",
-                }}
-              >
-                {recompute.isPending ? "Recomputing…" : "Recompute All"}
-              </button>
+              <>
+                <button
+                  data-testid="btn-write-thin-banks"
+                  onClick={writeThinBanks}
+                  disabled={thinWriting || !!thinJobId}
+                  style={{
+                    background: thinWriting || thinJobId ? "#e5e7eb" : "#2563eb", color: thinWriting || thinJobId ? "#9ca3af" : "#fff",
+                    border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: thinWriting || thinJobId ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {thinWriting ? "Starting…" : thinJobId ? `Writing ${thinJobQ.data?.done ?? 0}/${thinJobQ.data?.total ?? "?"} banks…` : "Bulk Write Thin Banks"}
+                </button>
+                <button
+                  data-testid="btn-recompute-all"
+                  onClick={() => recompute.mutate()}
+                  disabled={recompute.isPending}
+                  style={{
+                    background: "#111827", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  {recompute.isPending ? "Recomputing…" : "Recompute All"}
+                </button>
+              </>
             )}
           </div>
         </div>

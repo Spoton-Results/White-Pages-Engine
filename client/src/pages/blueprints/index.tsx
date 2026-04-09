@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Layers, Trash2, MoreHorizontal, Sparkles, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Layers, Trash2, MoreHorizontal, Sparkles, CheckCircle, ChevronDown, ChevronUp, Zap } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +39,10 @@ export default function BlueprintsPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [generatedBlueprint, setGeneratedBlueprint] = useState<any>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showBulkBp, setShowBulkBp] = useState(false);
+  const [bulkPageTypes, setBulkPageTypes] = useState<Set<string>>(new Set());
+  const [bulkSvcs, setBulkSvcs] = useState<Set<string>>(new Set());
+  const [bulkBpJobId, setBulkBpJobId] = useState<string | null>(null);
 
   const LS_KEY = "nexus_blueprint_wizard";
 
@@ -120,6 +124,30 @@ export default function BlueprintsPage() {
     onError: (err: any) => toast({ title: "Generation failed", description: err.message, variant: "destructive" }),
   });
 
+  const bulkBpJobQ = useQuery<any>({
+    queryKey: ["blueprint-bulk-job", bulkBpJobId],
+    queryFn: () => api.get<any>(`/api/accounts/${selectedAccount}/blueprints/bulk-job/${bulkBpJobId}`),
+    enabled: !!bulkBpJobId,
+    refetchInterval: (q: any) => {
+      const s = q.state.data?.status;
+      return s === "done" || s === "error" ? false : 1500;
+    },
+  });
+
+  const bulkBpJob = bulkBpJobQ.data as any;
+  const bulkBpDone = bulkBpJob?.status === "done" || bulkBpJob?.status === "error";
+
+  const submitBulkBp = async () => {
+    const resp = await api.post<any>(`/api/accounts/${selectedAccount}/blueprints/bulk-generate`, {
+      pageTypes: [...bulkPageTypes],
+      services: bulkSvcs.size > 0 ? [...bulkSvcs] : [""],
+    });
+    if (resp.jobId) setBulkBpJobId(resp.jobId);
+    else toast({ title: "Error starting job", variant: "destructive" });
+  };
+
+  const closeBulkBp = () => { setShowBulkBp(false); setBulkBpJobId(null); setBulkPageTypes(new Set()); setBulkSvcs(new Set()); };
+
   const accountWebsites = websites.filter((w: any) => w.accountId === selectedAccount);
 
   const saveMutation = useMutation({
@@ -153,14 +181,25 @@ export default function BlueprintsPage() {
             <p className="text-muted-foreground text-sm mt-0.5">AI-generated page templates — define once, generate thousands.</p>
           </div>
           {selectedAccount && (
-            <Button
-              className="gap-2"
-              size="sm"
-              onClick={() => setShowCreate(true)}
-              data-testid="button-new-blueprint"
-            >
-              <Sparkles className="size-4" />Generate with AI
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                className="gap-2"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowBulkBp(true)}
+                data-testid="button-bulk-blueprints"
+              >
+                <Zap className="size-4" />Bulk Generate
+              </Button>
+              <Button
+                className="gap-2"
+                size="sm"
+                onClick={() => setShowCreate(true)}
+                data-testid="button-new-blueprint"
+              >
+                <Sparkles className="size-4" />Generate with AI
+              </Button>
+            </div>
           )}
         </div>
 
@@ -479,6 +518,79 @@ export default function BlueprintsPage() {
               <CheckCircle className="size-4" />
               {saveMutation.isPending ? "Saving…" : "Save Blueprint"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fix 2 — Bulk Blueprint Generation Dialog */}
+      <Dialog open={showBulkBp} onOpenChange={v => { if (!v) closeBulkBp(); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Bulk Generate Blueprints</DialogTitle>
+          </DialogHeader>
+          {!bulkBpJobId ? (
+            <div className="flex flex-col gap-4 py-2">
+              <div>
+                <Label className="mb-2 block">Page Types (select one or more)</Label>
+                <div className="flex flex-col gap-1.5 border rounded-lg p-3 max-h-48 overflow-auto">
+                  {PAGE_TYPES.map(pt => (
+                    <label key={pt.value} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                      <input type="checkbox" checked={bulkPageTypes.has(pt.value)}
+                        onChange={() => { const n = new Set(bulkPageTypes); if (n.has(pt.value)) n.delete(pt.value); else n.add(pt.value); setBulkPageTypes(n); }} />
+                      <span className="text-sm font-medium">{pt.label}</span>
+                      <span className="text-xs text-muted-foreground ml-1">{pt.example}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <Label>Services <span className="text-muted-foreground font-normal">(optional — generates per-service blueprints)</span></Label>
+                  <button className="text-xs text-primary" onClick={() => setBulkSvcs(bulkSvcs.size === (services as any[]).length ? new Set() : new Set((services as any[]).map((s: any) => s.name)))}>
+                    {bulkSvcs.size === (services as any[]).length ? "Deselect All" : "Select All"}
+                  </button>
+                </div>
+                <div className="border rounded-lg p-2 max-h-40 overflow-auto flex flex-col gap-1">
+                  {(services as any[]).length === 0 ? (
+                    <span className="text-sm text-muted-foreground p-2">No services found</span>
+                  ) : (services as any[]).map((s: any) => (
+                    <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                      <input type="checkbox" checked={bulkSvcs.has(s.name)}
+                        onChange={() => { const n = new Set(bulkSvcs); if (n.has(s.name)) n.delete(s.name); else n.add(s.name); setBulkSvcs(n); }} />
+                      <span className="text-sm">{s.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="text-sm text-muted-foreground bg-muted/40 rounded p-2">
+                Will generate <strong>{bulkPageTypes.size * Math.max(bulkSvcs.size, 1)}</strong> blueprint(s)
+                ({bulkPageTypes.size} type{bulkPageTypes.size !== 1 ? "s" : ""} × {Math.max(bulkSvcs.size, 1)} service{Math.max(bulkSvcs.size, 1) !== 1 ? "s" : ""})
+              </div>
+            </div>
+          ) : (
+            <div className="py-4">
+              <div className="text-sm font-medium mb-2">{bulkBpDone ? (bulkBpJob?.status === "error" ? "Job failed" : "Done!") : "Generating blueprints…"}</div>
+              <div className="h-3 bg-muted rounded overflow-hidden mb-2">
+                <div className="h-full bg-primary transition-all" style={{ width: `${bulkBpJob ? Math.round((bulkBpJob.done / Math.max(bulkBpJob.total, 1)) * 100) : 0}%` }} />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {bulkBpJob ? `${bulkBpJob.done} / ${bulkBpJob.total} processed — ${bulkBpJob.created ?? 0} created` : "Starting…"}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            {!bulkBpJobId ? (
+              <>
+                <Button variant="outline" onClick={closeBulkBp}>Cancel</Button>
+                <Button onClick={submitBulkBp} disabled={bulkPageTypes.size === 0} data-testid="btn-bulk-bp-submit">
+                  Generate {bulkPageTypes.size * Math.max(bulkSvcs.size, 1)} Blueprint{bulkPageTypes.size * Math.max(bulkSvcs.size, 1) !== 1 ? "s" : ""}
+                </Button>
+              </>
+            ) : bulkBpDone ? (
+              <Button onClick={() => { closeBulkBp(); qc.invalidateQueries({ queryKey: ["/api/blueprints"] }); }}>Close</Button>
+            ) : (
+              <Button variant="outline" disabled>Running…</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

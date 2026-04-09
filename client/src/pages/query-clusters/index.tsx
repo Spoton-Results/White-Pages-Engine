@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Search, Trash2, Sparkles } from "lucide-react";
+import { Plus, Search, Trash2, Sparkles, Zap, Check, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -20,6 +20,11 @@ export default function QueryClustersPage() {
   const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
+  const [showBulkCluster, setShowBulkCluster] = useState(false);
+  const [bulkClusterSvcs, setBulkClusterSvcs] = useState<Set<string>>(new Set());
+  const [bulkSuggestions, setBulkSuggestions] = useState<Array<{ service: string; clusters: any[] }> | null>(null);
+  const [approvedClusters, setApprovedClusters] = useState<Set<string>>(new Set());
+  const [bulkGenerating, setBulkGenerating] = useState(false);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -78,6 +83,33 @@ export default function QueryClustersPage() {
     navigational: "bg-amber-500/10 text-amber-600",
   };
 
+  const generateBulkClusters = async () => {
+    setBulkGenerating(true);
+    try {
+      const svcNames = [...bulkClusterSvcs];
+      const result = await api.post<any>(`/api/accounts/${selectedAccount}/query-clusters/bulk-suggest`, { services: svcNames });
+      const allKeys = new Set<string>();
+      result.suggestions.forEach((g: any) => g.clusters.forEach((c: any) => allKeys.add(c.primaryKeyword)));
+      setApprovedClusters(allKeys);
+      setBulkSuggestions(result.suggestions);
+    } catch (e: any) {
+      toast({ title: "Generation failed", description: e.message, variant: "destructive" });
+    } finally { setBulkGenerating(false); }
+  };
+
+  const saveBulkClusters = async () => {
+    const allClusters: any[] = [];
+    (bulkSuggestions || []).forEach(g => g.clusters.forEach(c => { if (approvedClusters.has(c.primaryKeyword)) allClusters.push(c); }));
+    try {
+      const result = await api.post<any>(`/api/accounts/${selectedAccount}/query-clusters/bulk-save`, { clusters: allClusters });
+      qc.invalidateQueries({ queryKey: ["/api/query-clusters"] });
+      toast({ title: `Saved ${result.saved} cluster(s)` });
+      setShowBulkCluster(false); setBulkSuggestions(null); setBulkClusterSvcs(new Set()); setApprovedClusters(new Set());
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
@@ -88,6 +120,15 @@ export default function QueryClustersPage() {
           </div>
           {selectedAccount && (
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setShowBulkCluster(true)}
+                data-testid="button-bulk-generate-clusters"
+              >
+                <Zap className="size-4" />Bulk Generate
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -171,6 +212,79 @@ export default function QueryClustersPage() {
           </div>
         )}
       </div>
+
+      {/* Fix 3 — Bulk Generate Clusters Dialog */}
+      <Dialog open={showBulkCluster} onOpenChange={v => { if (!v) { setShowBulkCluster(false); setBulkSuggestions(null); setBulkClusterSvcs(new Set()); setApprovedClusters(new Set()); } }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto">
+          <DialogHeader><DialogTitle>Bulk Generate Query Clusters</DialogTitle></DialogHeader>
+          {!bulkSuggestions ? (
+            <div className="flex flex-col gap-4 py-2">
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <Label>Select Services (Claude generates 10–15 clusters per service)</Label>
+                  <button className="text-xs text-primary"
+                    onClick={() => setBulkClusterSvcs(bulkClusterSvcs.size === (services as any[]).length ? new Set() : new Set((services as any[]).map((s: any) => s.name)))}>
+                    {bulkClusterSvcs.size === (services as any[]).length ? "Deselect All" : "Select All"}
+                  </button>
+                </div>
+                <div className="border rounded-lg p-2 max-h-52 overflow-auto flex flex-col gap-1">
+                  {(services as any[]).length === 0 ? (
+                    <span className="text-sm text-muted-foreground p-2">No services found</span>
+                  ) : (services as any[]).map((s: any) => (
+                    <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                      <input type="checkbox" checked={bulkClusterSvcs.has(s.name)}
+                        onChange={() => { const n = new Set(bulkClusterSvcs); if (n.has(s.name)) n.delete(s.name); else n.add(s.name); setBulkClusterSvcs(n); }} />
+                      <span className="text-sm">{s.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowBulkCluster(false)}>Cancel</Button>
+                <Button onClick={generateBulkClusters} disabled={bulkClusterSvcs.size === 0 || bulkGenerating} data-testid="btn-bulk-cluster-generate">
+                  <Sparkles className="size-4 mr-2" />
+                  {bulkGenerating ? `Generating for ${bulkClusterSvcs.size} service(s)…` : `Generate for ${bulkClusterSvcs.size} Service${bulkClusterSvcs.size !== 1 ? "s" : ""}`}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 py-2">
+              <div className="text-sm text-muted-foreground bg-muted/40 rounded p-2">
+                Review and approve clusters to save. <strong>{approvedClusters.size}</strong> approved of {(bulkSuggestions || []).reduce((s, g) => s + g.clusters.length, 0)} generated.
+              </div>
+              <div className="flex flex-col gap-4 max-h-96 overflow-auto">
+                {(bulkSuggestions || []).map(group => (
+                  <div key={group.service}>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2 sticky top-0 bg-background py-1">{group.service}</div>
+                    <div className="flex flex-col gap-1">
+                      {group.clusters.map((c: any) => (
+                        <label key={c.primaryKeyword} className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1.5 border border-transparent has-[:checked]:border-primary/20 has-[:checked]:bg-primary/5">
+                          <input type="checkbox" className="mt-0.5" checked={approvedClusters.has(c.primaryKeyword)}
+                            onChange={() => { const n = new Set(approvedClusters); if (n.has(c.primaryKeyword)) n.delete(c.primaryKeyword); else n.add(c.primaryKeyword); setApprovedClusters(n); }} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium">{c.name}</div>
+                            <div className="text-xs text-muted-foreground">{c.primaryKeyword}</div>
+                            <div className="flex gap-2 mt-0.5">
+                              <Badge variant="secondary" className={`text-xs capitalize ${intentColors[c.intentType] || ""}`}>{c.intentType}</Badge>
+                              {c.searchVolume && <span className="text-xs text-muted-foreground">~{c.searchVolume.toLocaleString()}/mo</span>}
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setBulkSuggestions(null)}>← Back</Button>
+                <Button onClick={saveBulkClusters} disabled={approvedClusters.size === 0} data-testid="btn-bulk-cluster-save">
+                  <Check className="size-4 mr-2" />Save {approvedClusters.size} Cluster{approvedClusters.size !== 1 ? "s" : ""}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>

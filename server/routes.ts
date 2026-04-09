@@ -1010,6 +1010,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.status(201).json({ inserted: inserted.length, clusters: inserted });
   });
 
+  // Fix 3 — Bulk suggest query clusters per service (review before saving)
+  app.post("/api/accounts/:accountId/query-clusters/bulk-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    const accountId = req.params.accountId as string;
+    const { services: serviceNames } = z.object({ services: z.array(z.string()).min(1) }).parse(req.body);
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+    const [allServices, existingClusters] = await Promise.all([storage.getServices(accountId), storage.getQueryClusters(accountId)]);
+    const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
+    const serviceNameToId = new Map(allServices.map((s: any) => [s.name.toLowerCase(), s.id]));
+    const { generateQueryClusters } = await import("./services/claude");
+    const results: Array<{ service: string; clusters: any[] }> = [];
+    for (const svcName of serviceNames) {
+      const suggested = await generateQueryClusters({
+        businessName: account.name,
+        industry: (account as any).settings?.industry || account.name,
+        services: [svcName],
+        existingClusters: existingClusters.map((c: any) => c.primaryKeyword),
+      });
+      const filtered = suggested.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase())).map(c => {
+        const serviceId = serviceNameToId.get(svcName.toLowerCase()) ?? null;
+        return { ...c, accountId, serviceId, serviceName: svcName };
+      });
+      filtered.forEach(c => existingKeywords.add(c.primaryKeyword.toLowerCase()));
+      results.push({ service: svcName, clusters: filtered });
+    }
+    return res.json({ suggestions: results });
+  });
+
+  // Fix 3 — Bulk save approved clusters
+  app.post("/api/accounts/:accountId/query-clusters/bulk-save", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const { clusters } = z.object({
+      clusters: z.array(z.object({
+        name: z.string(), intentType: z.string(), primaryKeyword: z.string(),
+        secondaryKeywords: z.array(z.string()).optional().default([]),
+        searchVolume: z.number().nullable().optional(),
+        difficulty: z.number().nullable().optional(),
+        serviceId: z.string().nullable().optional(),
+      })),
+    }).parse(req.body);
+    const existingClusters = await storage.getQueryClusters(accountId);
+    const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
+    const toInsert = clusters.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase())).map(c => ({ ...c, accountId, serviceId: c.serviceId ?? null, searchVolume: c.searchVolume ?? null, difficulty: c.difficulty ?? null }));
+    const inserted = await Promise.all(toInsert.map(c => storage.createQueryCluster(c as any)));
+    return res.status(201).json({ saved: inserted.length, clusters: inserted });
+  });
+
   // ── Blueprints ────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
@@ -1037,6 +1085,64 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
     await storage.deleteBlueprint((req.params.id as string));
     return res.json({ message: "Deleted" });
+  });
+
+  // Fix 2 — Bulk blueprint generation background job
+  app.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    const accountId = req.params.accountId as string;
+    const { pageTypes, services: serviceNames } = z.object({
+      pageTypes: z.array(z.string()).min(1),
+      services: z.array(z.string()).optional().default([""]),
+    }).parse(req.body);
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+    const [brand, industries] = await Promise.all([
+      account ? storage.getBrandProfiles(accountId).then(bs => bs[0]) : Promise.resolve(null),
+      storage.getIndustries(accountId),
+    ]);
+    const businessName = brand?.name || account.name;
+    const industry = industries[0]?.name || account.name;
+    const combos: Array<{ pageType: string; service: string }> = [];
+    for (const pt of pageTypes) for (const svc of (serviceNames.length ? serviceNames : [""])) combos.push({ pageType: pt, service: svc });
+    const job = await storage.createGenerationJob({
+      accountId, websiteId: "", name: `Bulk Blueprint Generate (${combos.length} blueprints)`,
+      status: "pending", totalPages: combos.length, processedPages: 0, passedPages: 0, failedPages: 0,
+      settings: { type: "blueprint_bulk", combos, businessName, industry, progress: combos.map(c => ({ pageType: c.pageType, service: c.service, status: "pending" })) } as any,
+    });
+    setImmediate(async () => {
+      try {
+        const { generateBlueprint } = await import("./services/claude");
+        const s = (await storage.getGenerationJob(job.id))!.settings as any;
+        await storage.updateGenerationJob(job.id, { status: "running", startedAt: new Date() });
+        let passed = 0;
+        for (let i = 0; i < combos.length; i++) {
+          s.progress[i].status = "running";
+          await storage.updateGenerationJob(job.id, { settings: s as any });
+          try {
+            const { pageType, service } = combos[i];
+            const gen = await generateBlueprint({ businessName, industry, serviceName: service || undefined, pageType });
+            await storage.createBlueprint({ ...gen, accountId, requiredWordCount: gen.requiredWordCount, minPublishScore: gen.minPublishScore as any, faqEnabled: gen.faqEnabled });
+            s.progress[i].status = "done";
+            passed++;
+          } catch (e: any) { s.progress[i].status = "error"; s.progress[i].error = e.message; }
+          await storage.updateGenerationJob(job.id, { settings: s as any, processedPages: i + 1, passedPages: passed });
+        }
+        await storage.updateGenerationJob(job.id, { status: "done", completedAt: new Date(), passedPages: passed });
+      } catch (e: any) {
+        await storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() });
+      }
+    });
+    return res.json({ jobId: job.id });
+  });
+
+  app.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.jobId as string);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    const s = job.settings as any;
+    const total = s.progress?.length ?? job.totalPages;
+    const done = s.progress?.filter((p: any) => p.status === "done" || p.status === "error").length ?? job.processedPages;
+    return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
   });
 
   // ── Pages ─────────────────────────────────────────────────────────────────
@@ -1847,6 +1953,35 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ started: true, total: toProcess.length, jobId });
   });
 
+  // Fix 4 — Write only thin/incomplete variation banks
+  app.post("/api/websites/:id/variation-banks/write-thin", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const { threshold = 70 } = z.object({ threshold: z.number().optional() }).parse(req.body);
+    const [thinWarnings, allServices, brand, industries] = await Promise.all([
+      storage.getThinBankWarnings(websiteId, threshold),
+      storage.getServices(website.accountId),
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    if (thinWarnings.length === 0) return res.json({ started: false, total: 0, message: "No thin banks found below threshold" });
+    const thinServiceNames = new Set(thinWarnings.map((w: any) => w.service.toLowerCase()));
+    const toProcess = allServices.filter(s => thinServiceNames.has(s.name.toLowerCase()));
+    if (toProcess.length === 0) return res.json({ started: false, total: 0, message: "No matching services" });
+    const industry = industries[0];
+    const ctx: any = {
+      brandName: brand?.name,
+      brandDescription: (brand as any)?.description ?? undefined,
+      voiceAndTone: (brand as any)?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: (industry as any)?.description ?? undefined,
+    };
+    const { startBankWriteJob } = await import("./services/bank-write-background");
+    const jobId = await startBankWriteJob(websiteId, website.accountId, toProcess.map(s => ({ id: s.id, name: s.name })), ctx);
+    return res.json({ started: true, total: toProcess.length, jobId, thinCount: thinWarnings.length });
+  });
+
   // Active bank-write job status for a website (used by UI to restore progress bar on page refresh)
   app.get("/api/websites/:id/bank-write-job", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
@@ -2244,6 +2379,67 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ ok: true });
   });
 
+  // Fix 5 — Preview how many pages match bulk-tier filters
+  app.get("/api/websites/:id/pages/bulk-tier-preview", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const q = req.query as Record<string, string>;
+    const filters: any = {};
+    if (q.serviceId) filters.serviceId = q.serviceId;
+    if (q.locationId) filters.locationId = q.locationId;
+    if (q.blueprintId) filters.blueprintId = q.blueprintId;
+    if (q.scoreMin) filters.scoreMin = Number(q.scoreMin);
+    if (q.scoreMax) filters.scoreMax = Number(q.scoreMax);
+    const result = await storage.bulkFilterPagesCount(websiteId, filters);
+    return res.json(result);
+  });
+
+  // Fix 5 — Bulk set tier on filtered pages
+  app.post("/api/websites/:id/pages/bulk-set-tier", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { tier, filters } = z.object({
+      tier: z.number().int().min(1).max(3),
+      filters: z.object({
+        serviceId: z.string().optional(),
+        locationId: z.string().optional(),
+        blueprintId: z.string().optional(),
+        scoreMin: z.number().optional(),
+        scoreMax: z.number().optional(),
+      }).optional().default({}),
+    }).parse(req.body);
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const result = await storage.bulkSetPageTier(websiteId, tier, filters);
+    if (result.affected > 0) {
+      const { scheduleSitemapRegen } = await import("./services/automation");
+      scheduleSitemapRegen(websiteId);
+    }
+    return res.json({ ok: true, affected: result.affected });
+  });
+
+  // Fix 6 — Submit all Tier 1 published pages to Google Indexing API
+  app.post("/api/websites/:id/pages/submit-tier1-to-google", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const tier1Pages = await storage.getPagesByTier(websiteId, 1, 1000, 0);
+    if (tier1Pages.length === 0) return res.json({ submitted: 0, urls: [] });
+    const pDom = (website.settings as any)?.parentDomain;
+    const pPth = (website.settings as any)?.proxyPath || "";
+    const base = pDom ? `https://${pDom}${pPth}` : `https://${website.domain}`;
+    const urls = tier1Pages.map(p => `${base}/${p.slug}`);
+    const { submitUrlsToGoogle } = await import("./services/gsc-indexing");
+    const CHUNK = 200;
+    let submitted = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < urls.length; i += CHUNK) {
+      try {
+        await submitUrlsToGoogle(urls.slice(i, i + CHUNK));
+        submitted += Math.min(CHUNK, urls.length - i);
+      } catch (e: any) { errors.push(e.message); }
+    }
+    return res.json({ submitted, total: tier1Pages.length, errors: errors.length > 0 ? errors : undefined, urls: urls.slice(0, 20) });
+  });
+
   // ── SEO Control: Fallback Hits ─────────────────────────────────────────────
 
   app.get("/api/websites/:id/fallback-hits", requireAuth, async (req: Request, res: Response) => {
@@ -2422,6 +2618,103 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     const updated = await storage.updateHubPage(hub.id, { content, status: "published" });
     return res.json({ ok: true, hub: updated, childCount: childLinks.length });
+  });
+
+  // Fix 1 — Bulk hub page generation
+  app.post("/api/websites/:id/hub-pages/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const body = z.object({
+      hubType: z.enum(["service", "state", "city"]),
+      services: z.array(z.string()).optional().default([]),
+      states: z.array(z.string()).optional().default([]),
+      cities: z.array(z.string()).optional().default([]),
+      maxChildLinks: z.number().int().min(1).max(200).optional().default(30),
+      generateAI: z.boolean().optional().default(false),
+    }).parse(req.body);
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const names = body.hubType === "service" ? body.services : body.hubType === "state" ? body.states : body.cities;
+    if (names.length === 0) return res.status(400).json({ error: "No items selected" });
+    const job = await storage.createGenerationJob({
+      accountId: website.accountId,
+      websiteId,
+      name: `Bulk Hub Generate — ${body.hubType} (${names.length})`,
+      status: "pending",
+      totalPages: names.length,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+      settings: { type: "hub_bulk", hubType: body.hubType, names, maxChildLinks: body.maxChildLinks, generateAI: body.generateAI, progress: names.map(n => ({ name: n, status: "pending" })) } as any,
+    });
+    setImmediate(async () => {
+      try {
+        const { renderHubPageHtml } = await import("./services/hub-pages");
+        const brandProfiles = await storage.getBrandProfiles(website.accountId);
+        const brand = brandProfiles[0];
+        let s = (await storage.getGenerationJob(job.id))!.settings as any;
+        await storage.updateGenerationJob(job.id, { status: "running", startedAt: new Date() });
+        let passed = 0;
+        for (let i = 0; i < names.length; i++) {
+          const name = names[i];
+          s.progress[i].status = "running";
+          await storage.updateGenerationJob(job.id, { settings: s as any });
+          try {
+            const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+            const existingHubs = await storage.getHubPages(websiteId);
+            if (existingHubs.some((h: any) => h.slug === slug || (h.name.toLowerCase() === name.toLowerCase() && h.hubType === body.hubType))) {
+              s.progress[i].status = "skipped";
+              await storage.updateGenerationJob(job.id, { settings: s as any, processedPages: i + 1 });
+              continue;
+            }
+            let metaDescription: string | null = null;
+            if (body.generateAI && process.env.ANTHROPIC_API_KEY) {
+              try {
+                const Anthropic = (await import("@anthropic-ai/sdk")).default;
+                const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+                const resp = await ai.messages.create({
+                  model: "claude-haiku-4-5-20251001",
+                  max_tokens: 200,
+                  messages: [{ role: "user", content: `Write a compelling SEO meta description (max 155 chars) for a ${body.hubType} hub page about "${name}" for a business. Reply with ONLY the description text.` }],
+                });
+                const raw = resp.content[0].type === "text" ? resp.content[0].text.trim() : "";
+                if (raw.length > 0) metaDescription = raw.slice(0, 155);
+              } catch { /* non-fatal */ }
+            }
+            const hub = await storage.createHubPage({ websiteId, accountId: website.accountId, hubType: body.hubType, name, slug, parentSlug: null, maxChildLinks: body.maxChildLinks, metaDescription, status: "draft", tier: 1 });
+            if (body.generateAI) {
+              const childLinks = await storage.getChildPagesForHub(websiteId, body.hubType, name, body.maxChildLinks);
+              const content = renderHubPageHtml({
+                hubType: body.hubType as any,
+                name,
+                slug,
+                metaDescription,
+                parentSlug: null,
+                childLinks,
+                website: { domain: website.domain, settings: (website.settings ?? {}) as any },
+                brand: brand ? { name: brand.name, primaryColor: (brand as any).primaryColor ?? undefined, phone: (brand as any).phone ?? undefined, tagline: (brand as any).tagline ?? undefined, customFields: ((brand as any).customFields ?? {}) as any } : null,
+              });
+              await storage.updateHubPage(hub.id, { content, status: "published" });
+            }
+            s.progress[i].status = "done";
+            passed++;
+          } catch (e: any) { s.progress[i].status = "error"; s.progress[i].error = e.message; }
+          await storage.updateGenerationJob(job.id, { settings: s as any, processedPages: i + 1, passedPages: passed });
+        }
+        await storage.updateGenerationJob(job.id, { status: "done", completedAt: new Date(), passedPages: passed });
+      } catch (e: any) {
+        await storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() });
+      }
+    });
+    return res.json({ jobId: job.id });
+  });
+
+  app.get("/api/websites/:id/hub-pages/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.jobId as string);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    const s = job.settings as any;
+    const total = s.progress?.length ?? job.totalPages;
+    const done = s.progress?.filter((p: any) => ["done", "error", "skipped"].includes(p.status)).length ?? job.processedPages;
+    return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
   });
 
   // ── P8: Top Services / States by Tier 1 + Thin-Bank Warnings ─────────────

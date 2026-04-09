@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp, Pencil, Layers, Send, Filter } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -28,6 +28,13 @@ export default function PublishedPagesPage() {
   const [editSlugPage, setEditSlugPage] = useState<any>(null);
   const [slugInput, setSlugInput] = useState("");
   const [slugError, setSlugError] = useState("");
+  const [showBulkTier, setShowBulkTier] = useState(false);
+  const [tierFilters, setTierFilters] = useState<{ serviceId: string; locationId: string; blueprintId: string; scoreMin: string; scoreMax: string }>({ serviceId: "", locationId: "", blueprintId: "", scoreMin: "", scoreMax: "" });
+  const [tierTarget, setTierTarget] = useState("1");
+  const [tierPreview, setTierPreview] = useState<{ count: number } | null>(null);
+  const [tierPreviewing, setTierPreviewing] = useState(false);
+  const [tierSaving, setTierSaving] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -97,7 +104,64 @@ export default function PublishedPagesPage() {
     slugMut.mutate({ id: editSlugPage.id, slug: trimmed });
   };
 
-  const currentWebsite = websites.find((w: any) => w.id === selectedWebsite);
+  const currentWebsite = (websites as any[]).find((w: any) => w.id === selectedWebsite);
+  const currentAccountId = currentWebsite?.accountId || "";
+
+  const { data: tierServices = [] } = useQuery({
+    queryKey: ["/api/accounts", currentAccountId, "services"],
+    queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/services`),
+    enabled: !!currentAccountId && showBulkTier,
+  });
+  const { data: tierLocations = [] } = useQuery({
+    queryKey: ["/api/accounts", currentAccountId, "locations"],
+    queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/locations`),
+    enabled: !!currentAccountId && showBulkTier,
+  });
+  const { data: tierBlueprints = [] } = useQuery({
+    queryKey: ["/api/accounts", currentAccountId, "blueprints"],
+    queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/blueprints`),
+    enabled: !!currentAccountId && showBulkTier,
+  });
+
+  const previewTier = async () => {
+    setTierPreviewing(true); setTierPreview(null);
+    const p = new URLSearchParams();
+    if (tierFilters.serviceId) p.set("serviceId", tierFilters.serviceId);
+    if (tierFilters.locationId) p.set("locationId", tierFilters.locationId);
+    if (tierFilters.blueprintId) p.set("blueprintId", tierFilters.blueprintId);
+    if (tierFilters.scoreMin) p.set("scoreMin", tierFilters.scoreMin);
+    if (tierFilters.scoreMax) p.set("scoreMax", tierFilters.scoreMax);
+    try {
+      const result = await api.get<any>(`/api/websites/${selectedWebsite}/pages/bulk-tier-preview?${p.toString()}`);
+      setTierPreview({ count: result.count });
+    } catch (e: any) {
+      toast({ title: "Preview failed", description: e.message, variant: "destructive" });
+    } finally { setTierPreviewing(false); }
+  };
+
+  const applyTier = async () => {
+    setTierSaving(true);
+    try {
+      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-set-tier`, { tier: parseInt(tierTarget), filters: tierFilters });
+      qc.invalidateQueries({ queryKey: ["/api/pages/published", selectedWebsite] });
+      toast({ title: `Set ${result.updated} page(s) to Tier ${tierTarget}` });
+      setShowBulkTier(false); setTierPreview(null); setTierFilters({ serviceId: "", locationId: "", blueprintId: "", scoreMin: "", scoreMax: "" });
+    } catch (e: any) {
+      toast({ title: "Failed", description: e.message, variant: "destructive" });
+    } finally { setTierSaving(false); }
+  };
+
+  const submitToGoogle = async () => {
+    if (!confirm(`Submit all Tier 1 pages from this website to Google Indexing API?`)) return;
+    setGoogleSubmitting(true);
+    try {
+      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/submit-tier1-to-google`, {});
+      toast({ title: `Submitted ${result.submitted}/${result.total} URLs to Google`, description: result.errors > 0 ? `${result.errors} error(s)` : undefined });
+    } catch (e: any) {
+      toast({ title: "Submission failed", description: e.message, variant: "destructive" });
+    } finally { setGoogleSubmitting(false); }
+  };
+
   const pages = (pagesData?.pages || []).filter((p: any) =>
     !searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.slug.includes(searchText.toLowerCase())
   );
@@ -129,7 +193,17 @@ export default function PublishedPagesPage() {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedWebsite && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setShowBulkTier(true)} data-testid="button-bulk-set-tier">
+                  <Layers className="size-4 mr-2" />Bulk Set Tier
+                </Button>
+                <Button variant="outline" size="sm" onClick={submitToGoogle} disabled={googleSubmitting} data-testid="button-submit-google">
+                  <Send className="size-4 mr-2" />{googleSubmitting ? "Submitting…" : "Submit T1 to Google"}
+                </Button>
+              </>
+            )}
             {reviewData?.total > 0 && selectedWebsite && (
               <Button
                 size="sm"
@@ -329,6 +403,82 @@ export default function PublishedPagesPage() {
           </div>
         )}
       </div>
+
+      {/* Fix 5 — Bulk Set Tier Dialog */}
+      <Dialog open={showBulkTier} onOpenChange={v => { if (!v) { setShowBulkTier(false); setTierPreview(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Filter className="size-4" />Bulk Set Page Tier</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <p className="text-sm text-muted-foreground">Filter published pages and assign a tier in bulk. Leave filters blank to match all pages.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs mb-1 block">Service</Label>
+                <Select value={tierFilters.serviceId} onValueChange={v => setTierFilters(f => ({ ...f, serviceId: v === "all" ? "" : v }))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Any service" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Any service</SelectItem>
+                    {(tierServices as any[]).map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Location</Label>
+                <Select value={tierFilters.locationId} onValueChange={v => setTierFilters(f => ({ ...f, locationId: v === "all" ? "" : v }))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Any location" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Any location</SelectItem>
+                    {(tierLocations as any[]).map((l: any) => <SelectItem key={l.id} value={l.id}>{l.city}, {l.state}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Blueprint</Label>
+                <Select value={tierFilters.blueprintId} onValueChange={v => setTierFilters(f => ({ ...f, blueprintId: v === "all" ? "" : v }))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Any blueprint" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Any blueprint</SelectItem>
+                    {(tierBlueprints as any[]).map((b: any) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Tier to Set</Label>
+                <Select value={tierTarget} onValueChange={setTierTarget}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Tier 1 (Top Priority)</SelectItem>
+                    <SelectItem value="2">Tier 2</SelectItem>
+                    <SelectItem value="3">Tier 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Min Score (0–100)</Label>
+                <Input type="number" min="0" max="100" className="h-8 text-xs" placeholder="e.g. 60"
+                  value={tierFilters.scoreMin} onChange={e => setTierFilters(f => ({ ...f, scoreMin: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Max Score (0–100)</Label>
+                <Input type="number" min="0" max="100" className="h-8 text-xs" placeholder="e.g. 90"
+                  value={tierFilters.scoreMax} onChange={e => setTierFilters(f => ({ ...f, scoreMax: e.target.value }))} />
+              </div>
+            </div>
+            {tierPreview && (
+              <div className="bg-muted/50 rounded-lg p-3 text-sm">
+                <strong>{tierPreview.count}</strong> page{tierPreview.count !== 1 ? "s" : ""} match your filters and will be set to Tier {tierTarget}.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={previewTier} disabled={tierPreviewing} data-testid="btn-tier-preview">
+              {tierPreviewing ? "Previewing…" : "Preview Count"}
+            </Button>
+            <Button size="sm" onClick={applyTier} disabled={tierSaving || !tierPreview} data-testid="btn-tier-apply">
+              {tierSaving ? "Applying…" : `Set Tier ${tierTarget}${tierPreview ? ` (${tierPreview.count})` : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Slug Dialog */}
       <Dialog open={!!editSlugPage} onOpenChange={open => { if (!open) { setEditSlugPage(null); setSlugInput(""); setSlugError(""); } }}>

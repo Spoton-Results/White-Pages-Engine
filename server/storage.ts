@@ -855,6 +855,40 @@ export async function getUnscoredPages(websiteId: string, limit = 500): Promise<
     .limit(limit) as any;
 }
 
+export interface BulkTierFilters {
+  serviceId?: string;
+  locationId?: string;
+  blueprintId?: string;
+  scoreMin?: number;
+  scoreMax?: number;
+}
+
+export async function bulkFilterPagesCount(websiteId: string, filters: BulkTierFilters): Promise<{ count: number; sample: Array<{ title: string; slug: string; tier: number; qualityScore: number | null }> }> {
+  const conditions = [eq(pages.websiteId, websiteId), eq(pages.status, "published" as any)];
+  if (filters.serviceId) conditions.push(eq(pages.serviceId as any, filters.serviceId));
+  if (filters.locationId) conditions.push(eq(pages.locationId as any, filters.locationId));
+  if (filters.blueprintId) conditions.push(eq(pages.blueprintId as any, filters.blueprintId));
+  if (filters.scoreMin !== undefined) conditions.push(sql`${pages.qualityScore} >= ${filters.scoreMin}`);
+  if (filters.scoreMax !== undefined) conditions.push(sql`${pages.qualityScore} <= ${filters.scoreMax}`);
+  const [{ n }] = await db.select({ n: count() }).from(pages).where(and(...conditions));
+  const sample = await db.select({ title: pages.title, slug: pages.slug, tier: pages.tier as any, qualityScore: pages.qualityScore }).from(pages).where(and(...conditions)).orderBy(desc(pages.qualityScore)).limit(5) as any[];
+  return { count: Number(n), sample };
+}
+
+export async function bulkSetPageTier(websiteId: string, tier: number, filters: BulkTierFilters): Promise<{ affected: number; slugs: string[] }> {
+  const conditions = [eq(pages.websiteId, websiteId), eq(pages.status, "published" as any)];
+  if (filters.serviceId) conditions.push(eq(pages.serviceId as any, filters.serviceId));
+  if (filters.locationId) conditions.push(eq(pages.locationId as any, filters.locationId));
+  if (filters.blueprintId) conditions.push(eq(pages.blueprintId as any, filters.blueprintId));
+  if (filters.scoreMin !== undefined) conditions.push(sql`${pages.qualityScore} >= ${filters.scoreMin}`);
+  if (filters.scoreMax !== undefined) conditions.push(sql`${pages.qualityScore} <= ${filters.scoreMax}`);
+  const whereClause = and(...conditions);
+  const ids = await db.select({ id: pages.id, slug: pages.slug }).from(pages).where(whereClause);
+  if (ids.length === 0) return { affected: 0, slugs: [] };
+  await db.update(pages).set({ tier: tier as any, updatedAt: new Date() }).where(inArray(pages.id, ids.map(r => r.id)));
+  return { affected: ids.length, slugs: ids.map(r => r.slug) };
+}
+
 export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number; promotedSlugs: string[] }> {
   const result = await db.execute(sql`
     UPDATE pages
