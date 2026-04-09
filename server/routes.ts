@@ -2320,5 +2320,37 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     res.json({ status: "done", regenerated: done, total: services.length, results });
   });
 
+  // ── Admin: delete pages with slugs longer than minLength ──────────────────
+  app.post("/api/admin/delete-long-slug-pages/:websiteId", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.params;
+    const minLength = parseInt((req.query.minLength as string) || "300", 10);
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { pool } = await import("./db");
+
+    // First count how many will be deleted
+    const countRes = await pool.query(
+      `SELECT COUNT(*) AS c FROM pages WHERE website_id = $1 AND length(slug) >= $2`,
+      [websiteId, minLength]
+    );
+    const count = parseInt(countRes.rows[0].c, 10);
+
+    if (count === 0) return res.json({ deleted: 0, message: "No pages found with slug length >= " + minLength });
+
+    // Delete page versions first, then pages
+    await pool.query(
+      `DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1 AND length(slug) >= $2)`,
+      [websiteId, minLength]
+    );
+    await pool.query(
+      `DELETE FROM pages WHERE website_id = $1 AND length(slug) >= $2`,
+      [websiteId, minLength]
+    );
+
+    console.log(`[delete-long-slugs] Deleted ${count} pages with slug length >= ${minLength} for website ${websiteId}`);
+    res.json({ deleted: count, minLength, websiteId });
+  });
+
   return httpServer;
 }
