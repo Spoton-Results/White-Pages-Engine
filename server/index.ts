@@ -266,17 +266,18 @@ app.use((req, res, next) => {
       });
 
       // Auto 6: Weekly auto-demote — run once 5 min after startup, then every 7 days
+      // Uses runWeeklyAutoDemoteWithJobs so each run creates a visible Jobs dashboard entry
       setTimeout(async () => {
         try {
-          const { runWeeklyAutoDemote } = await import("./services/automation");
-          await runWeeklyAutoDemote();
+          const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
+          await runWeeklyAutoDemoteWithJobs();
         } catch (err) {
           console.error("[auto6] Initial auto-demote run failed (non-fatal):", err);
         }
         setInterval(async () => {
           try {
-            const { runWeeklyAutoDemote } = await import("./services/automation");
-            await runWeeklyAutoDemote();
+            const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
+            await runWeeklyAutoDemoteWithJobs();
           } catch (err) {
             console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
           }

@@ -496,11 +496,26 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     await submitUrlsToGoogle(newPageUrls);
   } catch { /* non-critical — GSC indexing is best-effort */ }
 
-  // Auto 1 + 2 + 3 + 4: Score pages, assign tiers, regen sitemap, submit T1 to Google
+  // Auto 1 + 2 + 3 + 4: Create a separate scoring job visible in the Jobs dashboard
   try {
-    const { triggerPostGenerationScoring } = await import("./automation");
-    await triggerPostGenerationScoring(job.websiteId, website);
+    const { runAutoScoringJob } = await import("./automation");
+    const scoringJob = await storage.createGenerationJob({
+      accountId: website.accountId!,
+      websiteId: job.websiteId,
+      name: `Auto-Score: ${website.domain}`,
+      status: "pending",
+      totalPages: 0,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+      settings: { type: "auto_scoring" },
+    });
+    setImmediate(() => runAutoScoringJob(scoringJob.id, website).catch(err => {
+      console.error("[auto1] Scoring background job failed:", err);
+      storage.updateGenerationJob(scoringJob.id, { status: "error", completedAt: new Date() }).catch(() => {});
+    }));
+    console.log(`[auto1] Scoring job ${scoringJob.id} queued for ${website.domain}`);
   } catch (err) {
-    console.error("[auto1] Post-generation automation failed (non-fatal):", err);
+    console.error("[auto1] Failed to create scoring job (non-fatal):", err);
   }
 }

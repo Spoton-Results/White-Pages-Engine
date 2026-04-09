@@ -855,6 +855,14 @@ export async function getUnscoredPages(websiteId: string, limit = 500): Promise<
     .limit(limit) as any;
 }
 
+export async function countUnscoredPages(websiteId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`COUNT(*)::int` })
+    .from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), isNull(pages.qualityScore)));
+  return row?.count ?? 0;
+}
+
 export interface BulkTierFilters {
   serviceId?: string;
   locationId?: string;

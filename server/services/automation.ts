@@ -332,6 +332,172 @@ Nexus Platform — ${new Date().toDateString()}
 `;
 }
 
+// ─── Auto 1 + 2: Background scoring job (visible in Jobs dashboard) ──────────
+
+export async function runAutoScoringJob(
+  jobId: string,
+  website: { id: string; domain: string; settings?: any; accountId?: string },
+): Promise<void> {
+  const settings = getAutomationSettings(website);
+  if (!settings.autoScoreAfterGeneration) {
+    await storage.updateGenerationJob(jobId, { status: "completed", completedAt: new Date() });
+    return;
+  }
+
+  await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
+
+  try {
+    const { scorePageContent } = await import("./scoring");
+    const blueprint = (website.settings as any)?.defaultBlueprintId
+      ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+      : null;
+    const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? settings.tier1Threshold;
+
+    const totalUnscored = await storage.countUnscoredPages(website.id);
+    await storage.updateGenerationJob(jobId, { totalPages: totalUnscored || 1 });
+
+    let processed = 0, passed = 0, failed = 0;
+
+    while (true) {
+      const currentJob = await storage.getGenerationJob(jobId);
+      if (currentJob?.status === "cancelled") {
+        console.log(`[auto1] Scoring job ${jobId} cancelled`);
+        break;
+      }
+
+      const unscored = await storage.getUnscoredPages(website.id, 500);
+      if (unscored.length === 0) break;
+
+      for (const p of unscored) {
+        try {
+          const version = await storage.getActivePageVersion(p.id);
+          const banks = await storage.getVariationBanks(website.id, p.title.split(" in ")[0] || "");
+          const scoreResult = scorePageContent(
+            version?.contentHtml || "", p.metaDescription || "", p.title, p.wordCount || 0, banks, minScoreForTier1,
+          );
+          await storage.updatePageScore(p.id, scoreResult.total, scoreResult as any, scoreResult.recommendedTier);
+          passed++;
+        } catch {
+          failed++;
+        }
+        processed++;
+      }
+
+      await storage.updateGenerationJob(jobId, { processedPages: processed, passedPages: passed, failedPages: failed });
+      if (unscored.length < 500) break;
+    }
+
+    // Auto 2: Assign tiers after scoring
+    if (settings.autoAssignTiersAfterScoring) {
+      console.log(`[auto2] Assigning tiers for ${website.domain}`);
+      const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(website.id, settings.tier1Threshold);
+      let demoted = 0;
+      if (settings.applyTier3) {
+        const r = await storage.bulkSetTier3(website.id, settings.tier2Threshold);
+        demoted = r.demoted;
+      }
+      console.log(`[auto2] Tiers assigned — promoted:${promoted} demoted:${demoted}`);
+
+      if (settings.googleIndexingEnabled && promotedSlugs.length > 0) {
+        submitTier1UrlsToGoogle(website.id, promotedSlugs, website).catch(() => {});
+      }
+      if (promoted > 0 || demoted > 0) {
+        const pDomain = (website.settings as any)?.parentDomain;
+        const pPath = (website.settings as any)?.proxyPath || "";
+        const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+        scheduleSitemapRegen(website.id, website.domain, canonBase, settings.sitemapRegenDebounceMinutes * 60 * 1000);
+      }
+    }
+
+    await storage.updateGenerationJob(jobId, {
+      status: "completed",
+      completedAt: new Date(),
+      processedPages: processed,
+      passedPages: passed,
+      failedPages: failed,
+    });
+    console.log(`[auto1] Scoring job complete — ${passed} scored, ${failed} failed for ${website.domain}`);
+  } catch (err) {
+    console.error(`[auto1] Scoring job ${jobId} failed:`, err);
+    await storage.updateGenerationJob(jobId, { status: "error", completedAt: new Date() });
+  }
+}
+
+// ─── Auto 6: Weekly demote with Jobs dashboard visibility ─────────────────────
+
+export async function runWeeklyAutoDemoteWithJobs(): Promise<void> {
+  console.log("[auto6] Running weekly auto-demote check (with job tracking)...");
+  try {
+    const allWebsites = await storage.getWebsites();
+    for (const website of allWebsites) {
+      const settings = getAutomationSettings(website);
+      const { autodemoteZeroImpressionDays } = settings;
+      try {
+        const candidates = await storage.getZeroImpressionTier1Pages(website.id, autodemoteZeroImpressionDays);
+        if (candidates.length === 0) continue;
+
+        // Create a job record so it's visible in the Jobs dashboard
+        const demoteJob = await storage.createGenerationJob({
+          accountId: website.accountId!,
+          websiteId: website.id,
+          name: `Auto-Demote: ${website.domain}`,
+          status: "running",
+          totalPages: candidates.length,
+          processedPages: 0,
+          passedPages: 0,
+          failedPages: 0,
+          settings: { type: "auto_demote", reason: `Zero impressions for ${autodemoteZeroImpressionDays} days` },
+        });
+
+        let processed = 0, failed = 0;
+        console.log(`[auto6] ${website.domain}: demoting ${candidates.length} zero-impression T1 page(s)`);
+        for (const page of candidates) {
+          try {
+            await storage.updatePageTier(page.id, 2);
+            await storage.createDemotionLog({
+              websiteId: website.id,
+              pageId: page.id,
+              fromTier: 1,
+              toTier: 2,
+              reason: `Zero impressions for more than ${autodemoteZeroImpressionDays} days`,
+            });
+            processed++;
+          } catch {
+            failed++;
+          }
+        }
+
+        await storage.createAdminNotification({
+          websiteId: website.id,
+          type: "auto_demote",
+          title: "Auto-demotion completed",
+          message: `${processed} Tier 1 page(s) were demoted to Tier 2 due to zero impressions for more than ${autodemoteZeroImpressionDays} days.`,
+          metadata: { count: processed, demotedAt: new Date().toISOString() },
+        });
+
+        const pDomain = (website.settings as any)?.parentDomain;
+        const pPath = (website.settings as any)?.proxyPath || "";
+        const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+        scheduleSitemapRegen(website.id, website.domain, canonBase, 60 * 1000);
+
+        await storage.updateGenerationJob(demoteJob.id, {
+          status: "completed",
+          completedAt: new Date(),
+          processedPages: processed,
+          passedPages: processed,
+          failedPages: failed,
+        });
+        console.log(`[auto6] ${website.domain}: demote job done — ${processed} demoted, ${failed} failed`);
+      } catch (err) {
+        console.error(`[auto6] Failed for ${website.domain}:`, err);
+      }
+    }
+    console.log("[auto6] Weekly auto-demote complete.");
+  } catch (err) {
+    console.error("[auto6] runWeeklyAutoDemoteWithJobs failed:", err);
+  }
+}
+
 async function sendEmail(to: string[], subject: string, body: string): Promise<void> {
   const smtpUrl = process.env.SMTP_URL;
   if (!smtpUrl) {
