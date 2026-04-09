@@ -106,6 +106,140 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
   return [statePages, cityPages, stateDisplayName, siblingServices];
 }
 
+const US_STATE_ABBRS = new Set([
+  "al","ak","az","ar","ca","co","ct","de","dc","fl","ga","hi","id","il","in","ia","ks","ky","la",
+  "me","md","ma","mi","mn","ms","mo","mt","ne","nv","nh","nj","nm","ny","nc","nd","oh","ok",
+  "or","pa","ri","sc","sd","tn","tx","ut","vt","va","wa","wv","wi","wy",
+]);
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function titleCase(slug: string): string {
+  return slug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Returns { html } to serve content or { redirect } to redirect, or null for true 404
+async function tryGenerateDynamicPage(
+  slug: string, website: any, brand: any,
+): Promise<{ html: string } | { redirect: string } | null> {
+  try {
+    const inIdx = slug.lastIndexOf("-in-");
+    if (inIdx < 1) return null;
+
+    const serviceSlugFromUrl = slug.slice(0, inIdx);
+    const locationSlug = slug.slice(inIdx + 4);
+    if (!serviceSlugFromUrl || !locationSlug) return null;
+
+    const proxyPath = (website.settings as any)?.proxyPath || "";
+
+    // ── Step 1: abbreviation format? try to find/redirect to full-name version ──
+    const cityMatch = locationSlug.match(/^(.+)-([a-z]{2})$/);
+    if (cityMatch && US_STATE_ABBRS.has(cityMatch[2])) {
+      const stateAbbr = cityMatch[2].toUpperCase();
+      const stateRec = await storage.getStateDataByAbbr(stateAbbr);
+      if (stateRec) {
+        const citySlug = cityMatch[1];
+        const fullNameSlug = `${serviceSlugFromUrl}-in-${citySlug}-${slugify(stateRec.stateName)}`;
+        const existingPage = await storage.getPageBySlug(website.id, fullNameSlug);
+        if (existingPage?.status === "published") {
+          // Redirect to the canonical full-name URL
+          return { redirect: `${proxyPath}/${fullNameSlug}` };
+        }
+
+        // No full-name page either — try generating dynamically
+        const bankServices = await storage.getVariationBankServices(website.id);
+        const matchedService = bankServices.find(s => slugify(s) === serviceSlugFromUrl)
+          || bankServices.find(s => serviceSlugFromUrl.startsWith(slugify(s).slice(0, 12)));
+        if (matchedService) {
+          const banks = await storage.getVariationBanks(website.id, matchedService);
+          if (banks.length) {
+            const cityName = titleCase(citySlug);
+            const result = buildVariationPage(
+              matchedService, slugify(matchedService), cityName, "city",
+              stateRec.stateName, stateAbbr,
+              brand?.name || website.name || website.domain,
+              banks, stateRec, null, undefined, undefined, website.domain, undefined, proxyPath,
+            );
+            // Use full-name slug as canonical
+            const canonicalSlug = `${serviceSlugFromUrl}-in-${citySlug}-${slugify(stateRec.stateName)}`;
+            const syntheticPage = {
+              id: "dynamic-" + canonicalSlug, slug: canonicalSlug,
+              title: result.title, h1: result.h1, metaDescription: result.metaDescription,
+              pageType: "service_city", websiteId: website.id, status: "published",
+              publishedAt: new Date(), updatedAt: new Date(),
+            };
+            const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
+            return { html: renderPageHtml(syntheticPage, { contentHtml: result.contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
+          }
+        }
+      }
+    }
+
+    // ── Step 2: full state-name format — no page in DB, try to generate ────────
+    const stateRec = await storage.getStateDataByName(titleCase(locationSlug))
+      || (locationSlug.includes("-")
+        ? await (async () => {
+            // Try matching last word(s) as state name
+            const parts = locationSlug.split("-");
+            for (let i = 1; i < parts.length; i++) {
+              const candidate = parts.slice(i).join(" ");
+              const r = await storage.getStateDataByName(
+                candidate.replace(/\b\w/g, c => c.toUpperCase())
+              );
+              if (r) return r;
+            }
+            return undefined;
+          })()
+        : undefined);
+
+    if (!stateRec) return null;
+
+    // For city pages with full state name: extract city = everything before state slug
+    const stateSlug = slugify(stateRec.stateName);
+    let cityName: string;
+    let locationType: "city" | "state";
+    if (locationSlug === stateSlug) {
+      locationType = "state";
+      cityName = stateRec.stateName;
+    } else if (locationSlug.endsWith(`-${stateSlug}`)) {
+      locationType = "city";
+      cityName = titleCase(locationSlug.slice(0, -(stateSlug.length + 1)));
+    } else {
+      return null;
+    }
+
+    const bankServices = await storage.getVariationBankServices(website.id);
+    const matchedService = bankServices.find(s => slugify(s) === serviceSlugFromUrl)
+      || bankServices.find(s => serviceSlugFromUrl.startsWith(slugify(s).slice(0, 12)));
+    if (!matchedService) return null;
+
+    const banks = await storage.getVariationBanks(website.id, matchedService);
+    if (!banks.length) return null;
+
+    const locationName = locationType === "city" ? cityName : stateRec.stateName;
+    const result = buildVariationPage(
+      matchedService, slugify(matchedService), locationName, locationType,
+      stateRec.stateName, stateRec.stateAbbr,
+      brand?.name || website.name || website.domain,
+      banks, stateRec, null, undefined, undefined, website.domain, undefined, proxyPath,
+    );
+    const syntheticPage = {
+      id: "dynamic-" + slug, slug,
+      title: result.title, h1: result.h1, metaDescription: result.metaDescription,
+      pageType: locationType === "city" ? "service_city" : "state_hub",
+      websiteId: website.id, status: "published",
+      publishedAt: new Date(), updatedAt: new Date(),
+    };
+    const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
+    return { html: renderPageHtml(syntheticPage, { contentHtml: result.contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
+  } catch (err) {
+    console.error("[dynamic-page] error for slug", slug, err);
+    return null;
+  }
+}
+
 function extractFaqSchema(contentHtml: string, pageUrl: string): string | null {
   const faqIdx = contentHtml.search(/Frequently Asked Questions/i);
   if (faqIdx === -1) return null;
@@ -402,7 +536,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       <div class="loc-grid">
         ${(navData.siblingServices ?? []).map(p => {
           const svcName = p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim();
-          return `<a href="/${p.slug}">${svcName}</a>`;
+          return `<a href="${proxyPath}/${p.slug}">${svcName}</a>`;
         }).join("\n        ")}
       </div>
     </div>
@@ -413,7 +547,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     <div class="loc-nav">
       <div class="loc-nav-title">Cities in ${navData.stateDisplayName || "this state"}</div>
       <div class="loc-grid">
-        ${navData.cityPages.map(p => `<a href="/${p.slug}">${p.displayName}</a>`).join("\n        ")}
+        ${navData.cityPages.map(p => `<a href="${proxyPath}/${p.slug}">${p.displayName}</a>`).join("\n        ")}
       </div>
     </div>
   </div>` : ""}
@@ -423,7 +557,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     <div class="loc-nav">
       <div class="loc-nav-title">Explore All Locations</div>
       <div class="loc-grid">
-        ${navData.statePages.map(p => `<a href="/${p.slug}">${p.displayName}</a>`).join("\n        ")}
+        ${navData.statePages.map(p => `<a href="${proxyPath}/${p.slug}">${p.displayName}</a>`).join("\n        ")}
       </div>
     </div>
   </div>` : ""}
@@ -1290,19 +1424,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const page = await storage.getPageBySlug(website.id, slug);
+    const brandProfiles = await storage.getBrandProfiles(website.accountId);
+    const brand = brandProfiles[0];
     if (!page || page.status !== "published") {
+      const dynamic = await tryGenerateDynamicPage(slug, website, brand);
+      if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
+      if (dynamic && "html" in dynamic) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        console.log(`[dynamic-page] 200 on-the-fly: ${slug}`);
+        return res.send(dynamic.html);
+      }
       return res.status(404).send(notFoundHtml("Page not found or not yet published"));
     }
 
     // Get active content version
     const version = await storage.getActivePageVersion(page.id);
 
-    // Get brand profile for branding
-    const brandProfiles = await storage.getBrandProfiles(website.accountId);
-    const brand = brandProfiles[0];
-
-    const [statePages, cityPages, stateDisplayName] = await resolveNavData(page, website.id);
-    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName });
+    const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
+    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
@@ -1491,14 +1631,22 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
       // Serve a specific page by slug
       const page = await storage.getPageBySlug(website.id, rawSlug);
+      const brandProfiles = await storage.getBrandProfiles(website.accountId);
+      const brand = brandProfiles[0];
       if (!page || page.status !== "published") {
+        const dynamic = await tryGenerateDynamicPage(rawSlug, website, brand);
+        if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
+        if (dynamic && "html" in dynamic) {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          console.log(`[dynamic-page] 200 on-the-fly: ${host}/${rawSlug}`);
+          return res.send(dynamic.html);
+        }
         console.log(`[page-serve] 404 ${host}/${rawSlug} — ${!page ? "not found" : "not published"}`);
         return res.status(404).send(notFoundHtml("Page not found or not yet published"));
       }
 
       const version = await storage.getActivePageVersion(page.id);
-      const brandProfiles = await storage.getBrandProfiles(website.accountId);
-      const brand = brandProfiles[0];
       const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
       const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
