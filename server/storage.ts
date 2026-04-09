@@ -968,6 +968,112 @@ export async function getScoreDistribution(websiteId: string): Promise<Array<{ b
   return (result as any).rows ?? [];
 }
 
+// ─── P8: Top Services / States by Tier ───────────────────────────────────────
+
+export async function getTopServicesByTier1(websiteId: string, limit = 10): Promise<Array<{ name: string; count: number }>> {
+  const rows = await db.execute(sql`
+    SELECT s.name, COUNT(*)::int AS count
+    FROM pages p
+    JOIN services s ON p.service_id = s.id
+    WHERE p.website_id = ${websiteId} AND p.tier = 1 AND p.status = 'published'
+    GROUP BY s.name ORDER BY count DESC LIMIT ${limit}
+  `);
+  return (rows as any).rows ?? [];
+}
+
+export async function getTopStatesByTier1(websiteId: string, limit = 10): Promise<Array<{ stateCode: string; count: number }>> {
+  const rows = await db.execute(sql`
+    SELECT l.state_code AS "stateCode", COUNT(*)::int AS count
+    FROM pages p
+    JOIN locations l ON p.location_id = l.id
+    WHERE p.website_id = ${websiteId} AND p.tier = 1 AND p.status = 'published'
+    GROUP BY l.state_code ORDER BY count DESC LIMIT ${limit}
+  `);
+  return (rows as any).rows ?? [];
+}
+
+export async function getThinBankWarnings(websiteId: string, threshold = 60): Promise<Array<{ service: string; completenessScore: number; isEligibleForTier1: boolean; avgVariationsPerSection: number }>> {
+  const rows = await db.execute(sql`
+    SELECT service, completeness_score AS "completenessScore",
+           is_eligible_for_tier1 AS "isEligibleForTier1",
+           avg_variations_per_section AS "avgVariationsPerSection"
+    FROM variation_bank_completeness
+    WHERE website_id = ${websiteId} AND completeness_score < ${threshold}
+    ORDER BY completeness_score ASC LIMIT 20
+  `);
+  return (rows as any).rows ?? [];
+}
+
+// ─── P6: Score + Apply Tiers in One Shot ──────────────────────────────────────
+
+export async function getRecentlyScoredPages(websiteId: string, limit = 50): Promise<Array<{ id: string; title: string; slug: string; qualityScore: number | null; tier: number; updatedAt: Date }>> {
+  return db.select({
+    id: pages.id, title: pages.title, slug: pages.slug,
+    qualityScore: pages.qualityScore, tier: pages.tier, updatedAt: pages.updatedAt,
+  })
+    .from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), sql`${pages.qualityScore} IS NOT NULL`))
+    .orderBy(desc(pages.updatedAt))
+    .limit(limit);
+}
+
+// ─── P7: Internal Links ────────────────────────────────────────────────────────
+
+export async function getInternalLinkStats(websiteId: string): Promise<{
+  totalLinks: number; pagesWithLinks: number; totalPublished: number;
+  topLinkedPages: Array<{ title: string; slug: string; inboundCount: number }>;
+}> {
+  const [totalRes, withLinksRes, publishedRes] = await Promise.all([
+    db.execute(sql`SELECT COUNT(*)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
+    db.execute(sql`SELECT COUNT(DISTINCT from_page_id)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
+    db.execute(sql`SELECT COUNT(*)::int AS count FROM pages WHERE website_id = ${websiteId} AND status = 'published'`),
+  ]);
+  const topRes = await db.execute(sql`
+    SELECT p.title, p.slug, COUNT(*)::int AS "inboundCount"
+    FROM internal_links il JOIN pages p ON il.to_page_id = p.id
+    WHERE il.website_id = ${websiteId}
+    GROUP BY p.id, p.title, p.slug ORDER BY "inboundCount" DESC LIMIT 10
+  `);
+  return {
+    totalLinks: (totalRes as any).rows?.[0]?.count ?? 0,
+    pagesWithLinks: (withLinksRes as any).rows?.[0]?.count ?? 0,
+    totalPublished: (publishedRes as any).rows?.[0]?.count ?? 0,
+    topLinkedPages: (topRes as any).rows ?? [],
+  };
+}
+
+export async function clearInternalLinks(websiteId: string): Promise<void> {
+  await db.delete(internalLinks).where(eq(internalLinks.websiteId, websiteId));
+}
+
+export async function saveInternalLinks(
+  links: Array<{ websiteId: string; fromPageId: string; toPageId: string; anchorText: string; linkType: string }>
+): Promise<number> {
+  if (links.length === 0) return 0;
+  const CHUNK = 200;
+  let saved = 0;
+  for (let i = 0; i < links.length; i += CHUNK) {
+    const batch = links.slice(i, i + CHUNK);
+    await db.insert(internalLinks).values(batch as any).onConflictDoNothing();
+    saved += batch.length;
+  }
+  return saved;
+}
+
+// Get pages eligible for internal linking (has both serviceId + locationId)
+export async function getPagesForLinking(websiteId: string, limit = 5000): Promise<Array<{
+  id: string; title: string; slug: string; pageType: string | null;
+  serviceId: string | null; locationId: string | null;
+}>> {
+  return db.select({
+    id: pages.id, title: pages.title, slug: pages.slug, pageType: pages.pageType,
+    serviceId: pages.serviceId, locationId: pages.locationId,
+  })
+    .from(pages)
+    .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published")))
+    .limit(limit);
+}
+
 // ─── Hub Pages ────────────────────────────────────────────────────────────────
 
 export async function getHubPages(websiteId: string): Promise<HubPage[]> {

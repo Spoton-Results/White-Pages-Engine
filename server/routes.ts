@@ -2407,6 +2407,155 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ ok: true, hub: updated, childCount: childLinks.length });
   });
 
+  // ── P8: Top Services / States by Tier 1 + Thin-Bank Warnings ─────────────
+
+  app.get("/api/websites/:id/top-services", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "10"), 50);
+    return res.json(await storage.getTopServicesByTier1(req.params.id as string, limit));
+  });
+
+  app.get("/api/websites/:id/top-states", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "10"), 50);
+    return res.json(await storage.getTopStatesByTier1(req.params.id as string, limit));
+  });
+
+  app.get("/api/websites/:id/thin-bank-warnings", requireAuth, async (req: Request, res: Response) => {
+    const threshold = Math.min(parseInt((req.query.threshold as string) || "60"), 100);
+    return res.json(await storage.getThinBankWarnings(req.params.id as string, threshold));
+  });
+
+  // ── P6: Score & Promote in One Shot ───────────────────────────────────────
+
+  app.post("/api/websites/:id/score-and-promote", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const { tier1Threshold = 80, tier3Threshold = 55, applyTier3 = false } = req.body;
+
+    // Return immediately — runs in background
+    res.json({ ok: true, message: "Score & Promote job started. Refresh stats in ~30s." });
+
+    setImmediate(async () => {
+      try {
+        const { scorePageContent } = await import("./services/scoring");
+        const blueprint = (website.settings as any)?.defaultBlueprintId
+          ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+          : null;
+        const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+
+        // 1. Score all unscored pages
+        let scored = 0;
+        while (true) {
+          const unscored = await storage.getUnscoredPages(websiteId, 500);
+          if (unscored.length === 0) break;
+          for (const p of unscored) {
+            try {
+              const version = await storage.getActivePageVersion(p.id);
+              const banks = await storage.getVariationBanks(websiteId, p.title.split(" in ")[0] || "");
+              const scoreResult = scorePageContent(
+                version?.contentHtml || "", p.metaDescription || "", p.title, p.wordCount || 0, banks, minScoreForTier1,
+              );
+              await storage.updatePageScore(p.id, scoreResult.total, scoreResult as any, scoreResult.recommendedTier);
+              scored++;
+            } catch { /* skip */ }
+          }
+          if (unscored.length < 500) break;
+        }
+
+        // 2. Apply tier assignments
+        const { promoted } = await storage.bulkUpdatePageTiers(websiteId, tier1Threshold);
+        let demoted = 0;
+        if (applyTier3) {
+          const r = await storage.bulkSetTier3(websiteId, tier3Threshold);
+          demoted = r.demoted;
+        }
+
+        console.log(`[score-and-promote] Done — scored:${scored} promoted:${promoted} demoted:${demoted}`);
+      } catch (e) {
+        console.error("[score-and-promote] error:", e);
+      }
+    });
+  });
+
+  // ── P9: Per-page scoring ───────────────────────────────────────────────────
+
+  app.post("/api/pages/:id/score", requireAuth, async (req: Request, res: Response) => {
+    const page = await storage.getPage(req.params.id as string);
+    if (!page) return res.status(404).json({ error: "Page not found" });
+    const version = await storage.getActivePageVersion(page.id);
+    const website = await storage.getWebsite(page.websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const blueprint = (website.settings as any)?.defaultBlueprintId
+      ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+      : null;
+    const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+    const { scorePageContent } = await import("./services/scoring");
+    const banks = await storage.getVariationBanks(page.websiteId, page.title.split(" in ")[0] || "");
+    const result = scorePageContent(
+      version?.contentHtml || "", page.metaDescription || "", page.title, page.wordCount || 0, banks, minScoreForTier1,
+    );
+    await storage.updatePageScore(page.id, result.total, result as any, result.recommendedTier);
+    return res.json({ ok: true, score: result.total, tier: result.recommendedTier, breakdown: result });
+  });
+
+  app.get("/api/websites/:id/recently-scored", requireAuth, async (req: Request, res: Response) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "50"), 200);
+    return res.json(await storage.getRecentlyScoredPages(req.params.id as string, limit));
+  });
+
+  // Unauthenticated webhook — score a single page by slug
+  // Requires X-Nexus-Key header matching NEXUS_WEBHOOK_KEY env var
+  app.post("/api/webhooks/score-page", async (req: Request, res: Response) => {
+    const key = req.headers["x-nexus-key"];
+    const expected = process.env.NEXUS_WEBHOOK_KEY;
+    if (expected && key !== expected) return res.status(401).json({ error: "Unauthorized" });
+
+    const { slug, websiteId } = req.body;
+    if (!slug || !websiteId) return res.status(400).json({ error: "slug and websiteId required" });
+
+    const page = await storage.getPageBySlug(websiteId, slug);
+    if (!page) return res.status(404).json({ error: "Page not found" });
+
+    const version = await storage.getActivePageVersion(page.id);
+    const website = await storage.getWebsite(page.websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { scorePageContent } = await import("./services/scoring");
+    const banks = await storage.getVariationBanks(page.websiteId, page.title.split(" in ")[0] || "");
+    const result = scorePageContent(
+      version?.contentHtml || "", page.metaDescription || "", page.title, page.wordCount || 0, banks, 80,
+    );
+    await storage.updatePageScore(page.id, result.total, result as any, result.recommendedTier);
+    return res.json({ ok: true, slug, score: result.total, tier: result.recommendedTier });
+  });
+
+  // ── P7: Internal Links ─────────────────────────────────────────────────────
+
+  app.get("/api/websites/:id/internal-links/stats", requireAuth, async (req: Request, res: Response) => {
+    return res.json(await storage.getInternalLinkStats(req.params.id as string));
+  });
+
+  app.post("/api/websites/:id/internal-links/rebuild", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    res.json({ ok: true, message: "Internal link rebuild started. Refresh stats in ~20s." });
+
+    setImmediate(async () => {
+      try {
+        const { buildInternalLinks } = await import("./services/internal-links");
+        const allPages = await storage.getPagesForLinking(websiteId, 5000);
+        const links = buildInternalLinks(websiteId, allPages as any);
+        await storage.clearInternalLinks(websiteId);
+        const saved = await storage.saveInternalLinks(links);
+        console.log(`[internal-links] Rebuilt: ${saved} links for website ${websiteId}`);
+      } catch (e) {
+        console.error("[internal-links] rebuild error:", e);
+      }
+    });
+  });
+
   // ── Leads Admin ───────────────────────────────────────────────────────────
 
   app.get("/api/websites/:id/leads", requireAuth, async (req: Request, res: Response) => {
