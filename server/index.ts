@@ -75,6 +75,42 @@ app.use((req, res, next) => {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`);
     console.log("[startup] Database indexes ensured.");
+
+    // Automation tables (added in automation phase)
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS admin_notifications (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      type text NOT NULL, title text NOT NULL, message text NOT NULL,
+      metadata jsonb, read_at timestamp, created_at timestamp NOT NULL DEFAULT NOW()
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS demotion_logs (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      page_id varchar NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+      from_tier integer NOT NULL, to_tier integer NOT NULL,
+      reason text NOT NULL, created_at timestamp NOT NULL DEFAULT NOW()
+    )`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_admin_notif_website ON admin_notifications(website_id, created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_demotion_logs_website ON demotion_logs(website_id, created_at DESC)`);
+    console.log("[startup] Automation tables ensured.");
+
+    // Domain migration: update old subdomain-based domains to root domain + /pages proxyPath
+    // Idempotent — only fires when the old domain is still present
+    await db.execute(sql`
+      UPDATE websites
+      SET domain = 'spotonresults.com',
+          name   = CASE WHEN name = 'SpotOn Results Main' THEN 'SpotOn Results' ELSE name END,
+          settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
+      WHERE domain = 'pages.spotonresults.com'
+    `);
+    await db.execute(sql`
+      UPDATE websites
+      SET domain = 'subtrackers.spotonresults.com',
+          name   = CASE WHEN name = 'Subtracker pages' OR name = 'SubTrackers' THEN 'SubTrackers' ELSE name END,
+          settings = settings || '{"proxyPath":"/pages","parentDomain":"subtrackers.spotonresults.com"}'::jsonb
+      WHERE domain = 'pagessubtrackers.spotonresults.com'
+    `);
+    console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
   } catch (err) {
     console.error("[startup] Schema migration failed (non-fatal):", err);
   }
