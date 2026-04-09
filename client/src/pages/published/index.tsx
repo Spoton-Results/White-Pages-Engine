@@ -229,15 +229,24 @@ export default function PublishedPagesPage() {
                 <span className="font-semibold">How pages are served: </span>
                 {currentWebsite ? (
                   <>
-                    Pages for <strong>{currentWebsite.domain}</strong> are live at{" "}
-                    <button
-                      className="font-mono bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded text-xs transition-colors inline-flex items-center gap-1"
-                      onClick={() => { navigator.clipboard.writeText(`https://${currentWebsite.domain}/`); toast({ title: "Base URL copied" }); }}
-                    >
-                      https://{currentWebsite.domain}/…
-                      <Copy className="size-3" />
-                    </button>
-                    {" "}— use <Eye className="size-3 inline" /> to preview via this platform, <ExternalLink className="size-3 inline" /> for the live customer URL.
+                    {(() => {
+                      const pd = currentWebsite.settings?.parentDomain;
+                      const pp = currentWebsite.settings?.proxyPath || "";
+                      const liveBase = pd ? `https://${pd}${pp}` : `https://${currentWebsite.domain}`;
+                      return (
+                        <>
+                          Pages for <strong>{pd || currentWebsite.domain}</strong> are live at{" "}
+                          <button
+                            className="font-mono bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded text-xs transition-colors inline-flex items-center gap-1"
+                            onClick={() => { navigator.clipboard.writeText(`${liveBase}/`); toast({ title: "Base URL copied" }); }}
+                          >
+                            {liveBase}/…
+                            <Copy className="size-3" />
+                          </button>
+                          {" "}— use <Eye className="size-3 inline" /> to preview via this platform, <ExternalLink className="size-3 inline" /> for the live customer URL.
+                        </>
+                      );
+                    })()}
                   </>
                 ) : (
                   <>
