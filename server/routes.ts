@@ -2560,6 +2560,41 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.status(201).json(hub);
   });
 
+  // Bulk-publish all draft hub pages (optionally scoped to a hubType)
+  app.post("/api/websites/:id/hub-pages/bulk-publish", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { hubType } = req.body as any;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const allHubs = await storage.getHubPages(websiteId);
+    const drafts = allHubs.filter((h: any) => h.status === "draft" && (!hubType || h.hubType === hubType));
+    const total = drafts.length;
+    if (total === 0) return res.json({ published: 0, jobId: null });
+    const label = hubType
+      ? `Publish ${hubType.charAt(0).toUpperCase() + hubType.slice(1)} Hub Drafts`
+      : "Publish All Hub Drafts";
+    const job = await storage.createGenerationJob({
+      websiteId,
+      accountId: website.accountId,
+      name: label,
+      status: "running" as any,
+      totalPages: total,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+      settings: { type: "hub_bulk_publish", hubType: hubType || "all" } as any,
+      startedAt: new Date(),
+    });
+    const published = await storage.bulkPublishHubDrafts(websiteId, hubType);
+    await storage.updateGenerationJob(job.id, {
+      status: "done" as any,
+      processedPages: published,
+      passedPages: published,
+      completedAt: new Date(),
+    });
+    return res.json({ published, jobId: job.id });
+  });
+
   app.patch("/api/websites/:id/hub-pages/:hubId", requireAuth, async (req: Request, res: Response) => {
     const { hubId } = req.params as any;
     const { name, slug, parentSlug, maxChildLinks, metaDescription, status, tier } = req.body as any;

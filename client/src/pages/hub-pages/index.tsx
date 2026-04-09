@@ -191,7 +191,7 @@ const inputStyle: React.CSSProperties = { width: "100%", border: "1px solid #d1d
 
 // ── Child Links Preview Modal ─────────────────────────────────────────────────
 
-function ChildLinksModal({ hub, websiteId, onClose }: { hub: HubPage; websiteId: string; onClose: () => void }) {
+function ChildLinksModal({ hub, websiteId, domain, onClose }: { hub: HubPage; websiteId: string; domain: string; onClose: () => void }) {
   const q = useQuery<ChildLink[]>({
     queryKey: ["/api/websites", websiteId, "hub-pages", hub.id, "child-links"],
     queryFn: () =>
@@ -226,7 +226,10 @@ function ChildLinksModal({ hub, websiteId, onClose }: { hub: HubPage; websiteId:
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {links.map(l => (
                 <div key={l.slug} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", fontSize: ".8rem" }}>
-                  <div style={{ color: "#1d4ed8", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.title}</div>
+                  <a href={`https://${domain}/${l.slug}`} target="_blank" rel="noopener noreferrer"
+                    style={{ color: "#1d4ed8", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", textDecoration: "none" }}>
+                    {l.title}
+                  </a>
                   <div style={{ color: "#9ca3af", fontSize: ".72rem", marginTop: 2 }}>
                     score: {l.qualityScore ?? "—"} · T{l.tier ?? "?"}
                   </div>
@@ -245,10 +248,12 @@ function ChildLinksModal({ hub, websiteId, onClose }: { hub: HubPage; websiteId:
 function HubCard({
   hub,
   websiteId,
+  domain,
   onRefresh,
 }: {
   hub: HubPage;
   websiteId: string;
+  domain: string;
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
@@ -301,7 +306,7 @@ function HubCard({
 
   return (
     <>
-      {showChildren && <ChildLinksModal hub={hub} websiteId={websiteId} onClose={() => setShowChildren(false)} />}
+      {showChildren && <ChildLinksModal hub={hub} websiteId={websiteId} domain={domain} onClose={() => setShowChildren(false)} />}
       <div
         data-testid={`card-hub-${hub.id}`}
         style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.25rem 1.5rem", display: "flex", flexDirection: "column", gap: 12 }}
@@ -666,6 +671,103 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
   );
 }
 
+// ── Bulk Publish Drafts Button ─────────────────────────────────────────────────
+
+function BulkPublishDraftsButton({
+  websiteId,
+  hubType,
+  draftCount,
+  onDone,
+}: {
+  websiteId: string;
+  hubType?: string;
+  draftCount: number;
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  if (draftCount === 0) return null;
+
+  const typeLabel = hubType ? hubType.charAt(0).toUpperCase() + hubType.slice(1) + " " : "";
+  const confirmMsg = `This will publish all ${draftCount.toLocaleString()} draft ${typeLabel}hub pages. Are you sure?`;
+
+  const handleConfirm = async () => {
+    setPublishing(true);
+    try {
+      const resp = await fetch(`/api/websites/${websiteId}/hub-pages/bulk-publish`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hubType }),
+      });
+      const data = await resp.json();
+      toast({ title: `Published ${(data.published ?? 0).toLocaleString()} hub pages`, description: data.jobId ? "Job logged to Jobs dashboard." : undefined });
+      setConfirming(false);
+      onDone();
+    } catch (e: any) {
+      toast({ title: "Publish failed", description: e.message, variant: "destructive" });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const isGlobal = !hubType;
+
+  return (
+    <>
+      {confirming && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => !publishing && setConfirming(false)}
+        >
+          <div
+            style={{ background: "#fff", borderRadius: 12, padding: "1.75rem 2rem", maxWidth: 440, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,.2)" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontWeight: 700, fontSize: "1rem", color: "#111827", marginBottom: "0.75rem" }}>
+              Publish {typeLabel}Hub Drafts
+            </div>
+            <div style={{ color: "#374151", fontSize: ".9rem", marginBottom: "1.25rem" }}>{confirmMsg}</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={publishing}
+                style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontWeight: 600, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                data-testid={`btn-confirm-publish-${hubType || "all"}`}
+                onClick={handleConfirm}
+                disabled={publishing}
+                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", fontWeight: 600, cursor: publishing ? "not-allowed" : "pointer" }}
+              >
+                {publishing ? "Publishing…" : `Publish ${draftCount.toLocaleString()}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <button
+        data-testid={`btn-bulk-publish-${hubType || "all"}`}
+        onClick={() => setConfirming(true)}
+        style={{
+          background: "#fff", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 600,
+          borderRadius: isGlobal ? 8 : 6,
+          padding: isGlobal ? "8px 18px" : "3px 10px",
+          fontSize: isGlobal ? ".9rem" : ".78rem",
+        }}
+      >
+        {isGlobal
+          ? `Publish All Drafts (${draftCount.toLocaleString()})`
+          : `Publish ${draftCount.toLocaleString()} Drafts`}
+      </button>
+    </>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function HubPagesPage() {
@@ -694,6 +796,8 @@ export default function HubPagesPage() {
 
   const published = hubs.filter(h => h.status === "published").length;
   const withContent = hubs.filter(h => h.content).length;
+  const draftCount = hubs.filter(h => h.status === "draft").length;
+  const domain = (currentWebsite as any)?.domain || "";
 
   return (
     <DashboardLayout>
@@ -720,6 +824,7 @@ export default function HubPagesPage() {
               ))}
             </select>
             {websiteId && <BulkGenerateHubDialog websiteId={websiteId} accountId={(currentWebsite as any)?.accountId || ""} onDone={refresh} />}
+            {websiteId && <BulkPublishDraftsButton websiteId={websiteId} draftCount={draftCount} onDone={refresh} />}
             {websiteId && <CreateHubForm websiteId={websiteId} onCreated={refresh} />}
           </div>
         </div>
@@ -763,13 +868,19 @@ export default function HubPagesPage() {
               if (group.length === 0) return null;
               return (
                 <div key={type} style={{ marginBottom: "2rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                     <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "#374151" }}>{HUB_TYPE_LABELS[type]}s</h2>
                     <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: ".75rem", fontWeight: 600, padding: "1px 8px", borderRadius: 10 }}>{group.length}</span>
+                    <BulkPublishDraftsButton
+                      websiteId={websiteId}
+                      hubType={type}
+                      draftCount={group.filter(h => h.status === "draft").length}
+                      onDone={refresh}
+                    />
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {group.map(hub => (
-                      <HubCard key={hub.id} hub={hub} websiteId={websiteId} onRefresh={refresh} />
+                      <HubCard key={hub.id} hub={hub} websiteId={websiteId} domain={domain} onRefresh={refresh} />
                     ))}
                   </div>
                 </div>

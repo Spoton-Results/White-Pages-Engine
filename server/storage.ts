@@ -1173,6 +1173,13 @@ export async function deleteHubPage(id: string): Promise<void> {
   await db.delete(hubPages).where(eq(hubPages.id, id));
 }
 
+export async function bulkPublishHubDrafts(websiteId: string, hubType?: string): Promise<number> {
+  const conditions: any[] = [eq(hubPages.websiteId, websiteId), eq(hubPages.status, "draft" as any)];
+  if (hubType) conditions.push(eq(hubPages.hubType, hubType as any));
+  const result = await db.update(hubPages).set({ status: "published" as any }).where(and(...conditions)).returning({ id: hubPages.id });
+  return result.length;
+}
+
 /**
  * Get the top N child pages for a hub, ordered by quality_score DESC.
  * - service hub → pages whose title/slug match the service keyword
