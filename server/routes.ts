@@ -810,6 +810,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ message: "Deleted" });
   });
 
+  app.post("/api/accounts/:accountId/brand-profiles/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const { name, websiteUrl, industryName } = req.body as { name?: string; websiteUrl?: string; industryName?: string };
+    if (!name) return res.status(400).json({ error: "name is required" });
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        messages: [{
+          role: "user",
+          content: `You are a brand copywriter. Given a business name, generate a brand profile for a local service business SEO site.
+
+Business name: ${name}
+${websiteUrl ? `Website: ${websiteUrl}` : ""}
+${industryName ? `Industry: ${industryName}` : ""}
+
+Return ONLY valid JSON (no markdown) with these exact keys:
+{
+  "tagline": "Short punchy tagline under 10 words",
+  "description": "2-3 sentence brand description focused on local service excellence",
+  "voiceAndTone": "2-3 sentence description of brand voice, writing style, and tone for content writers"
+}`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
+  });
+
   // ── Websites ──────────────────────────────────────────────────────────────
 
   app.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
@@ -893,6 +927,42 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ inserted, skipped: rawItems.length - inserted });
   });
 
+  app.post("/api/accounts/:accountId/locations/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const { businessType, state, count } = req.body as { businessType?: string; state?: string; count?: number };
+    if (!businessType || !state) return res.status(400).json({ error: "businessType and state are required" });
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `You are a local SEO strategist. Suggest the best target cities for a local service business to target for SEO.
+
+Business type: ${businessType}
+State: ${state}
+Number of cities to suggest: ${count || 10}
+
+Return ONLY valid JSON (no markdown):
+{
+  "suggestions": [
+    { "name": "City Name", "stateCode": "TX", "stateName": "Texas", "reason": "Why this city is a good target" }
+  ]
+}
+
+Choose cities with high population, commercial activity, or strong demand for this service type. Include a mix of major cities and up-and-coming markets.`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
+  });
+
   // ── Services ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
@@ -937,6 +1007,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/industries/:id", requireAuth, async (req: Request, res: Response) => {
     await storage.deleteIndustry((req.params.id as string));
     return res.json({ message: "Deleted" });
+  });
+
+  app.post("/api/accounts/:accountId/industries/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const { name } = req.body as { name?: string };
+    if (!name) return res.status(400).json({ error: "name is required" });
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 400,
+        messages: [{
+          role: "user",
+          content: `You are an SEO content strategist. Given an industry name, generate a description and related services for a local service business directory.
+
+Industry: ${name}
+
+Return ONLY valid JSON (no markdown):
+{
+  "description": "1-2 sentence description of this industry for SEO purposes",
+  "relatedServices": ["service1", "service2", "service3", "service4", "service5"]
+}`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
   });
 
   // ── Query Clusters ────────────────────────────────────────────────────────
@@ -2975,6 +3076,50 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     });
   });
 
+  app.post("/api/websites/:id/internal-links/ai-strategy", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    try {
+      const stats = await storage.getInternalLinkStats(websiteId);
+      const services = await storage.getServices(website.accountId);
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `You are an internal linking SEO strategist. Analyze this website's internal link health and recommend improvements.
+
+Website: ${website.name || website.domain}
+Total pages: ${(stats as any)?.totalPublished ?? "unknown"}
+Pages with internal links: ${(stats as any)?.pagesWithLinks ?? "unknown"}
+Total links: ${(stats as any)?.totalLinks ?? "unknown"}
+Services: ${services.slice(0, 10).map((s: any) => s.name).join(", ")}
+
+Return ONLY valid JSON (no markdown):
+{
+  "summary": "1 sentence assessment of current internal link health",
+  "recommendations": [
+    { "title": "Short title", "description": "What to do and why it helps SEO", "impact": "high" },
+    { "title": "Short title", "description": "What to do and why it helps SEO", "impact": "medium" },
+    { "title": "Short title", "description": "What to do and why it helps SEO", "impact": "low" }
+  ]
+}
+
+impact must be "high", "medium", or "low".`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
+  });
+
   // ── Leads Admin ───────────────────────────────────────────────────────────
 
   app.get("/api/websites/:id/leads", requireAuth, async (req: Request, res: Response) => {
@@ -2993,6 +3138,49 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     const offset = parseInt((req.query.offset as string) || "0");
     const items = await storage.getAllLeads(limit, offset);
     return res.json({ leads: items });
+  });
+
+  app.post("/api/leads/ai-qualify", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const { name, email, businessName, phone, message, pageSlug } = req.body as {
+      name?: string; email?: string; businessName?: string; phone?: string; message?: string; pageSlug?: string;
+    };
+    if (!name || !email) return res.status(400).json({ error: "name and email are required" });
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `You are a sales assistant for a local service business. Qualify this lead and draft a follow-up email reply.
+
+Lead info:
+Name: ${name}
+Email: ${email}
+Business: ${businessName || "N/A"}
+Phone: ${phone || "N/A"}
+Page they came from: ${pageSlug || "N/A"}
+Message: ${message || "(no message)"}
+
+Return ONLY valid JSON (no markdown):
+{
+  "score": 85,
+  "label": "Hot",
+  "reasoning": "1-2 sentences on why this lead is scored this way",
+  "draftReply": "A professional 3-4 sentence email reply addressing their inquiry, ready to send"
+}
+
+score is 0-100. label must be one of: "Hot", "Warm", "Cold".`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
   });
 
   // ── One-time admin fix: rewrite Related Services links to match blueprint slug format ──
@@ -3282,6 +3470,101 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     const updated = await storage.updateWebsite(req.params.id as string, { settings: merged } as any);
     const { getAutomationSettings } = await import("./services/automation");
     return res.json({ ok: true, settings: getAutomationSettings(updated) });
+  });
+
+  app.post("/api/websites/:id/automation/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    try {
+      const { getAutomationSettings } = await import("./services/automation");
+      const current = getAutomationSettings(website);
+      const totalPages = await storage.getPageCount(websiteId, "published");
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        messages: [{
+          role: "user",
+          content: `You are an SEO automation expert. Suggest optimal automation threshold settings for a local SEO content site.
+
+Website: ${website.name || website.domain}
+Total published pages: ${totalPages}
+Current tier1Threshold: ${current.tier1Threshold}
+Current tier2Threshold: ${current.tier2Threshold}
+Current fallbackHitThreshold: ${current.fallbackHitThreshold}
+Current fallbackHitWindowDays: ${current.fallbackHitWindowDays}
+Current autodemoteZeroImpressionDays: ${current.autodemoteZeroImpressionDays}
+Current thinBankThreshold: ${current.thinBankThreshold}
+
+Return ONLY valid JSON (no markdown):
+{
+  "tier1Threshold": 80,
+  "tier2Threshold": 50,
+  "fallbackHitThreshold": 3,
+  "fallbackHitWindowDays": 30,
+  "autodemoteZeroImpressionDays": 90,
+  "thinBankThreshold": 60,
+  "reasoning": "2-3 sentence explanation of why these settings are recommended"
+}`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
+  });
+
+  app.post("/api/accounts/:accountId/ai-checklist", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const accountId = req.params.accountId as string;
+    try {
+      const [websites, services, locations, industries, brands] = await Promise.all([
+        storage.getWebsites(accountId),
+        storage.getServices(accountId),
+        storage.getLocations(accountId),
+        storage.getIndustries(accountId),
+        storage.getBrandProfiles(accountId),
+      ]);
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const r = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 700,
+        messages: [{
+          role: "user",
+          content: `You are an SEO platform onboarding expert. Based on this account's current setup state, generate a prioritized action checklist.
+
+Account setup state:
+- Websites: ${websites.length}
+- Brand profiles: ${brands.length}
+- Industries: ${industries.length}
+- Services: ${services.length}
+- Locations: ${locations.length}
+
+Return ONLY valid JSON (no markdown):
+{
+  "healthScore": 72,
+  "summary": "1-2 sentence assessment of account readiness",
+  "steps": [
+    { "title": "Short action title", "description": "What to do and why it matters for SEO", "priority": "critical", "done": false },
+    { "title": "Short action title", "description": "What to do and why it matters for SEO", "priority": "important", "done": true }
+  ]
+}
+
+healthScore is 0-100. priority must be "critical", "important", or "nice-to-have". Set done=true for items that are already set up based on the state above.`,
+        }],
+      });
+      const raw = (r.content[0] as any).text.trim();
+      const json = JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/, "").trim());
+      return res.json(json);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI error" });
+    }
   });
 
   // ── Admin Notifications (Auto 5, 6, 7) ────────────────────────────────────────

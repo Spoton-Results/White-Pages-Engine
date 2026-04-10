@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Briefcase, Building2, Phone, Mail, Trash2 } from "lucide-react";
+import { Plus, Briefcase, Building2, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -19,7 +19,12 @@ export default function BrandProfilesPage() {
   const { toast } = useToast();
   const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
-  const { register, handleSubmit, reset } = useForm<any>();
+  const { register, handleSubmit, reset, setValue, watch } = useForm<any>();
+
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<{ tagline: string; description: string; voiceAndTone: string } | null>(null);
+
+  const brandName = watch("name");
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -40,6 +45,7 @@ export default function BrandProfilesPage() {
       qc.invalidateQueries({ queryKey: ["/api/brand-profiles"] });
       setShowCreate(false);
       reset();
+      setAiResult(null);
       toast({ title: "Brand profile created" });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -52,6 +58,36 @@ export default function BrandProfilesPage() {
       toast({ title: "Brand profile deleted" });
     },
   });
+
+  async function handleAiSuggest() {
+    if (!brandName?.trim()) {
+      toast({ title: "Enter brand name first", variant: "destructive" });
+      return;
+    }
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const result = await api.post<any>(`/api/accounts/${selectedAccount}/brand-profiles/ai-suggest`, {
+        name: brandName,
+        websiteUrl: watch("websiteUrl"),
+        industryName: watch("industryName"),
+      });
+      setAiResult(result);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function applyAiResult() {
+    if (!aiResult) return;
+    setValue("tagline", aiResult.tagline);
+    setValue("description", aiResult.description);
+    setValue("voiceAndTone", aiResult.voiceAndTone);
+    setAiResult(null);
+    toast({ title: "Fields filled from AI" });
+  }
 
   return (
     <DashboardLayout>
@@ -131,14 +167,43 @@ export default function BrandProfilesPage() {
         )}
       </div>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(o) => { setShowCreate(o); if (!o) { reset(); setAiResult(null); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Create Brand Profile</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(d => create.mutate(d))} className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Brand Name</Label>
-              <Input placeholder="Acme Plumbing Co" {...register("name", { required: true })} />
+              <div className="flex items-center justify-between">
+                <Label>Brand Name</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
+                  disabled={aiLoading || !brandName?.trim()}
+                  onClick={handleAiSuggest}
+                  data-testid="button-brand-ai-suggest"
+                >
+                  {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                  {aiLoading ? "Generating…" : "AI Generate Fields"}
+                </Button>
+              </div>
+              <Input placeholder="Acme Plumbing Co" {...register("name", { required: true })} data-testid="input-brand-name" />
             </div>
+
+            {aiResult && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-violet-700 text-xs font-semibold">
+                  <CheckCircle2 className="size-3.5" />AI Generated Fields
+                </div>
+                <p className="text-xs text-violet-800 italic">"{aiResult.tagline}"</p>
+                <p className="text-xs text-muted-foreground">{aiResult.description}</p>
+                <p className="text-xs text-muted-foreground border-t pt-2">{aiResult.voiceAndTone}</p>
+                <Button type="button" size="sm" className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white" onClick={applyAiResult}>
+                  <CheckCircle2 className="size-3.5" />Apply These Fields
+                </Button>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label>Tagline</Label>
               <Input placeholder="Atlanta's Most Trusted Plumbers" {...register("tagline")} />

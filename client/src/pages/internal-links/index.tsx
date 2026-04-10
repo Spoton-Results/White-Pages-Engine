@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { api } from "@/lib/api";
 
 interface Website { id: string; name: string; domain: string; }
 
@@ -18,6 +19,22 @@ export default function InternalLinksPage() {
   const qc = useQueryClient();
   const [websiteId, setWebsiteId] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiStrategy, setAiStrategy] = useState<{ summary: string; recommendations: Array<{ title: string; description: string; impact: string }> } | null>(null);
+
+  const handleAiStrategy = async () => {
+    if (!websiteId) return;
+    setAiLoading(true);
+    setAiStrategy(null);
+    try {
+      const result = await api.post<any>(`/api/websites/${websiteId}/internal-links/ai-strategy`, {});
+      setAiStrategy(result);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const websitesQ = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -115,14 +132,25 @@ export default function InternalLinksPage() {
             <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: "1.5rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, color: "#111827" }}>Link Coverage</h2>
-                <button
-                  data-testid="btn-rebuild-links"
-                  onClick={() => rebuild.mutate()}
-                  disabled={rebuild.isPending || rebuilding}
-                  style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: ".88rem", fontWeight: 700, cursor: "pointer", opacity: (rebuild.isPending || rebuilding) ? .7 : 1 }}
-                >
-                  {rebuild.isPending || rebuilding ? "Rebuilding…" : "Rebuild Internal Links"}
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    data-testid="btn-ai-strategy"
+                    onClick={handleAiStrategy}
+                    disabled={aiLoading}
+                    style={{ display: "flex", alignItems: "center", gap: 5, background: aiLoading ? "#ede9fe" : "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: ".85rem", fontWeight: 700, cursor: aiLoading ? "not-allowed" : "pointer", opacity: aiLoading ? .8 : 1 }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    {aiLoading ? "Analyzing…" : "AI Strategy"}
+                  </button>
+                  <button
+                    data-testid="btn-rebuild-links"
+                    onClick={() => rebuild.mutate()}
+                    disabled={rebuild.isPending || rebuilding}
+                    style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: ".88rem", fontWeight: 700, cursor: "pointer", opacity: (rebuild.isPending || rebuilding) ? .7 : 1 }}
+                  >
+                    {rebuild.isPending || rebuilding ? "Rebuilding…" : "Rebuild Internal Links"}
+                  </button>
+                </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ flex: 1, height: 18, background: "#f3f4f6", borderRadius: 9, overflow: "hidden" }}>
@@ -149,6 +177,27 @@ export default function InternalLinksPage() {
                       <div style={{ width: 40, fontSize: ".8rem", fontWeight: 700, color: "#374151", textAlign: "right" }}>{p.inboundCount}</div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {aiStrategy && (
+              <div style={{ background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: 12, padding: "1.25rem 1.5rem" }}>
+                <div style={{ fontSize: ".85rem", fontWeight: 700, color: "#6d28d9", marginBottom: 6 }}>AI Internal Link Strategy</div>
+                <p style={{ fontSize: ".85rem", color: "#555", marginBottom: 14 }}>{aiStrategy.summary}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {aiStrategy.recommendations.map((r, i) => {
+                    const impactColor = r.impact === "high" ? "#dc2626" : r.impact === "medium" ? "#d97706" : "#16a34a";
+                    return (
+                      <div key={i} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 14px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                        <span style={{ background: impactColor, color: "#fff", borderRadius: 4, padding: "2px 7px", fontSize: ".72rem", fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{r.impact.toUpperCase()}</span>
+                        <div>
+                          <div style={{ fontSize: ".85rem", fontWeight: 600, color: "#111827" }}>{r.title}</div>
+                          <div style={{ fontSize: ".8rem", color: "#6b7280", marginTop: 2 }}>{r.description}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

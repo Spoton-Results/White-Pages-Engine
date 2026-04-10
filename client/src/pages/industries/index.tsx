@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Factory, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Factory, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -19,7 +20,12 @@ export default function IndustriesPage() {
   const { toast } = useToast();
   const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
-  const { register, handleSubmit, reset } = useForm<any>();
+  const { register, handleSubmit, reset, setValue, watch } = useForm<any>();
+
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<{ description: string; relatedServices: string[] } | null>(null);
+
+  const industryName = watch("name");
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -40,6 +46,7 @@ export default function IndustriesPage() {
       qc.invalidateQueries({ queryKey: ["/api/industries"] });
       setShowCreate(false);
       reset();
+      setAiResult(null);
       toast({ title: "Industry created" });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -52,6 +59,30 @@ export default function IndustriesPage() {
       toast({ title: "Industry deleted" });
     },
   });
+
+  async function handleAiSuggest() {
+    if (!industryName?.trim()) {
+      toast({ title: "Enter industry name first", variant: "destructive" });
+      return;
+    }
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const result = await api.post<any>(`/api/accounts/${selectedAccount}/industries/ai-suggest`, { name: industryName });
+      setAiResult(result);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function applyAiResult() {
+    if (!aiResult) return;
+    setValue("description", aiResult.description);
+    setAiResult(null);
+    toast({ title: "Description filled from AI" });
+  }
 
   return (
     <DashboardLayout>
@@ -127,12 +158,26 @@ export default function IndustriesPage() {
         )}
       </div>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(o) => { setShowCreate(o); if (!o) { reset(); setAiResult(null); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Industry</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(d => create.mutate(d))} className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Industry Name</Label>
+              <div className="flex items-center justify-between">
+                <Label>Industry Name</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
+                  disabled={aiLoading || !industryName?.trim()}
+                  onClick={handleAiSuggest}
+                  data-testid="button-industry-ai-suggest"
+                >
+                  {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                  {aiLoading ? "Generating…" : "AI Fill Description"}
+                </Button>
+              </div>
               <Input placeholder="Plumbing" {...register("name", { required: true })} />
             </div>
             <div className="space-y-1.5">
@@ -147,6 +192,27 @@ export default function IndustriesPage() {
               <Label>Description</Label>
               <Textarea rows={2} {...register("description")} />
             </div>
+
+            {aiResult && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-violet-700 text-xs font-semibold">
+                  <CheckCircle2 className="size-3.5" />AI Suggested
+                </div>
+                <p className="text-xs text-muted-foreground">{aiResult.description}</p>
+                {aiResult.relatedServices?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    <span className="text-xs text-violet-700 font-medium mr-1">Related services:</span>
+                    {aiResult.relatedServices.map((s: string) => (
+                      <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
+                    ))}
+                  </div>
+                )}
+                <Button type="button" size="sm" className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white" onClick={applyAiResult}>
+                  <CheckCircle2 className="size-3.5" />Apply Description
+                </Button>
+              </div>
+            )}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
               <Button type="submit" disabled={create.isPending}>Add</Button>

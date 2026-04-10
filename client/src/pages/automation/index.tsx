@@ -60,6 +60,8 @@ export default function AutomationPage() {
   const [websiteId, setWebsiteId] = useState("");
   const [form, setForm] = useState<AutomationSettings | null>(null);
   const [emailInput, setEmailInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuggest, setAiSuggest] = useState<{ tier1Threshold: number; tier2Threshold: number; fallbackHitThreshold: number; fallbackHitWindowDays: number; autodemoteZeroImpressionDays: number; thinBankThreshold: number; reasoning: string } | null>(null);
 
   const { data: websites = [] } = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -127,6 +129,42 @@ export default function AutomationPage() {
     saveMutation.mutate({ ...form, weeklyEmailRecipients: recipients });
   };
 
+  const handleAiSuggest = async () => {
+    if (!websiteId) return;
+    setAiLoading(true);
+    setAiSuggest(null);
+    try {
+      const result = await fetch(`/api/websites/${websiteId}/automation/ai-suggest`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = await result.json();
+      if (!result.ok) throw new Error(json.error ?? "AI error");
+      setAiSuggest(json);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyAiSuggest = () => {
+    if (!aiSuggest || !form) return;
+    setForm(f => f ? {
+      ...f,
+      tier1Threshold: aiSuggest.tier1Threshold,
+      tier2Threshold: aiSuggest.tier2Threshold,
+      fallbackHitThreshold: aiSuggest.fallbackHitThreshold,
+      fallbackHitWindowDays: aiSuggest.fallbackHitWindowDays,
+      autodemoteZeroImpressionDays: aiSuggest.autodemoteZeroImpressionDays,
+      thinBankThreshold: aiSuggest.thinBankThreshold,
+    } : f);
+    setAiSuggest(null);
+    toast({ title: "Settings applied from AI" });
+  };
+
   const setField = <K extends keyof AutomationSettings>(k: K, v: AutomationSettings[K]) =>
     setForm(f => f ? { ...f, [k]: v } : f);
 
@@ -167,7 +205,43 @@ export default function AutomationPage() {
           <>
             {/* ── Settings card ── */}
             <div className="bg-white border rounded-lg shadow-sm p-6 space-y-6">
-              <h2 className="font-semibold text-lg">Automation Thresholds</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-lg">Automation Thresholds</h2>
+                <button
+                  data-testid="button-ai-suggest-settings"
+                  onClick={handleAiSuggest}
+                  disabled={aiLoading || !websiteId}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: aiLoading ? "#ede9fe" : "#7c3aed", color: "#fff", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: aiLoading ? "not-allowed" : "pointer", opacity: aiLoading ? .8 : 1 }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  {aiLoading ? "Analyzing…" : "AI Suggest Settings"}
+                </button>
+              </div>
+              {aiSuggest && (
+                <div style={{ background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: ".82rem", fontWeight: 700, color: "#6d28d9", marginBottom: 6 }}>AI Recommendation</div>
+                  <p style={{ fontSize: ".82rem", color: "#555", marginBottom: 10 }}>{aiSuggest.reasoning}</p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                    {[
+                      { label: "Tier 1 ≥", val: aiSuggest.tier1Threshold },
+                      { label: "Tier 3 <", val: aiSuggest.tier2Threshold },
+                      { label: "Fallback hits", val: aiSuggest.fallbackHitThreshold },
+                      { label: "Fallback window (days)", val: aiSuggest.fallbackHitWindowDays },
+                      { label: "Demote after (days)", val: aiSuggest.autodemoteZeroImpressionDays },
+                      { label: "Thin bank %", val: aiSuggest.thinBankThreshold },
+                    ].map(({ label, val }) => (
+                      <div key={label} style={{ background: "#ede9fe", borderRadius: 6, padding: "3px 9px", fontSize: ".78rem", color: "#5b21b6" }}>
+                        <span style={{ fontWeight: 600 }}>{label}:</span> {val}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    data-testid="button-apply-ai-settings"
+                    onClick={applyAiSuggest}
+                    style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: "pointer" }}
+                  >Apply These Settings</button>
+                </div>
+              )}
 
               {/* Auto 1 + 2 */}
               <Section title="Auto 1 — Score after generation" description="Automatically score all newly generated pages when a bulk job finishes.">

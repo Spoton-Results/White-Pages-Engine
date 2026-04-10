@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, MapPin, Trash2, Search, Download } from "lucide-react";
+import { Plus, MapPin, Trash2, Search, Download, Sparkles, Loader2, CheckSquare, Square } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -44,10 +44,52 @@ export default function LocationsPage() {
   const [overrideAccount, setOverrideAccount] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [showAiSuggest, setShowAiSuggest] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [displayTopN, setDisplayTopN] = useState<number | "all" | null>(null);
   const [displayTierFilter, setDisplayTierFilter] = useState<number | null>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
+
+  const [aiBusinessType, setAiBusinessType] = useState("");
+  const [aiStateInput, setAiStateInput] = useState("");
+  const [aiCityCount, setAiCityCount] = useState(10);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiCities, setAiCities] = useState<Array<{ name: string; stateCode: string; stateName: string; reason: string; selected: boolean }>>([]);
+
+  const handleAiSuggestCities = async () => {
+    if (!aiBusinessType.trim() || !aiStateInput.trim()) return;
+    setAiLoading(true);
+    setAiCities([]);
+    try {
+      const result = await api.post<any>(`/api/accounts/${selectedAccount}/locations/ai-suggest`, {
+        businessType: aiBusinessType,
+        state: aiStateInput,
+        count: aiCityCount,
+      });
+      setAiCities((result.suggestions || []).map((s: any) => ({ ...s, selected: true })));
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const importAiCities = () => {
+    const selected = aiCities.filter(c => c.selected);
+    if (!selected.length) return;
+    const items = selected.map(c => ({
+      type: "city",
+      name: c.name,
+      slug: c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      stateCode: c.stateCode.toLowerCase(),
+      stateName: c.stateName,
+    }));
+    bulkImport.mutate(items as any);
+    setShowAiSuggest(false);
+    setAiCities([]);
+    setAiBusinessType("");
+    setAiStateInput("");
+  };
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -116,6 +158,9 @@ export default function LocationsPage() {
           </div>
           {selectedAccount && (
             <div className="flex gap-2">
+              <Button variant="outline" className="gap-2 text-violet-600 border-violet-300 hover:bg-violet-50" size="sm" onClick={() => setShowAiSuggest(true)} data-testid="button-ai-suggest-cities">
+                <Sparkles className="size-4" />AI Suggest Cities
+              </Button>
               <Button variant="outline" className="gap-2" size="sm" onClick={() => setShowBulk(true)} data-testid="button-bulk-import">
                 <Download className="size-4" />Bulk Import
               </Button>
@@ -312,6 +357,99 @@ export default function LocationsPage() {
           isPending={bulkImport.isPending}
         />
       )}
+
+      {/* ── AI Suggest Cities Dialog ── */}
+      <Dialog open={showAiSuggest} onOpenChange={(o) => { setShowAiSuggest(o); if (!o) setAiCities([]); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles className="size-4 text-violet-600" />AI Suggest Cities</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Tell us about your business and target state, and AI will recommend the best cities to target for SEO.</p>
+            <div className="space-y-1.5">
+              <Label>Business Type</Label>
+              <Input
+                placeholder="e.g. Plumbing, HVAC, Roofing..."
+                value={aiBusinessType}
+                onChange={e => setAiBusinessType(e.target.value)}
+                data-testid="input-ai-business-type"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>State</Label>
+                <Input
+                  placeholder="e.g. Texas, CA, Florida..."
+                  value={aiStateInput}
+                  onChange={e => setAiStateInput(e.target.value)}
+                  data-testid="input-ai-state"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Number of cities</Label>
+                <Select value={String(aiCityCount)} onValueChange={v => setAiCityCount(Number(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[5, 10, 15, 20].map(n => <SelectItem key={n} value={String(n)}>{n} cities</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button
+              type="button"
+              className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+              disabled={aiLoading || !aiBusinessType.trim() || !aiStateInput.trim()}
+              onClick={handleAiSuggestCities}
+              data-testid="button-generate-city-suggestions"
+            >
+              {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {aiLoading ? "Generating suggestions…" : "Generate City Suggestions"}
+            </Button>
+
+            {aiCities.length > 0 && (
+              <div className="space-y-2 border rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{aiCities.filter(c => c.selected).length} of {aiCities.length} selected</span>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setAiCities(cs => cs.map(c => ({ ...c, selected: true })))}>All</Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setAiCities(cs => cs.map(c => ({ ...c, selected: false })))}>None</Button>
+                  </div>
+                </div>
+                <ScrollArea className="h-56">
+                  <div className="space-y-1.5 pr-2">
+                    {aiCities.map((city, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-3 p-2 rounded-md cursor-pointer transition-colors ${city.selected ? "bg-violet-50 border border-violet-200" : "hover:bg-muted/50"}`}
+                        onClick={() => setAiCities(cs => cs.map((c, j) => j === i ? { ...c, selected: !c.selected } : c))}
+                        data-testid={`city-suggestion-${i}`}
+                      >
+                        {city.selected ? <CheckSquare className="size-4 text-violet-600 shrink-0 mt-0.5" /> : <Square className="size-4 text-muted-foreground shrink-0 mt-0.5" />}
+                        <div>
+                          <div className="text-sm font-medium">{city.name}, {city.stateCode}</div>
+                          <div className="text-xs text-muted-foreground">{city.reason}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAiSuggest(false)}>Cancel</Button>
+            {aiCities.length > 0 && (
+              <Button
+                disabled={aiCities.filter(c => c.selected).length === 0 || bulkImport.isPending}
+                onClick={importAiCities}
+                className="gap-2"
+                data-testid="button-import-ai-cities"
+              >
+                {bulkImport.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                Import {aiCities.filter(c => c.selected).length} Cities
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

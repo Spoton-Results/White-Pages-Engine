@@ -1,11 +1,17 @@
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Building2, Globe, Briefcase, MapPin, Wrench, Layers, Zap,
   FileText, CheckCircle, Map, Users, ChevronDown, ChevronRight,
-  ArrowRight, AlertCircle, Info, Terminal, Link2, BookOpen, Database, Shuffle
+  ArrowRight, AlertCircle, Info, Terminal, Link2, BookOpen, Database, Shuffle,
+  Sparkles, Loader2, CheckCircle2, XCircle, Circle
 } from "lucide-react";
+import { api } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 interface Step {
   num: string;
@@ -427,7 +433,37 @@ function GlossaryItem({ term, def }: { term: string; def: string }) {
 }
 
 export default function GuidePage() {
-  const [tab, setTab] = useState<"guide" | "glossary">("guide");
+  const { toast } = useToast();
+  const [tab, setTab] = useState<"guide" | "glossary" | "checklist">("guide");
+  const [checklistAccount, setChecklistAccount] = useState<string>("");
+  const [checklistLoading, setChecklistLoading] = useState(false);
+  const [checklist, setChecklist] = useState<{ healthScore: number; summary: string; steps: Array<{ title: string; description: string; priority: string; done: boolean }> } | null>(null);
+
+  const { data: accounts = [] } = useQuery({
+    queryKey: ["/api/accounts"],
+    queryFn: () => api.get<any[]>("/api/accounts"),
+  });
+  const selectedChecklistAccount = checklistAccount || (accounts as any[])[0]?.id || "";
+
+  const handleChecklist = async () => {
+    if (!selectedChecklistAccount) return;
+    setChecklistLoading(true);
+    setChecklist(null);
+    try {
+      const result = await api.post<any>(`/api/accounts/${selectedChecklistAccount}/ai-checklist`, {});
+      setChecklist(result);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setChecklistLoading(false);
+    }
+  };
+
+  const priorityColors: Record<string, string> = {
+    critical: "text-red-600 border-red-300 bg-red-50",
+    important: "text-amber-600 border-amber-300 bg-amber-50",
+    "nice-to-have": "text-green-600 border-green-300 bg-green-50",
+  };
 
   return (
     <DashboardLayout>
@@ -454,6 +490,13 @@ export default function GuidePage() {
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${tab === "glossary" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             <FileText className="size-3.5" />Glossary
+          </button>
+          <button
+            data-testid="tab-checklist"
+            onClick={() => setTab("checklist")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${tab === "checklist" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Sparkles className="size-3.5" />AI Checklist
           </button>
         </div>
 
@@ -498,6 +541,80 @@ export default function GuidePage() {
                 <GlossaryItem key={term} term={term} def={def} />
               ))}
             </dl>
+          </div>
+        )}
+
+        {tab === "checklist" && (
+          <div className="space-y-4">
+            <div className="bg-card border rounded-lg p-4 space-y-3">
+              <p className="text-sm text-muted-foreground">Select an account to generate a personalized AI setup checklist based on what's configured vs. what's still missing.</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Select value={selectedChecklistAccount} onValueChange={setChecklistAccount}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Select account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(accounts as any[]).map((a: any) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+                  disabled={checklistLoading || !selectedChecklistAccount}
+                  onClick={handleChecklist}
+                  data-testid="button-generate-checklist"
+                >
+                  {checklistLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  {checklistLoading ? "Analyzing account…" : "Generate AI Checklist"}
+                </Button>
+              </div>
+            </div>
+
+            {checklist && (
+              <div className="space-y-4">
+                <div className="bg-card border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold">Account Health Score</span>
+                    <span className={`text-lg font-bold ${checklist.healthScore >= 80 ? "text-green-600" : checklist.healthScore >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                      {checklist.healthScore}/100
+                    </span>
+                  </div>
+                  <div className="h-2.5 bg-muted rounded-full overflow-hidden mb-3">
+                    <div
+                      className={`h-full rounded-full transition-all ${checklist.healthScore >= 80 ? "bg-green-500" : checklist.healthScore >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                      style={{ width: `${checklist.healthScore}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground">{checklist.summary}</p>
+                </div>
+
+                <div className="space-y-2">
+                  {checklist.steps.map((step, i) => (
+                    <div key={i} className={`border rounded-lg p-3.5 flex items-start gap-3 ${step.done ? "opacity-60" : ""}`}>
+                      <div className="mt-0.5 shrink-0">
+                        {step.done
+                          ? <CheckCircle2 className="size-4 text-green-500" />
+                          : step.priority === "critical"
+                            ? <XCircle className="size-4 text-red-500" />
+                            : <Circle className="size-4 text-muted-foreground" />
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-sm font-medium ${step.done ? "line-through text-muted-foreground" : ""}`}>{step.title}</span>
+                          <span className={`text-xs border rounded px-1.5 py-0.5 ${priorityColors[step.priority] ?? "text-muted-foreground border-border"}`}>
+                            {step.priority}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{step.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

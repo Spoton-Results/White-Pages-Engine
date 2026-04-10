@@ -7,8 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
-import { Mail, Phone, Building2, FileText, Calendar, Inbox, Download, Search, Copy } from "lucide-react";
+import { Mail, Phone, Building2, FileText, Calendar, Inbox, Download, Search, Copy, Sparkles, Loader2, ChevronDown, ChevronUp, ClipboardCopy } from "lucide-react";
 import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString("en-US", {
@@ -40,10 +41,20 @@ function exportToCsv(leads: any[], filename = "leads.csv") {
   URL.revokeObjectURL(url);
 }
 
+const labelColors: Record<string, string> = {
+  Hot: "bg-red-100 text-red-700 border-red-300",
+  Warm: "bg-amber-100 text-amber-700 border-amber-300",
+  Cold: "bg-blue-100 text-blue-700 border-blue-300",
+};
+
 export default function LeadsPage() {
+  const { toast } = useToast();
   const [overrideWebsite, setOverrideWebsite] = useState<string>("");
   const [search, setSearch] = useState("");
   const [dupeOnly, setDupeOnly] = useState(false);
+  const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
+  const [aiResults, setAiResults] = useState<Record<string, { score: number; label: string; reasoning: string; draftReply: string }>>({});
+  const [aiOpen, setAiOpen] = useState<Record<string, boolean>>({});
 
   const { data: websites } = useQuery<any[]>({
     queryKey: ["websites"],
@@ -88,6 +99,27 @@ export default function LeadsPage() {
   }, [allLeads, search, dupeOnly, dupeEmails]);
 
   const dupeCount = dupeEmails.size;
+
+  async function qualifyLead(lead: any) {
+    if (aiLoading[lead.id]) return;
+    setAiLoading(prev => ({ ...prev, [lead.id]: true }));
+    try {
+      const result = await api.post<any>("/api/leads/ai-qualify", {
+        name: lead.name,
+        email: lead.email,
+        businessName: lead.businessName,
+        phone: lead.phone,
+        message: lead.message,
+        pageSlug: lead.pageSlug,
+      });
+      setAiResults(prev => ({ ...prev, [lead.id]: result }));
+      setAiOpen(prev => ({ ...prev, [lead.id]: true }));
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    } finally {
+      setAiLoading(prev => ({ ...prev, [lead.id]: false }));
+    }
+  }
 
   return (
     <DashboardLayout>
@@ -183,6 +215,8 @@ export default function LeadsPage() {
           <div className="grid gap-4">
             {filtered.map((lead: any) => {
               const isDupe = dupeEmails.has(lead.email);
+              const aiRes = aiResults[lead.id];
+              const isAiOpen = aiOpen[lead.id];
               return (
                 <Card
                   key={lead.id}
@@ -201,6 +235,11 @@ export default function LeadsPage() {
                             Duplicate email
                           </Badge>
                         )}
+                        {aiRes && (
+                          <Badge variant="outline" className={`text-xs gap-1 ${labelColors[aiRes.label] ?? ""}`}>
+                            {aiRes.label} · {aiRes.score}/100
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {lead.pageSlug && (
@@ -213,6 +252,17 @@ export default function LeadsPage() {
                           <Calendar className="size-3" />
                           {formatDate(lead.createdAt)}
                         </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1.5 text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
+                          disabled={!!aiLoading[lead.id]}
+                          onClick={() => aiRes ? setAiOpen(prev => ({ ...prev, [lead.id]: !prev[lead.id] })) : qualifyLead(lead)}
+                          data-testid={`button-ai-qualify-${lead.id}`}
+                        >
+                          {aiLoading[lead.id] ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                          {aiLoading[lead.id] ? "Qualifying…" : aiRes ? (isAiOpen ? "Hide AI" : "Show AI") : "AI Qualify"}
+                        </Button>
                       </div>
                     </div>
                   </CardHeader>
@@ -254,6 +304,40 @@ export default function LeadsPage() {
                       >
                         {lead.message}
                       </p>
+                    )}
+
+                    {aiRes && isAiOpen && (
+                      <div className="mt-3 border-t pt-3 space-y-3">
+                        <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-violet-700">AI Assessment</span>
+                            <Badge variant="outline" className={`text-xs ${labelColors[aiRes.label] ?? ""}`}>
+                              {aiRes.label} · {aiRes.score}/100
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{aiRes.reasoning}</p>
+                        </div>
+                        <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-foreground">Draft Reply</span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 gap-1 text-xs"
+                              onClick={() => { navigator.clipboard.writeText(aiRes.draftReply); toast({ title: "Copied to clipboard" }); }}
+                            >
+                              <ClipboardCopy className="size-3" />Copy
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground whitespace-pre-line">{aiRes.draftReply}</p>
+                          <a
+                            href={`mailto:${lead.email}?subject=Re: Your inquiry&body=${encodeURIComponent(aiRes.draftReply)}`}
+                            className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                          >
+                            <Mail className="size-3" />Open in email client
+                          </a>
+                        </div>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
