@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
@@ -185,7 +186,7 @@ export default function SearchControlPage() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const scorePagesMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/websites/${websiteId}/score-pages`, { method: "POST" }),
+    mutationFn: () => api.post(`/api/websites/${websiteId}/score-pages`, {}),
     onSuccess: () => {
       setScoringRunning(true);
       toast({ title: "Scoring started", description: "Pages scored in background. Stats refresh every 5s." });
@@ -199,10 +200,7 @@ export default function SearchControlPage() {
 
   // P6 — combined score + promote
   const scoreAndPromoteMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/websites/${websiteId}/score-and-promote`, {
-      method: "POST",
-      body: JSON.stringify({ tier1Threshold, tier3Threshold, applyTier3 }),
-    }),
+    mutationFn: () => api.post(`/api/websites/${websiteId}/score-and-promote`, { tier1Threshold, tier3Threshold, applyTier3 }),
     onSuccess: () => {
       setScoringRunning(true);
       toast({ title: "Score & Promote started", description: "Job running in background — stats will refresh in ~30s." });
@@ -217,7 +215,7 @@ export default function SearchControlPage() {
   });
 
   const recomputeBanksMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/websites/${websiteId}/bank-completeness/recompute`, { method: "POST" }),
+    mutationFn: () => api.post(`/api/websites/${websiteId}/bank-completeness/recompute`, {}),
     onSuccess: (data: any) => {
       toast({ title: "Recomputed", description: `Updated ${data.computed} services.` });
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
@@ -226,10 +224,7 @@ export default function SearchControlPage() {
   });
 
   const applyTiersMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/websites/${websiteId}/apply-tiers`, {
-      method: "POST",
-      body: JSON.stringify({ tier1Threshold, applyTier3, tier3Threshold }),
-    }),
+    mutationFn: () => api.post(`/api/websites/${websiteId}/apply-tiers`, { tier1Threshold, applyTier3, tier3Threshold }),
     onSuccess: (data: any) => {
       toast({
         title: "Tiers updated",
@@ -242,10 +237,7 @@ export default function SearchControlPage() {
   });
 
   const promoteFallbackMutation = useMutation({
-    mutationFn: (slug: string) => apiRequest(`/api/websites/${websiteId}/fallback-hits/promote`, {
-      method: "POST",
-      body: JSON.stringify({ slug }),
-    }),
+    mutationFn: (slug: string) => api.post(`/api/websites/${websiteId}/fallback-hits/promote`, { slug }),
     onSuccess: () => {
       toast({ title: "Marked as promoted" });
       refetchFallback();
