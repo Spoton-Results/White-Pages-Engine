@@ -692,6 +692,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(activity);
   });
 
+  // ── Agencies ──────────────────────────────────────────────────────────────
+
+  app.get("/api/agencies", requireAuth, async (req: Request, res: Response) => {
+    const all = await storage.getAgencies();
+    return res.json(all);
+  });
+
+  app.get("/api/agencies/:id", requireAuth, async (req: Request, res: Response) => {
+    const agency = await storage.getAgency(req.params.id as string);
+    if (!agency) return res.status(404).json({ message: "Agency not found" });
+    return res.json(agency);
+  });
+
+  app.post("/api/agencies", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { name, contactName, email, phone, monthlyFee, startDate, status } = req.body;
+    if (!name) return res.status(400).json({ message: "name is required" });
+    const agency = await storage.createAgency({ name, contactName, email, phone, monthlyFee, startDate, status: status ?? "active" });
+    return res.status(201).json(agency);
+  });
+
+  app.put("/api/agencies/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { name, contactName, email, phone, monthlyFee, startDate, status } = req.body;
+    const agency = await storage.updateAgency(req.params.id as string, { name, contactName, email, phone, monthlyFee, startDate, status });
+    if (!agency) return res.status(404).json({ message: "Agency not found" });
+    return res.json(agency);
+  });
+
+  app.delete("/api/agencies/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    await storage.deleteAgency(req.params.id as string);
+    return res.json({ message: "Agency deleted" });
+  });
+
+  app.get("/api/agencies/:id/accounts", requireAuth, async (req: Request, res: Response) => {
+    const accts = await storage.getAgencyAccounts(req.params.id as string);
+    return res.json(accts);
+  });
+
   // ── Accounts ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {
@@ -721,13 +758,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put("/api/accounts/:id", requireAuth, async (req: Request, res: Response) => {
     const current = await storage.getAccount(req.params.id as string);
     if (!current) return res.status(404).json({ message: "Account not found" });
-    const { name, slug, plan, status, settings } = req.body;
+    const { name, slug, plan, status, settings, agencyId } = req.body;
     const mergedSettings = { ...(current.settings as Record<string, any> ?? {}), ...(settings ?? {}) };
     const payload: Record<string, any> = { settings: mergedSettings };
     if (name !== undefined) payload.name = name;
     if (slug !== undefined) payload.slug = slug;
     if (plan !== undefined) payload.plan = plan;
     if (status !== undefined) payload.status = status;
+    if (agencyId !== undefined) payload.agencyId = agencyId === "" ? null : agencyId;
     const updated = await storage.updateAccount(req.params.id as string, payload as any);
     return res.json(updated);
   });

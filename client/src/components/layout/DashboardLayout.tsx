@@ -1,17 +1,29 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Users, Globe,
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot
+  Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
+  ChevronDown, Handshake
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import {
+  AccountContext,
+  useAccountContext,
+  loadFromStorage,
+  saveToStorage,
+  STORAGE_KEY_AGENCY,
+  STORAGE_KEY_ACCOUNT,
+} from "@/hooks/use-account-context";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -19,6 +31,7 @@ interface DashboardLayoutProps {
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
+  { name: "Agencies", href: "/agencies", icon: Handshake },
   { name: "Accounts", href: "/accounts", icon: Building2 },
   { name: "Websites", href: "/websites", icon: Globe },
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
@@ -120,63 +133,148 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
   );
 }
 
-export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [mobileOpen, setMobileOpen] = useState(false);
+function AgencyClientSwitcher() {
+  const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } = useAccountContext();
+
+  const { data: agencies = [] } = useQuery({
+    queryKey: ["/api/agencies"],
+    queryFn: () => api.get<any[]>("/api/agencies"),
+  });
+
+  const { data: accounts = [] } = useQuery({
+    queryKey: ["/api/accounts"],
+    queryFn: () => api.get<any[]>("/api/accounts"),
+  });
+
+  const filteredAccounts = selectedAgencyId
+    ? (accounts as any[]).filter((a: any) => a.agencyId === selectedAgencyId)
+    : (accounts as any[]);
+
+  const handleAgencyChange = (val: string) => {
+    const newAgencyId = val === "all" ? null : val;
+    setSelectedAgencyId(newAgencyId);
+    setSelectedAccountId(null);
+  };
+
+  const handleAccountChange = (val: string) => {
+    setSelectedAccountId(val === "all" ? null : val);
+  };
+
+  const selectedAgencyLabel = selectedAgencyId
+    ? (agencies as any[]).find((a: any) => a.id === selectedAgencyId)?.name ?? "Agency"
+    : "All Agencies";
+
+  const selectedAccountLabel = selectedAccountId
+    ? (accounts as any[]).find((a: any) => a.id === selectedAccountId)?.name ?? "Client"
+    : "All Clients";
 
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-60 flex-col border-r bg-card sticky top-0 h-screen z-40 shrink-0">
-        <SidebarContent />
-      </aside>
+    <div className="flex items-center gap-2" data-testid="agency-client-switcher">
+      <Select value={selectedAgencyId ?? "all"} onValueChange={handleAgencyChange}>
+        <SelectTrigger className="h-8 text-xs w-[160px] gap-1" data-testid="select-agency">
+          <Handshake className="size-3 text-muted-foreground shrink-0" />
+          <SelectValue placeholder="All Agencies">
+            <span className="truncate">{selectedAgencyLabel}</span>
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Agencies</SelectItem>
+          {(agencies as any[]).map((a: any) => (
+            <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-      {/* Mobile Drawer */}
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
-          <SheetHeader className="sr-only">
-            <SheetTitle>Navigation</SheetTitle>
-          </SheetHeader>
-          <SidebarContent onNav={() => setMobileOpen(false)} />
-        </SheetContent>
-      </Sheet>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
-        <header className="h-14 border-b bg-background/95 backdrop-blur sticky top-0 z-30 flex items-center justify-between px-4 gap-3">
-          {/* Hamburger — mobile only */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden shrink-0"
-            onClick={() => setMobileOpen(true)}
-            data-testid="button-mobile-menu"
-          >
-            <Menu className="size-5" />
-          </Button>
-
-          {/* Logo — mobile only (desktop shows in sidebar) */}
-          <div className="md:hidden flex items-center gap-2 font-bold text-base">
-            <div className="size-6 rounded bg-primary flex items-center justify-center text-primary-foreground">
-              <Globe className="size-3.5" />
-            </div>
-            <span>Nexus</span>
-          </div>
-
-          <div className="flex-1 hidden md:block" />
-
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="text-muted-foreground size-8">
-              <Bell className="size-4" />
-            </Button>
-          </div>
-        </header>
-
-        <div className="flex-1 overflow-auto bg-muted/20">
-          <div className="p-4 md:p-6 max-w-7xl mx-auto">
-            {children}
-          </div>
-        </div>
-      </main>
+      <Select value={selectedAccountId ?? "all"} onValueChange={handleAccountChange}>
+        <SelectTrigger className="h-8 text-xs w-[160px] gap-1" data-testid="select-client">
+          <Building2 className="size-3 text-muted-foreground shrink-0" />
+          <SelectValue placeholder="All Clients">
+            <span className="truncate">{selectedAccountLabel}</span>
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Clients</SelectItem>
+          {filteredAccounts.map((a: any) => (
+            <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
+  );
+}
+
+export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_AGENCY));
+  const [selectedAccountId, setSelectedAccountIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_ACCOUNT));
+
+  const setSelectedAgencyId = useCallback((id: string | null) => {
+    setSelectedAgencyIdRaw(id);
+    saveToStorage(STORAGE_KEY_AGENCY, id);
+  }, []);
+
+  const setSelectedAccountId = useCallback((id: string | null) => {
+    setSelectedAccountIdRaw(id);
+    saveToStorage(STORAGE_KEY_ACCOUNT, id);
+  }, []);
+
+  return (
+    <AccountContext.Provider value={{ selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId }}>
+      <div className="min-h-screen bg-background flex">
+        {/* Desktop Sidebar */}
+        <aside className="hidden md:flex w-60 flex-col border-r bg-card sticky top-0 h-screen z-40 shrink-0">
+          <SidebarContent />
+        </aside>
+
+        {/* Mobile Drawer */}
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
+            <SheetHeader className="sr-only">
+              <SheetTitle>Navigation</SheetTitle>
+            </SheetHeader>
+            <SidebarContent onNav={() => setMobileOpen(false)} />
+          </SheetContent>
+        </Sheet>
+
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
+          <header className="h-14 border-b bg-background/95 backdrop-blur sticky top-0 z-30 flex items-center justify-between px-4 gap-3">
+            {/* Hamburger — mobile only */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden shrink-0"
+              onClick={() => setMobileOpen(true)}
+              data-testid="button-mobile-menu"
+            >
+              <Menu className="size-5" />
+            </Button>
+
+            {/* Logo — mobile only (desktop shows in sidebar) */}
+            <div className="md:hidden flex items-center gap-2 font-bold text-base">
+              <div className="size-6 rounded bg-primary flex items-center justify-center text-primary-foreground">
+                <Globe className="size-3.5" />
+              </div>
+              <span>Nexus</span>
+            </div>
+
+            <div className="flex-1 hidden md:block" />
+
+            <div className="flex items-center gap-3">
+              <AgencyClientSwitcher />
+              <Button variant="ghost" size="icon" className="text-muted-foreground size-8">
+                <Bell className="size-4" />
+              </Button>
+            </div>
+          </header>
+
+          <div className="flex-1 overflow-auto bg-muted/20">
+            <div className="p-4 md:p-6 max-w-7xl mx-auto">
+              {children}
+            </div>
+          </div>
+        </main>
+      </div>
+    </AccountContext.Provider>
   );
 }

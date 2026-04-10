@@ -1,11 +1,12 @@
 import { db } from "./db";
 import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte, isNull, lt, lte } from "drizzle-orm";
 import {
-  accounts, users, brandProfiles, websites, locations, services, industries,
+  agencies, accounts, users, brandProfiles, websites, locations, services, industries,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
   generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
   fallbackHitLogs, variationBankCompleteness, hubPages,
   adminNotifications, demotionLogs,
+  type Agency, type InsertAgency,
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
@@ -29,6 +30,35 @@ import {
   type AdminNotification, type InsertAdminNotification,
   type DemotionLog, type InsertDemotionLog,
 } from "@shared/schema";
+
+// ─── Agencies ─────────────────────────────────────────────────────────────────
+
+export async function getAgencies(): Promise<Agency[]> {
+  return db.select().from(agencies).orderBy(asc(agencies.name));
+}
+
+export async function getAgency(id: string): Promise<Agency | undefined> {
+  const [row] = await db.select().from(agencies).where(eq(agencies.id, id));
+  return row;
+}
+
+export async function createAgency(data: InsertAgency): Promise<Agency> {
+  const [row] = await db.insert(agencies).values(data).returning();
+  return row;
+}
+
+export async function updateAgency(id: string, data: Partial<InsertAgency>): Promise<Agency | undefined> {
+  const [row] = await db.update(agencies).set(data).where(eq(agencies.id, id)).returning();
+  return row;
+}
+
+export async function deleteAgency(id: string): Promise<void> {
+  await db.delete(agencies).where(eq(agencies.id, id));
+}
+
+export async function getAgencyAccounts(agencyId: string): Promise<Account[]> {
+  return db.select().from(accounts).where(eq(accounts.agencyId, agencyId)).orderBy(asc(accounts.name));
+}
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 

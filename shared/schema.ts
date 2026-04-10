@@ -20,8 +20,25 @@ export const locationTypeEnum = pgEnum("location_type", ["state", "city", "neigh
 
 // ─── Core Tables ─────────────────────────────────────────────────────────────
 
+export const agencies = pgTable("agencies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  contactName: text("contact_name"),
+  email: text("email"),
+  phone: text("phone"),
+  monthlyFee: decimal("monthly_fee"),
+  startDate: text("start_date"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAgencySchema = createInsertSchema(agencies).omit({ id: true, createdAt: true });
+export type InsertAgency = z.infer<typeof insertAgencySchema>;
+export type Agency = typeof agencies.$inferSelect;
+
 export const accounts = pgTable("accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agencyId: varchar("agency_id").references(() => agencies.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   plan: accountPlanEnum("plan").notNull().default("starter"),

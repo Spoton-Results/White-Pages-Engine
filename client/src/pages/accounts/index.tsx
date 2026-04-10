@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil, AlertTriangle } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil, AlertTriangle, Handshake } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +30,11 @@ export default function AccountsPage() {
   const { data: accounts = [], isLoading, isFetching: accountsFetching } = useQuery({
     queryKey: ["/api/accounts"],
     queryFn: () => api.get<any[]>("/api/accounts"),
+  });
+
+  const { data: agencies = [] } = useQuery({
+    queryKey: ["/api/agencies"],
+    queryFn: () => api.get<any[]>("/api/agencies"),
   });
 
   const create = useMutation({
@@ -74,6 +79,7 @@ export default function AccountsPage() {
     setEditValue("slug", account.slug);
     setEditValue("plan", account.plan);
     setEditValue("status", account.status);
+    setEditValue("agencyId", account.agencyId ?? "");
     setEditValue("ownerName", s.ownerName ?? "");
     setEditValue("email", s.email ?? "");
     setEditValue("phone", s.phone ?? "");
@@ -82,7 +88,7 @@ export default function AccountsPage() {
   };
 
   const onEditSubmit = (d: any) => {
-    const { name, slug, plan, status, ownerName, email, phone, anthropicApiKey, notes } = d;
+    const { name, slug, plan, status, agencyId, ownerName, email, phone, anthropicApiKey, notes } = d;
     update.mutate({
       id: editAccount.id,
       data: {
@@ -90,6 +96,7 @@ export default function AccountsPage() {
         slug,
         plan,
         status,
+        agencyId: agencyId === "" ? null : (agencyId || null),
         settings: { ownerName, email, phone, anthropicApiKey, notes },
       },
     });
@@ -213,6 +220,18 @@ export default function AccountsPage() {
             <div className="space-y-1.5">
               <Label>Slug</Label>
               <Input placeholder="acme-corp" {...register("slug", { required: true })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5"><Handshake className="size-3.5 text-muted-foreground" />Agency</Label>
+              <Select onValueChange={v => setValue("agencyId", v === "none" ? null : v)} defaultValue="none">
+                <SelectTrigger data-testid="select-create-agency"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unassigned</SelectItem>
+                  {(agencies as any[]).map((a: any) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Plan</Label>
@@ -341,6 +360,21 @@ export default function AccountsPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5"><Handshake className="size-3.5 text-muted-foreground" />Agency</Label>
+              <Select
+                defaultValue={editAccount?.agencyId ?? "none"}
+                onValueChange={v => setEditValue("agencyId", v === "none" ? "" : v)}
+              >
+                <SelectTrigger data-testid="select-edit-agency"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unassigned</SelectItem>
+                  {(agencies as any[]).map((a: any) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Notes</Label>
