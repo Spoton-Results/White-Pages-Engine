@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 0 });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 3 });
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
@@ -347,10 +347,26 @@ export async function writeVariationsForService(
   accountId: string,
   websiteId: string,
   ctx?: BrandContext,
-): Promise<void> {
+): Promise<{ written: string[]; errors: Record<string, string> }> {
+  const written: string[] = [];
+  const errors: Record<string, string> = {};
+
   for (const section of SECTIONS) {
-    await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
+    try {
+      await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
+      written.push(section);
+    } catch (err: any) {
+      errors[section] = err?.message ?? String(err);
+      console.error(`[variation-writer] Section "${section}" failed for "${serviceName}":`, errors[section]);
+    }
   }
+
+  if (written.length === 0) {
+    const firstError = Object.values(errors)[0] ?? "All sections failed";
+    throw new Error(`All 10 sections failed for "${serviceName}": ${firstError}`);
+  }
+
+  return { written, errors };
 }
 
 /**

@@ -93,7 +93,11 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
     await Promise.all(batch.map(async ({ i, entry }) => {
       try {
         await storage.deleteVariationBanks(job.websiteId, entry.serviceName);
-        await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
+        const result = await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
+        const partialErrors = Object.keys(result.errors).length;
+        if (partialErrors > 0) {
+          console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/10 sections; ${partialErrors} section(s) failed`);
+        }
         progress[i] = { ...entry, status: "done" };
         done++;
       } catch (err: any) {
