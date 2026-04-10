@@ -342,6 +342,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   // Sanitize: admin-preview paths (starting with /sites/) must never leak into live page rendering
   const sanitizedProxy = rawSettingsProxy.startsWith("/sites/") ? "" : rawSettingsProxy;
   const proxyPath = linkBaseOverride ?? sanitizedProxy;
+  console.log(`[render] slug=${page.slug} rawProxy=${JSON.stringify(rawSettingsProxy)} linkBaseOverride=${JSON.stringify(linkBaseOverride)} proxyPath=${JSON.stringify(proxyPath)}`);
   const canonicalBase = parentDomain ? `https://${parentDomain}${sanitizedProxy}` : `https://${website.domain}`;
   const pageUrl = `${canonicalBase}/${page.slug}`;
   const baseUrl = canonicalBase;
@@ -529,6 +530,16 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       document.querySelectorAll('main a[href^="/"]').forEach(function(a){
         var h = a.getAttribute('href');
         if (!h.startsWith(base)) a.setAttribute('href', base + h);
+      });
+    })();
+    </script>` : ""}
+    ${(!linkBaseOverride && rawSettingsProxy.startsWith('/sites/')) ? `<script>
+    // Strip stale /sites/{domain} prefix baked into stored page content (live-site cleanup)
+    (function(){
+      var p = ${JSON.stringify(rawSettingsProxy)};
+      document.querySelectorAll('main a[href]').forEach(function(a){
+        var h = a.getAttribute('href');
+        if (h && h.startsWith(p + '/')) a.setAttribute('href', h.slice(p.length));
       });
     })();
     </script>` : ""}
@@ -1757,6 +1768,20 @@ Return ONLY valid JSON (no markdown):
       return res.send(robotsContent);
     }
 
+    // Detect whether this request is from the live custom domain (Cloudflare-proxied) or from
+    // the admin app preview. When the incoming Host matches the website's own domain, this is a
+    // live-site request and we must use the real proxy path (not the /sites/... admin prefix).
+    const reqHost = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+    const isLiveSiteRequest = reqHost === req.params.domain.toLowerCase();
+    let siteLinkBase: string;
+    if (isLiveSiteRequest) {
+      const rawPx = ((website.settings as any)?.proxyPath || "") as string;
+      siteLinkBase = rawPx.startsWith("/sites/") ? "" : rawPx;
+    } else {
+      siteLinkBase = `/sites/${req.params.domain}`;
+    }
+    console.log(`[sites-route] slug=${slug} reqHost=${reqHost} domain=${req.params.domain} isLive=${isLiveSiteRequest} siteLinkBase=${JSON.stringify(siteLinkBase)}`);
+
     const page = await storage.getPageBySlug(website.id, slug);
     const brandProfiles = await storage.getBrandProfiles(website.accountId);
     const brand = brandProfiles[0];
@@ -1768,7 +1793,7 @@ Return ONLY valid JSON (no markdown):
         res.setHeader("Cache-Control", "public, max-age=3600");
         return res.send(hubPage.content);
       }
-      const dynamic = await tryGenerateDynamicPage(slug, website, brand);
+      const dynamic = await tryGenerateDynamicPage(slug, website, brand, siteLinkBase || undefined);
       if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
       if (dynamic && "html" in dynamic) {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1783,8 +1808,8 @@ Return ONLY valid JSON (no markdown):
     const version = await storage.getActivePageVersion(page.id);
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-    const previewLinkBase = `/sites/${req.params.domain}`;
-    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, previewLinkBase);
+
+    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, siteLinkBase || undefined);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
@@ -1894,6 +1919,7 @@ Return ONLY valid JSON (no markdown):
         }
       }
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
+      console.log(`[domain-mw] storedProxy=${JSON.stringify(storedProxyPath)} effectiveLinkBase=${JSON.stringify(effectiveLinkBase)} rawSlug=${rawSlug}`);
 
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
