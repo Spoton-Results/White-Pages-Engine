@@ -226,7 +226,7 @@ function ChildLinksModal({ hub, websiteId, domain, onClose }: { hub: HubPage; we
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {links.map(l => (
                 <div key={l.slug} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", fontSize: ".8rem" }}>
-                  <a href={`https://${domain}/${l.slug}`} target="_blank" rel="noopener noreferrer"
+                  <a href={`${window.location.origin}/sites/${domain}/${l.slug}`} target="_blank" rel="noopener noreferrer"
                     style={{ color: "#1d4ed8", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", textDecoration: "none" }}>
                     {l.title}
                   </a>
