@@ -359,7 +359,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           allRelatedServices,
           website.domain,
           blueprintTemplate?.slugTemplate,
-          (website.settings as any)?.proxyPath || "",
+          (() => { const rp = ((website.settings as any)?.proxyPath || "") as string; return rp.startsWith("/sites/") ? "" : rp; })(),
         );
 
         const bpOverride = applyBlueprintTemplates(blueprintTemplate, {
@@ -479,7 +479,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   try {
     const { generateSitemapsForWebsite } = await import("./sitemap");
     const pDomain = (website.settings as any)?.parentDomain;
-    const pPath = (website.settings as any)?.proxyPath || "";
+    const pPathRaw = ((website.settings as any)?.proxyPath || "") as string;
+    const pPath = pPathRaw.startsWith("/sites/") ? "" : pPathRaw;
     const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
     await generateSitemapsForWebsite(job.websiteId, website.domain, canonBase);
   } catch { /* non-critical */ }

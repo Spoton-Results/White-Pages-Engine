@@ -83,7 +83,11 @@ interface NavData {
 }
 
 async function resolveNavData(page: any, websiteId: string): Promise<[NavData["statePages"], NavData["cityPages"], string, NavData["siblingServices"]]> {
-  const statePages = await storage.getStateNavPages(websiteId);
+  // Extract service slug from current page slug (format: {service}-in-{location})
+  const pageServiceSlug = page.slug && page.slug.includes("-in-")
+    ? page.slug.slice(0, page.slug.lastIndexOf("-in-"))
+    : undefined;
+  const statePages = await storage.getStateNavPages(websiteId, pageServiceSlug);
   let cityPages: NavData["cityPages"] = [];
   let stateDisplayName = "";
   let siblingServices: NavData["siblingServices"] = [];
@@ -197,7 +201,7 @@ async function resolveServiceBanks(websiteId: string, serviceSlugFromUrl: string
 
 // Returns { html } to serve content or { redirect } to redirect, or null for true 404
 async function tryGenerateDynamicPage(
-  slug: string, website: any, brand: any,
+  slug: string, website: any, brand: any, linkBase?: string,
 ): Promise<{ html: string } | { redirect: string } | null> {
   try {
     // Hard limit: never dynamically generate pages with very long slugs
@@ -210,7 +214,9 @@ async function tryGenerateDynamicPage(
     const locationSlug = slug.slice(inIdx + 4);
     if (!serviceSlugFromUrl || !locationSlug) return null;
 
-    const proxyPath = (website.settings as any)?.proxyPath || "";
+    // Sanitize proxyPath: admin-preview paths (starting with /sites/) must never be used for live page links
+    const rawSettingsProxy = ((website.settings as any)?.proxyPath || "") as string;
+    const proxyPath = linkBase ?? (rawSettingsProxy.startsWith("/sites/") ? "" : rawSettingsProxy);
 
     // ── Step 1: resolve location ──────────────────────────────────────────────
     const loc = await resolveLocation(locationSlug);
@@ -285,7 +291,7 @@ async function tryGenerateDynamicPage(
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
     console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
-    return { html: renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }) };
+    return { html: renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, proxyPath || undefined) };
 
   } catch (err) {
     console.error("[dynamic-page] error for slug", slug, err);
@@ -332,8 +338,11 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
   const parentDomain = (website.settings as any)?.parentDomain;
-  const proxyPath = linkBaseOverride ?? (website.settings as any)?.proxyPath ?? "";
-  const canonicalBase = parentDomain ? `https://${parentDomain}${(website.settings as any)?.proxyPath || ""}` : `https://${website.domain}`;
+  const rawSettingsProxy = ((website.settings as any)?.proxyPath ?? "") as string;
+  // Sanitize: admin-preview paths (starting with /sites/) must never leak into live page rendering
+  const sanitizedProxy = rawSettingsProxy.startsWith("/sites/") ? "" : rawSettingsProxy;
+  const proxyPath = linkBaseOverride ?? sanitizedProxy;
+  const canonicalBase = parentDomain ? `https://${parentDomain}${sanitizedProxy}` : `https://${website.domain}`;
   const pageUrl = `${canonicalBase}/${page.slug}`;
   const baseUrl = canonicalBase;
 
@@ -513,10 +522,10 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
         (_, open, name, close) => `${open}${name.trim()}${close}`)
     }
-    ${proxyPath ? `<script>
-    // Rewrite root-relative body links to use the correct path prefix
+    ${(linkBaseOverride && linkBaseOverride.startsWith('/sites/')) ? `<script>
+    // Rewrite root-relative body links to use the correct path prefix (admin preview only)
     (function(){
-      var base = ${JSON.stringify(proxyPath)};
+      var base = ${JSON.stringify(linkBaseOverride)};
       document.querySelectorAll('main a[href^="/"]').forEach(function(a){
         var h = a.getAttribute('href');
         if (!h.startsWith(base)) a.setAttribute('href', base + h);
@@ -1522,7 +1531,8 @@ Return ONLY valid JSON (no markdown):
     // Clear chunk cache so regenerated content is served immediately
     invalidateSitemapCache(req.params.websiteId as string);
     const pDomain = (website.settings as any)?.parentDomain;
-    const pPath = (website.settings as any)?.proxyPath || "";
+    const pPathRaw = ((website.settings as any)?.proxyPath || "") as string;
+    const pPath = pPathRaw.startsWith("/sites/") ? "" : pPathRaw;
     const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
     const keys = await generateSitemapsForWebsite((req.params.websiteId as string), website.domain, canonBase);
     return res.json({ message: "Sitemaps generated", keys });
@@ -1543,7 +1553,8 @@ Return ONLY valid JSON (no markdown):
     if (rows.length === 0) return res.json({ submitted: 0, nextOffset: offset, total, done: true });
 
     const pDom = (website.settings as any)?.parentDomain;
-    const pPth = (website.settings as any)?.proxyPath || "";
+    const pPthRaw = ((website.settings as any)?.proxyPath || "") as string;
+    const pPth = pPthRaw.startsWith("/sites/") ? "" : pPthRaw;
     const idxBase = pDom ? `https://${pDom}${pPth}` : `https://${website.domain}`;
     const urls = rows.map(p => `${idxBase}/${p.slug}`);
     const { submitUrlsToGoogle } = await import("./services/gsc-indexing");
@@ -1608,7 +1619,8 @@ Return ONLY valid JSON (no markdown):
     const website = await storage.getWebsiteByDomain(req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
-    const pp = (website.settings as any)?.proxyPath || "";
+    const ppRaw = ((website.settings as any)?.proxyPath || "") as string;
+    const pp = ppRaw.startsWith("/sites/") ? "" : ppRaw;
     const base = pd ? `https://${pd}${pp}` : `https://${website.domain}`;
     const sitemapList = await storage.getSitemapsMeta(website.id);
     const today = new Date().toISOString().split("T")[0];
@@ -1628,7 +1640,8 @@ Return ONLY valid JSON (no markdown):
     const website = await storage.getWebsiteByDomain(req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
-    const pp = (website.settings as any)?.proxyPath || "";
+    const ppRaw2 = ((website.settings as any)?.proxyPath || "") as string;
+    const pp = ppRaw2.startsWith("/sites/") ? "" : ppRaw2;
     const base = pd ? `https://${pd}${pp}` : `https://${website.domain}`;
     const chunkIndex = parseInt(req.params.num, 10) - 1;
     const chunkSlug = `sitemap-${req.params.num}`;
@@ -1662,7 +1675,8 @@ Return ONLY valid JSON (no markdown):
     const website = await storage.getWebsiteByDomain(req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
-    const pp = (website.settings as any)?.proxyPath || "";
+    const ppRaw3 = ((website.settings as any)?.proxyPath || "") as string;
+    const pp = ppRaw3.startsWith("/sites/") ? "" : ppRaw3;
     const sitemapUrl = pd ? `https://${pd}${pp}/sitemap.xml` : `https://${website.domain}/sitemap.xml`;
     const robotsContent = website.robotsTxt || generateRobotsTxt(website.domain, sitemapUrl);
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -1857,13 +1871,27 @@ Return ONLY valid JSON (no markdown):
         return next(); // unknown domain — fall through to admin app
       }
 
-      // Strip the proxyPath prefix (e.g. /pages) from incoming URLs before slug matching
-      const rawProxyPath = ((website.settings as any)?.proxyPath || "").replace(/\/$/, "");
+      // Strip the proxyPath prefix (e.g. /pages) from incoming URLs before slug matching.
+      // If the stored proxyPath is an admin-preview-style path (starts with /sites/), ignore
+      // it for slug extraction and fall back to detecting the prefix from the URL directly.
+      const storedProxyPath = ((website.settings as any)?.proxyPath || "").replace(/\/$/, "");
+      const rawProxyPath = storedProxyPath.startsWith("/sites/") ? "" : storedProxyPath;
       let effectivePath = req.path;
+      let effectiveLinkBase = rawProxyPath; // used later as linkBaseOverride for renderPageHtml
       if (rawProxyPath && req.path.startsWith(rawProxyPath + "/")) {
         effectivePath = req.path.slice(rawProxyPath.length);
       } else if (rawProxyPath && (req.path === rawProxyPath || req.path === rawProxyPath + "/")) {
         effectivePath = "/";
+      } else if (!rawProxyPath) {
+        // No valid proxyPath configured — auto-detect from common path prefixes
+        const knownPrefixes = ["/pages", "/p"];
+        for (const pfx of knownPrefixes) {
+          if (req.path.startsWith(pfx + "/")) {
+            effectivePath = req.path.slice(pfx.length);
+            effectiveLinkBase = pfx;
+            break;
+          }
+        }
       }
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
 
@@ -1979,7 +2007,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
           console.log(`[hub-page] 200 ${host}/${rawSlug}`);
           return res.send(hubPage.content);
         }
-        const dynamic = await tryGenerateDynamicPage(rawSlug, website, brand);
+        const dynamic = await tryGenerateDynamicPage(rawSlug, website, brand, effectiveLinkBase || undefined);
         if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
         if (dynamic && "html" in dynamic) {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1993,7 +2021,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
       const version = await storage.getActivePageVersion(page.id);
       const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
+      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, effectiveLinkBase || undefined);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=3600");
       console.log(`[page-serve] 200 ${host}/${rawSlug}`);
@@ -3024,7 +3052,8 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
             const { scheduleSitemapRegen, getAutomationSettings } = await import("./services/automation");
             const autoSettings = getAutomationSettings(website);
             const pDomain = (website.settings as any)?.parentDomain;
-            const pPath = (website.settings as any)?.proxyPath || "";
+            const pPathRaw4 = ((website.settings as any)?.proxyPath || "") as string;
+            const pPath = pPathRaw4.startsWith("/sites/") ? "" : pPathRaw4;
             const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
             scheduleSitemapRegen(websiteId, website.domain, canonBase, autoSettings.sitemapRegenDebounceMinutes * 60 * 1000);
           } catch { /* non-critical */ }

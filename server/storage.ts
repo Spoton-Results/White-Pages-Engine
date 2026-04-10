@@ -735,7 +735,7 @@ export async function insertStateData(data: InsertStateData): Promise<StateData>
 
 // ─── Page Navigation (states/cities footer grid) ─────────────────────────────
 
-export async function getStateNavPages(websiteId: string): Promise<{displayName: string, slug: string}[]> {
+export async function getStateNavPages(websiteId: string, serviceSlug?: string): Promise<{displayName: string, slug: string}[]> {
   const [hubPages, states] = await Promise.all([
     db.select({ title: pages.title, slug: pages.slug })
       .from(pages)
@@ -745,14 +745,32 @@ export async function getStateNavPages(websiteId: string): Promise<{displayName:
       .from(stateData)
       .orderBy(asc(stateData.stateName)),
   ]);
+
+  // When a serviceSlug is provided, prefer pages whose slug starts with that service prefix
+  // so the "Explore All Locations" nav links stay on the same service
+  const servicePrefix = serviceSlug ? serviceSlug + "-" : null;
+
   const seen = new Set<string>();
   const result: {displayName: string, slug: string}[] = [];
   for (const state of states) {
-    for (const p of hubPages) {
-      if (!seen.has(state.stateName) && p.title.toLowerCase().includes(`in ${state.stateName.toLowerCase()}`)) {
-        seen.add(state.stateName);
-        result.push({ displayName: state.stateName, slug: p.slug });
-        break;
+    // First pass: try to find a state hub page for the same service
+    if (servicePrefix) {
+      for (const p of hubPages) {
+        if (!seen.has(state.stateName) && p.slug.startsWith(servicePrefix) && p.title.toLowerCase().includes(state.stateName.toLowerCase())) {
+          seen.add(state.stateName);
+          result.push({ displayName: state.stateName, slug: p.slug });
+          break;
+        }
+      }
+    }
+    // Second pass: fall back to any state hub page for this state
+    if (!seen.has(state.stateName)) {
+      for (const p of hubPages) {
+        if (!seen.has(state.stateName) && p.title.toLowerCase().includes(`in ${state.stateName.toLowerCase()}`)) {
+          seen.add(state.stateName);
+          result.push({ displayName: state.stateName, slug: p.slug });
+          break;
+        }
       }
     }
   }

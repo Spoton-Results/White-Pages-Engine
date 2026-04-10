@@ -77,7 +77,9 @@ export function renderHubPageHtml(opts: HubPageRenderOptions): string {
   const phone = brand?.phone || website.settings?.phone || "";
   const mainWebsiteUrl = website.settings?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
   const parentDomain = website.settings?.parentDomain;
-  const proxyPath = website.settings?.proxyPath || "";
+  const rawProxyPath = (website.settings?.proxyPath || "") as string;
+  // Sanitize: admin-preview paths (starting with /sites/) must never be used in live page content
+  const proxyPath = rawProxyPath.startsWith("/sites/") ? "" : rawProxyPath;
   const canonicalBase = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
   const pageUrl = `${canonicalBase}/${slug}`;
   const baseUrl = canonicalBase;
