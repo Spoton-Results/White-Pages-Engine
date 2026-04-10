@@ -1,4 +1,4 @@
-import { generateFirstPass, reviewAndRewrite, type PageContext } from "./claude";
+import { generateFirstPass, type PageContext } from "./claude";
 import { savePageArtifact, saveLog, isR2Configured } from "./r2";
 import * as db from "../storage";
 import type { Blueprint, Location, Service, Industry, Website, BrandProfile, GenerationJob } from "@shared/schema";
@@ -183,23 +183,9 @@ export async function runGenerationJob(
 
         const qaResult = runRuleQA(generated, blueprint);
 
-        let finalHtml = generated.contentHtml;
-        let reviewNotes = "";
-        let finalScore = generated.publishScore;
-
-        if (qaResult.passed) {
-          try {
-            const review = await reviewAndRewrite(generated.contentHtml, ctx);
-            reviewNotes = review.notes;
-            if (!review.passed && review.rewrittenHtml) {
-              finalHtml = review.rewrittenHtml;
-              finalScore = review.score;
-              log(`Second pass rewrite applied for ${generated.slug}`);
-            }
-          } catch (reviewErr: any) {
-            log(`Review pass failed (non-fatal): ${reviewErr.message}`);
-          }
-        }
+        const finalHtml = generated.contentHtml;
+        const reviewNotes = "";
+        const finalScore = generated.publishScore;
 
         const existingPage = await db.getPageBySlug(task.websiteId, generated.slug);
         if (existingPage) {
