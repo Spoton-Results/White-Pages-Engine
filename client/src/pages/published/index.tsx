@@ -35,6 +35,8 @@ export default function PublishedPagesPage() {
   const [tierPreviewing, setTierPreviewing] = useState(false);
   const [tierSaving, setTierSaving] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<{ tier: number; minScore: number | null; maxScore: number | null; reason: string } | null>(null);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -144,6 +146,35 @@ export default function PublishedPagesPage() {
     } catch (e: any) {
       toast({ title: "Failed", description: e.message, variant: "destructive" });
     } finally { setTierSaving(false); }
+  };
+
+  const suggestTier = async () => {
+    setAiSuggesting(true); setAiSuggestion(null);
+    const selectedService = (tierServices as any[]).find((s: any) => s.id === tierFilters.serviceId);
+    const selectedBlueprint = (tierBlueprints as any[]).find((b: any) => b.id === tierFilters.blueprintId);
+    try {
+      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-tier-suggest`, {
+        serviceName: selectedService?.name || "",
+        locationName: tierFilters.locationName.trim(),
+        blueprintName: selectedBlueprint?.name || "",
+        currentTier: tierTarget,
+        scoreMin: tierFilters.scoreMin,
+        scoreMax: tierFilters.scoreMax,
+      });
+      setAiSuggestion(result);
+    } catch (e: any) {
+      toast({ title: "AI suggestion failed", description: e.message, variant: "destructive" });
+    } finally { setAiSuggesting(false); }
+  };
+
+  const applyAiSuggestion = () => {
+    if (!aiSuggestion) return;
+    setTierTarget(String(aiSuggestion.tier));
+    setTierFilters(f => ({
+      ...f,
+      scoreMin: aiSuggestion.minScore != null ? String(aiSuggestion.minScore) : f.scoreMin,
+      scoreMax: aiSuggestion.maxScore != null ? String(aiSuggestion.maxScore) : f.scoreMax,
+    }));
   };
 
   const submitToGoogle = async () => {
@@ -409,7 +440,7 @@ export default function PublishedPagesPage() {
       </div>
 
       {/* Fix 5 — Bulk Set Tier Dialog */}
-      <Dialog open={showBulkTier} onOpenChange={v => { if (!v) { setShowBulkTier(false); setTierPreview(null); } }}>
+      <Dialog open={showBulkTier} onOpenChange={v => { if (!v) { setShowBulkTier(false); setTierPreview(null); setAiSuggestion(null); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Filter className="size-4" />Bulk Set Page Tier</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-4 py-2">
@@ -467,6 +498,45 @@ export default function PublishedPagesPage() {
                   value={tierFilters.scoreMax} onChange={e => setTierFilters(f => ({ ...f, scoreMax: e.target.value }))} />
               </div>
             </div>
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={suggestTier}
+                disabled={aiSuggesting}
+                data-testid="btn-ai-suggest-tier"
+                className="gap-2 text-xs border-violet-300 text-violet-700 hover:bg-violet-50"
+              >
+                {aiSuggesting ? (
+                  <><span className="animate-spin inline-block size-3 border-2 border-violet-400 border-t-transparent rounded-full" />Thinking…</>
+                ) : (
+                  <><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>AI Suggest</>
+                )}
+              </Button>
+            </div>
+            {aiSuggestion && (
+              <div className="border border-violet-200 bg-violet-50/60 rounded-lg p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-violet-800">AI Recommendation</span>
+                  <span className="text-xs font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                    Tier {aiSuggestion.tier}
+                    {aiSuggestion.minScore != null || aiSuggestion.maxScore != null
+                      ? ` · Score ${aiSuggestion.minScore ?? ""}–${aiSuggestion.maxScore ?? ""}`
+                      : ""}
+                  </span>
+                </div>
+                <p className="text-xs text-violet-700 leading-snug">{aiSuggestion.reason}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="self-start h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
+                  onClick={applyAiSuggestion}
+                  data-testid="btn-apply-ai-suggestion"
+                >
+                  Apply These Settings
+                </Button>
+              </div>
+            )}
             {tierPreview && (
               <div className="bg-muted/50 rounded-lg p-3 text-sm">
                 <strong>{tierPreview.count}</strong> page{tierPreview.count !== 1 ? "s" : ""} match your filters and will be set to Tier {tierTarget}.

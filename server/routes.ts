@@ -2397,6 +2397,52 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json(result);
   });
 
+  // AI Suggest — recommend tier + score range from filter context
+  app.post("/api/websites/:id/pages/bulk-tier-suggest", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
+    const { serviceName, locationName, blueprintName, currentTier, scoreMin, scoreMax } = req.body as Record<string, string | undefined>;
+    const prompt = `You are an SEO tier-assignment assistant for a white-pages publishing platform called Nexus.
+
+TIER SYSTEM:
+- Tier 1 (Top Priority): Pages with highest quality scores, included in the primary sitemap, given priority crawl budget. Typically quality score >= 75.
+- Tier 2 (Live): Standard published pages, in secondary sitemap. Typically quality score 45–74.
+- Tier 3 (noindex): Low-quality or thin pages, excluded from sitemaps. Typically quality score < 45.
+
+CURRENT FILTER CONTEXT:
+${serviceName ? `- Service: ${serviceName}` : "- Service: (any)"}
+${locationName ? `- Location filter: ${locationName}` : "- Location: (any)"}
+${blueprintName ? `- Blueprint: ${blueprintName}` : "- Blueprint: (any)"}
+${currentTier ? `- Current tier target: ${currentTier}` : "- Tier target: (not set)"}
+${scoreMin ? `- Min score filter: ${scoreMin}` : "- Min score: (not set)"}
+${scoreMax ? `- Max score filter: ${scoreMax}` : "- Max score: (not set)"}
+
+Based on this context, recommend the best tier and score range to assign.
+Return ONLY valid JSON (no markdown, no explanation outside the JSON):
+{
+  "tier": <1, 2, or 3>,
+  "minScore": <integer 0-100 or null>,
+  "maxScore": <integer 0-100 or null>,
+  "reason": "<one sentence explaining the recommendation>"
+}`;
+
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const msg = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 256,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const raw = msg.content[0].type === "text" ? msg.content[0].text : "";
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return res.status(500).json({ error: "Could not parse AI response" });
+      const result = JSON.parse(jsonMatch[0]);
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message ?? "AI request failed" });
+    }
+  });
+
   // Fix 5 — Bulk set tier on filtered pages
   app.post("/api/websites/:id/pages/bulk-set-tier", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
