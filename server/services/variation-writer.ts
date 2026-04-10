@@ -326,10 +326,9 @@ export async function writeVariationsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<void> {
-  // Write all sections (core + extended) in parallel
-  await Promise.all(SECTIONS.map(section =>
-    writeSingleSection(section, serviceName, accountId, websiteId, ctx)
-  ));
+  for (const section of SECTIONS) {
+    await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
+  }
 }
 
 /**
@@ -351,14 +350,14 @@ export async function fillMissingSectionsForService(
   const filled: string[] = [];
   const errors: string[] = [];
 
-  await Promise.all(toFill.map(async (section) => {
+  for (const section of toFill) {
     try {
       await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
       filled.push(section);
     } catch (err: any) {
       errors.push(`${section}: ${err?.message ?? "unknown error"}`);
     }
-  }));
+  }
 
   return { filled, skipped: skipped as string[], errors };
 }
