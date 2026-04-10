@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "_ZGcmaa8p60VxPZFNqIqW"
+uri = "file://NEXUS_FEATURES.md"
+type = "text"
+title = "Nexus Platform — Full Feature Reference"
