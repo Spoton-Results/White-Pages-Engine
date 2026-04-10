@@ -2389,6 +2389,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     const filters: any = {};
     if (q.serviceId) filters.serviceId = q.serviceId;
     if (q.locationId) filters.locationId = q.locationId;
+    if (q.locationName) filters.locationName = q.locationName;
     if (q.blueprintId) filters.blueprintId = q.blueprintId;
     if (q.scoreMin) filters.scoreMin = Number(q.scoreMin);
     if (q.scoreMax) filters.scoreMax = Number(q.scoreMax);
@@ -2404,6 +2405,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       filters: z.object({
         serviceId: z.string().optional(),
         locationId: z.string().optional(),
+        locationName: z.string().optional(),
         blueprintId: z.string().optional(),
         scoreMin: z.number().optional(),
         scoreMax: z.number().optional(),

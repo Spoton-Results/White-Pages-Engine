@@ -881,18 +881,26 @@ export async function countUnscoredPages(websiteId: string): Promise<number> {
 export interface BulkTierFilters {
   serviceId?: string;
   locationId?: string;
+  locationName?: string;
   blueprintId?: string;
   scoreMin?: number;
   scoreMax?: number;
 }
 
-export async function bulkFilterPagesCount(websiteId: string, filters: BulkTierFilters): Promise<{ count: number; sample: Array<{ title: string; slug: string; tier: number; qualityScore: number | null }> }> {
-  const conditions = [eq(pages.websiteId, websiteId), eq(pages.status, "published" as any)];
+function applyBulkTierConditions(conditions: any[], filters: BulkTierFilters) {
   if (filters.serviceId) conditions.push(eq(pages.serviceId as any, filters.serviceId));
   if (filters.locationId) conditions.push(eq(pages.locationId as any, filters.locationId));
+  if (filters.locationName) {
+    conditions.push(sql`${pages.locationId} IN (SELECT id FROM locations WHERE LOWER(name) LIKE LOWER(${'%' + filters.locationName + '%'}))`);
+  }
   if (filters.blueprintId) conditions.push(eq(pages.blueprintId as any, filters.blueprintId));
   if (filters.scoreMin !== undefined) conditions.push(sql`${pages.qualityScore} >= ${filters.scoreMin}`);
   if (filters.scoreMax !== undefined) conditions.push(sql`${pages.qualityScore} <= ${filters.scoreMax}`);
+}
+
+export async function bulkFilterPagesCount(websiteId: string, filters: BulkTierFilters): Promise<{ count: number; sample: Array<{ title: string; slug: string; tier: number; qualityScore: number | null }> }> {
+  const conditions = [eq(pages.websiteId, websiteId), eq(pages.status, "published" as any)];
+  applyBulkTierConditions(conditions, filters);
   const [{ n }] = await db.select({ n: count() }).from(pages).where(and(...conditions));
   const sample = await db.select({ title: pages.title, slug: pages.slug, tier: pages.tier as any, qualityScore: pages.qualityScore }).from(pages).where(and(...conditions)).orderBy(desc(pages.qualityScore)).limit(5) as any[];
   return { count: Number(n), sample };
@@ -900,11 +908,7 @@ export async function bulkFilterPagesCount(websiteId: string, filters: BulkTierF
 
 export async function bulkSetPageTier(websiteId: string, tier: number, filters: BulkTierFilters): Promise<{ affected: number; slugs: string[] }> {
   const conditions = [eq(pages.websiteId, websiteId), eq(pages.status, "published" as any)];
-  if (filters.serviceId) conditions.push(eq(pages.serviceId as any, filters.serviceId));
-  if (filters.locationId) conditions.push(eq(pages.locationId as any, filters.locationId));
-  if (filters.blueprintId) conditions.push(eq(pages.blueprintId as any, filters.blueprintId));
-  if (filters.scoreMin !== undefined) conditions.push(sql`${pages.qualityScore} >= ${filters.scoreMin}`);
-  if (filters.scoreMax !== undefined) conditions.push(sql`${pages.qualityScore} <= ${filters.scoreMax}`);
+  applyBulkTierConditions(conditions, filters);
   const whereClause = and(...conditions);
   const ids = await db.select({ id: pages.id, slug: pages.slug }).from(pages).where(whereClause);
   if (ids.length === 0) return { affected: 0, slugs: [] };

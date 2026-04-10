@@ -29,7 +29,7 @@ export default function PublishedPagesPage() {
   const [slugInput, setSlugInput] = useState("");
   const [slugError, setSlugError] = useState("");
   const [showBulkTier, setShowBulkTier] = useState(false);
-  const [tierFilters, setTierFilters] = useState<{ serviceId: string; locationId: string; blueprintId: string; scoreMin: string; scoreMax: string }>({ serviceId: "", locationId: "", blueprintId: "", scoreMin: "", scoreMax: "" });
+  const [tierFilters, setTierFilters] = useState<{ serviceId: string; locationName: string; blueprintId: string; scoreMin: string; scoreMax: string }>({ serviceId: "", locationName: "", blueprintId: "", scoreMin: "", scoreMax: "" });
   const [tierTarget, setTierTarget] = useState("1");
   const [tierPreview, setTierPreview] = useState<{ count: number } | null>(null);
   const [tierPreviewing, setTierPreviewing] = useState(false);
@@ -112,11 +112,6 @@ export default function PublishedPagesPage() {
     queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/services`),
     enabled: !!currentAccountId && showBulkTier,
   });
-  const { data: tierLocations = [] } = useQuery({
-    queryKey: ["/api/accounts", currentAccountId, "locations"],
-    queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/locations`),
-    enabled: !!currentAccountId && showBulkTier,
-  });
   const { data: tierBlueprints = [] } = useQuery({
     queryKey: ["/api/accounts", currentAccountId, "blueprints"],
     queryFn: () => api.get<any[]>(`/api/accounts/${currentAccountId}/blueprints`),
@@ -127,7 +122,7 @@ export default function PublishedPagesPage() {
     setTierPreviewing(true); setTierPreview(null);
     const p = new URLSearchParams();
     if (tierFilters.serviceId) p.set("serviceId", tierFilters.serviceId);
-    if (tierFilters.locationId) p.set("locationId", tierFilters.locationId);
+    if (tierFilters.locationName.trim()) p.set("locationName", tierFilters.locationName.trim());
     if (tierFilters.blueprintId) p.set("blueprintId", tierFilters.blueprintId);
     if (tierFilters.scoreMin) p.set("scoreMin", tierFilters.scoreMin);
     if (tierFilters.scoreMax) p.set("scoreMax", tierFilters.scoreMax);
@@ -142,10 +137,10 @@ export default function PublishedPagesPage() {
   const applyTier = async () => {
     setTierSaving(true);
     try {
-      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-set-tier`, { tier: parseInt(tierTarget), filters: tierFilters });
+      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-set-tier`, { tier: parseInt(tierTarget), filters: { ...tierFilters, locationName: tierFilters.locationName.trim() || undefined } });
       qc.invalidateQueries({ queryKey: ["/api/pages/published", selectedWebsite] });
-      toast({ title: `Set ${result.updated} page(s) to Tier ${tierTarget}` });
-      setShowBulkTier(false); setTierPreview(null); setTierFilters({ serviceId: "", locationId: "", blueprintId: "", scoreMin: "", scoreMax: "" });
+      toast({ title: `Set ${result.affected ?? result.updated} page(s) to Tier ${tierTarget}` });
+      setShowBulkTier(false); setTierPreview(null); setTierFilters({ serviceId: "", locationName: "", blueprintId: "", scoreMin: "", scoreMax: "" });
     } catch (e: any) {
       toast({ title: "Failed", description: e.message, variant: "destructive" });
     } finally { setTierSaving(false); }
@@ -432,13 +427,13 @@ export default function PublishedPagesPage() {
               </div>
               <div>
                 <Label className="text-xs mb-1 block">Location</Label>
-                <Select value={tierFilters.locationId} onValueChange={v => setTierFilters(f => ({ ...f, locationId: v === "all" ? "" : v }))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Any location" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Any location</SelectItem>
-                    {(tierLocations as any[]).map((l: any) => <SelectItem key={l.id} value={l.id}>{l.city}, {l.state}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="Filter by city name…"
+                  value={tierFilters.locationName}
+                  onChange={e => setTierFilters(f => ({ ...f, locationName: e.target.value }))}
+                  data-testid="input-tier-location-name"
+                />
               </div>
               <div>
                 <Label className="text-xs mb-1 block">Blueprint</Label>
