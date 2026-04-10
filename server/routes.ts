@@ -78,7 +78,7 @@ function notFoundHtml(msg: string): string {
 interface NavData {
   statePages: { displayName: string; slug: string }[];
   cityPages: { displayName: string; slug: string }[];
-  siblingServices: { title: string; slug: string }[];
+  siblingServices: { title: string; slug: string; serviceName: string | null }[];
   stateDisplayName?: string;
 }
 
@@ -598,7 +598,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       <div class="loc-nav-title">More Services${locationFromTitle ? ` in ${locationFromTitle}` : ""}</div>
       <div class="loc-grid">
         ${(navData.siblingServices ?? []).map(p => {
-          const svcName = p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim();
+          const svcName = p.serviceName ?? p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim();
           return `<a href="${proxyPath}/${p.slug}">${svcName}</a>`;
         }).join("\n        ")}
       </div>

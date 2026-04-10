@@ -729,21 +729,22 @@ export async function getStateNavPages(websiteId: string): Promise<{displayName:
   return result;
 }
 
-export async function getSiblingServicePages(websiteId: string, currentSlug: string, currentPageId: string): Promise<{title: string, slug: string}[]> {
+export async function getSiblingServicePages(websiteId: string, currentSlug: string, currentPageId: string): Promise<{title: string, slug: string, serviceName: string | null}[]> {
   const inIdx = currentSlug.lastIndexOf("-in-");
   if (inIdx === -1) return [];
   const locationSuffix = currentSlug.slice(inIdx); // e.g. "-in-dallas-tx"
-  const rows = await db.select({ title: pages.title, slug: pages.slug })
+  const rows = await db.select({ title: pages.title, slug: pages.slug, serviceName: services.name })
     .from(pages)
+    .leftJoin(services, eq(pages.serviceId, services.id))
     .where(and(
       eq(pages.websiteId, websiteId),
       eq(pages.status, "published"),
       sql`${pages.slug} LIKE ${"%" + locationSuffix}`,
       sql`${pages.id} != ${currentPageId}`,
     ))
-    .orderBy(asc(pages.title))
+    .orderBy(asc(services.name), asc(pages.title))
     .limit(20);
-  return rows.map(r => ({ title: r.title, slug: r.slug }));
+  return rows.map(r => ({ title: r.title, slug: r.slug, serviceName: r.serviceName ?? null }));
 }
 
 export async function getCityPagesForState(websiteId: string, stateCode: string): Promise<{displayName: string, slug: string}[]> {
