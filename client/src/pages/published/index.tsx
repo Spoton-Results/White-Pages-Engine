@@ -139,7 +139,15 @@ export default function PublishedPagesPage() {
   const applyTier = async () => {
     setTierSaving(true);
     try {
-      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-set-tier`, { tier: parseInt(tierTarget), filters: { ...tierFilters, locationName: tierFilters.locationName.trim() || undefined } });
+      const result = await api.post<any>(`/api/websites/${selectedWebsite}/pages/bulk-set-tier`, {
+        tier: parseInt(tierTarget),
+        filters: {
+          ...tierFilters,
+          locationName: tierFilters.locationName.trim() || undefined,
+          scoreMin: tierFilters.scoreMin !== "" ? Number(tierFilters.scoreMin) : undefined,
+          scoreMax: tierFilters.scoreMax !== "" ? Number(tierFilters.scoreMax) : undefined,
+        },
+      });
       qc.invalidateQueries({ queryKey: ["/api/pages/published", selectedWebsite] });
       toast({ title: `Set ${result.affected ?? result.updated} page(s) to Tier ${tierTarget}` });
       setShowBulkTier(false); setTierPreview(null); setTierFilters({ serviceId: "", locationName: "", blueprintId: "", scoreMin: "", scoreMax: "" });
