@@ -5,7 +5,7 @@ const MODEL = "claude-haiku-4-5-20251001";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 0 });
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
-const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point"] as const;
+const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
 const SECTIONS = [...CORE_SECTIONS, ...EXTENDED_SECTIONS] as const;
 type Section = typeof SECTIONS[number];
 
@@ -284,6 +284,28 @@ Format EXACTLY as shown — no text outside delimiters:
 <p>...</p>
 ====VARIATION_5====
 <p>...</p>
+<p>...</p>`,
+
+  local_stat: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct local market statistics sections for a "${service}" service page.
+
+Each section = 1-2 HTML paragraphs (~80-100 words) that reference compelling, plausible statistics about the local market, business adoption rates, or industry growth to support why this service matters. Use EXACTLY:
+{{service}} {{city}} {{state}} {{state_abbr}} {{business_count}}
+
+CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. Do NOT fabricate specific named studies or real organizations — keep stats general and plausible.
+
+Each variation should emphasize a different type of stat: market size, adoption rate, ROI, cost savings, or growth trend.
+${ctx?.industryName ? `Frame the statistics around the ${ctx.industryName} industry.` : ""}
+
+Format EXACTLY as shown — no text outside delimiters:
+====VARIATION_1====
+<p>...</p>
+====VARIATION_2====
+<p>...</p>
+====VARIATION_3====
+<p>...</p>
+====VARIATION_4====
+<p>...</p>
+====VARIATION_5====
 <p>...</p>`,
 };
 

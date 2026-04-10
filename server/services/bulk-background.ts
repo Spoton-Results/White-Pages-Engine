@@ -109,7 +109,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   const website = await storage.getWebsite(job.websiteId);
   if (!website) {
-    await storage.updateGenerationJob(jobId, { status: "error", completedAt: new Date() });
+    await storage.updateGenerationJob(jobId, { status: "failed", completedAt: new Date() });
     return;
   }
 
@@ -512,7 +512,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     });
     setImmediate(() => runAutoScoringJob(scoringJob.id, website).catch(err => {
       console.error("[auto1] Scoring background job failed:", err);
-      storage.updateGenerationJob(scoringJob.id, { status: "error", completedAt: new Date() }).catch(() => {});
+      storage.updateGenerationJob(scoringJob.id, { status: "failed", completedAt: new Date() }).catch(() => {});
     }));
     console.log(`[auto1] Scoring job ${scoringJob.id} queued for ${website.domain}`);
   } catch (err) {

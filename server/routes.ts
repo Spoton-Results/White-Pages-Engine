@@ -1231,9 +1231,9 @@ Return ONLY valid JSON (no markdown):
           } catch (e: any) { s.progress[i].status = "error"; s.progress[i].error = e.message; }
           await storage.updateGenerationJob(job.id, { settings: s as any, processedPages: i + 1, passedPages: passed });
         }
-        await storage.updateGenerationJob(job.id, { status: "done", completedAt: new Date(), passedPages: passed });
+        await storage.updateGenerationJob(job.id, { status: "completed", completedAt: new Date(), passedPages: passed });
       } catch (e: any) {
-        await storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() });
+        await storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() });
       }
     });
     return res.json({ jobId: job.id });
@@ -2303,7 +2303,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     setImmediate(() => {
       runBulkBackgroundJob(job.id).catch(err => {
         console.error("[bulk-background] unhandled error in job", job.id, err);
-        storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() }).catch(() => {});
+        storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() }).catch(() => {});
       });
     });
 
@@ -2736,7 +2736,7 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     });
     const published = await storage.bulkPublishHubDrafts(websiteId, hubType);
     await storage.updateGenerationJob(job.id, {
-      status: "done" as any,
+      status: "completed" as any,
       processedPages: published,
       passedPages: published,
       completedAt: new Date(),
@@ -2887,9 +2887,9 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
           } catch (e: any) { s.progress[i].status = "error"; s.progress[i].error = e.message; }
           await storage.updateGenerationJob(job.id, { settings: s as any, processedPages: i + 1, passedPages: passed });
         }
-        await storage.updateGenerationJob(job.id, { status: "done", completedAt: new Date(), passedPages: passed });
+        await storage.updateGenerationJob(job.id, { status: "completed", completedAt: new Date(), passedPages: passed });
       } catch (e: any) {
-        await storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() });
+        await storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() });
       }
     });
     return res.json({ jobId: job.id });

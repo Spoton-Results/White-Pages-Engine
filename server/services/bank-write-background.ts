@@ -47,7 +47,7 @@ export async function startBankWriteJob(
   setImmediate(() => {
     runBankWriteJob(job.id).catch(err => {
       console.error("[bank-write] Unexpected error in job", job.id, err);
-      storage.updateGenerationJob(job.id, { status: "error", completedAt: new Date() }).catch(() => {});
+      storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() }).catch(() => {});
     });
   });
 
