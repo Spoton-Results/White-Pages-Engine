@@ -27,6 +27,7 @@ const navigation = [
   { name: "Services", href: "/services", icon: Wrench },
   { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
   { name: "Blueprints", href: "/blueprints", icon: Layers },
+  { name: "Hub Pages", href: "/hub-pages", icon: Network },
 ];
 
 const contentNav = [
@@ -35,7 +36,6 @@ const contentNav = [
   { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
-  { name: "Hub Pages", href: "/hub-pages", icon: Network },
   { name: "Internal Links", href: "/internal-links", icon: Link2 },
   { name: "Automation", href: "/automation", icon: Bot },
   { name: "Bank Health", href: "/bank-health", icon: Activity },
