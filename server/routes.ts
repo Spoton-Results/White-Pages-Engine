@@ -317,7 +317,7 @@ function extractFaqSchema(contentHtml: string, pageUrl: string): string | null {
   });
 }
 
-function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [], siblingServices: [] }): string {
+function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [], siblingServices: [] }, linkBaseOverride?: string): string {
   const brandName = brand?.name || website.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || (website.settings as any)?.phone || "";
@@ -332,8 +332,8 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
   const parentDomain = (website.settings as any)?.parentDomain;
-  const proxyPath = (website.settings as any)?.proxyPath || "";
-  const canonicalBase = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
+  const proxyPath = linkBaseOverride ?? (website.settings as any)?.proxyPath ?? "";
+  const canonicalBase = parentDomain ? `https://${parentDomain}${(website.settings as any)?.proxyPath || ""}` : `https://${website.domain}`;
   const pageUrl = `${canonicalBase}/${page.slug}`;
   const baseUrl = canonicalBase;
 
@@ -513,6 +513,16 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
         (_, open, name, close) => `${open}${name.trim()}${close}`)
     }
+    ${proxyPath ? `<script>
+    // Rewrite root-relative body links to use the correct path prefix
+    (function(){
+      var base = ${JSON.stringify(proxyPath)};
+      document.querySelectorAll('main a[href^="/"]').forEach(function(a){
+        var h = a.getAttribute('href');
+        if (!h.startsWith(base)) a.setAttribute('href', base + h);
+      });
+    })();
+    </script>` : ""}
 
     <div class="contact-section">
       <h2>${ctaHeading}</h2>
@@ -1721,7 +1731,8 @@ Return ONLY valid JSON (no markdown):
     const version = await storage.getActivePageVersion(page.id);
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices });
+    const previewLinkBase = `/sites/${req.params.domain}`;
+    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, previewLinkBase);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
