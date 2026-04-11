@@ -134,6 +134,15 @@ export default function LocationsPage() {
     },
   });
 
+  const loadStandard = useMutation({
+    mutationFn: () => api.post<{ inserted: number; skipped: number }>(`/api/accounts/${selectedAccount}/locations/load-standard`, {}),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["/api/locations"] });
+      toast({ title: `${result.inserted} cities added, ${result.skipped} already existed` });
+    },
+    onError: (err: any) => toast({ title: "Load failed", description: err.message, variant: "destructive" }),
+  });
+
   const filtered = useMemo(() => {
     let result = (locations as any[]).filter((l: any) =>
       !searchText || l.name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -157,12 +166,23 @@ export default function LocationsPage() {
             <p className="text-muted-foreground text-sm mt-0.5">Manage target states, cities, and neighborhoods.</p>
           </div>
           {selectedAccount && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button variant="outline" className="gap-2 text-violet-600 border-violet-300 hover:bg-violet-50" size="sm" onClick={() => setShowAiSuggest(true)} data-testid="button-ai-suggest-cities">
                 <Sparkles className="size-4" />AI Suggest Cities
               </Button>
               <Button variant="outline" className="gap-2" size="sm" onClick={() => setShowBulk(true)} data-testid="button-bulk-import">
                 <Download className="size-4" />Bulk Import
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                onClick={() => loadStandard.mutate()}
+                disabled={loadStandard.isPending}
+                data-testid="button-load-standard-cities"
+              >
+                {loadStandard.isPending ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+                {loadStandard.isPending ? "Loading…" : "Load Standard US City List"}
               </Button>
               <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-add-location">
                 <Plus className="size-4" />Add Location
