@@ -100,6 +100,10 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
         </div>
       </div>
 
+      <div className="md:hidden px-3 py-3 border-b">
+        <AgencyClientSwitcher stacked />
+      </div>
+
       <div className="flex-1 py-4 px-3 flex flex-col gap-0.5 overflow-y-auto">
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
           Platform
@@ -133,7 +137,7 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
   );
 }
 
-function AgencyClientSwitcher() {
+function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
   const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } = useAccountContext();
 
   const { data: agencies = [] } = useQuery({
@@ -169,9 +173,9 @@ function AgencyClientSwitcher() {
     : "All Clients";
 
   return (
-    <div className="flex items-center gap-2" data-testid="agency-client-switcher">
+    <div className={stacked ? "flex flex-col gap-2 w-full" : "flex items-center gap-2"} data-testid="agency-client-switcher">
       <Select value={selectedAgencyId ?? "all"} onValueChange={handleAgencyChange}>
-        <SelectTrigger className="h-8 text-xs w-[160px] gap-1" data-testid="select-agency">
+        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-agency">
           <Handshake className="size-3 text-muted-foreground shrink-0" />
           <SelectValue placeholder="All Agencies">
             <span className="truncate">{selectedAgencyLabel}</span>
@@ -186,7 +190,7 @@ function AgencyClientSwitcher() {
       </Select>
 
       <Select value={selectedAccountId ?? "all"} onValueChange={handleAccountChange}>
-        <SelectTrigger className="h-8 text-xs w-[160px] gap-1" data-testid="select-client">
+        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-client">
           <Building2 className="size-3 text-muted-foreground shrink-0" />
           <SelectValue placeholder="All Clients">
             <span className="truncate">{selectedAccountLabel}</span>
@@ -261,7 +265,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <div className="flex-1 hidden md:block" />
 
             <div className="flex items-center gap-3">
-              <AgencyClientSwitcher />
+              <div className="hidden md:flex">
+                <AgencyClientSwitcher />
+              </div>
               <Button variant="ghost" size="icon" className="text-muted-foreground size-8">
                 <Bell className="size-4" />
               </Button>
