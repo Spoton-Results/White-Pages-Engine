@@ -2945,30 +2945,7 @@ Return ONLY valid JSON (no markdown):
     if (host === "subtrackers.spotonresults.com") {
       return res.redirect(301, "https://subtrackers.spotonresults.com/pages/");
     }
-    if (host === "spotonnexus.com") {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SpotOn Nexus</title>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{background:#0a0a0a;color:#fff;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
-    .wrap{text-align:center;padding:2rem}
-    h1{font-size:3rem;font-weight:700;letter-spacing:-.02em;margin-bottom:1rem}
-    p{font-size:1.25rem;color:#a0a0a0}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>SpotOn Nexus</h1>
-    <p>Managed Local SEO Infrastructure for Agencies &mdash; Coming Soon.</p>
-  </div>
-</body>
-</html>`);
-    }
+    // spotonnexus.com — fall through to Vite/static so React landing page renders
     return next();
   });
 
@@ -2983,10 +2960,13 @@ Return ONLY valid JSON (no markdown):
         console.log(`[domain-mw] host=${host} path=${req.path}`);
       }
 
-      // Skip Replit platform domains, localhost, and internal asset paths
+      // Skip Replit platform domains, localhost, landing page domain, and internal asset paths
+      const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
       if (!host
         || host === "localhost"
         || host === "0.0.0.0"
+        || host === landingDomain
+        || host === `www.${landingDomain}`
         || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
         || req.path.startsWith("/api/")
         || req.path.startsWith("/sites/")
