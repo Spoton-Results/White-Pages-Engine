@@ -130,12 +130,12 @@ export default function BlueprintsPage() {
     enabled: !!bulkBpJobId,
     refetchInterval: (q: any) => {
       const s = q.state.data?.status;
-      return s === "done" || s === "error" ? false : 1500;
+      return s === "completed" || s === "failed" ? false : 1500;
     },
   });
 
   const bulkBpJob = bulkBpJobQ.data as any;
-  const bulkBpDone = bulkBpJob?.status === "done" || bulkBpJob?.status === "error";
+  const bulkBpDone = bulkBpJob?.status === "completed" || bulkBpJob?.status === "failed";
 
   const submitBulkBp = async () => {
     const resp = await api.post<any>(`/api/accounts/${selectedAccount}/blueprints/bulk-generate`, {
@@ -569,7 +569,7 @@ export default function BlueprintsPage() {
             </div>
           ) : (
             <div className="py-4">
-              <div className="text-sm font-medium mb-2">{bulkBpDone ? (bulkBpJob?.status === "error" ? "Job failed" : "Done!") : "Generating blueprints…"}</div>
+              <div className="text-sm font-medium mb-2">{bulkBpDone ? (bulkBpJob?.status === "failed" ? "Job failed" : "Done!") : "Generating blueprints…"}</div>
               <div className="h-3 bg-muted rounded overflow-hidden mb-2">
                 <div className="h-full bg-primary transition-all" style={{ width: `${bulkBpJob ? Math.round((bulkBpJob.done / Math.max(bulkBpJob.total, 1)) * 100) : 0}%` }} />
               </div>

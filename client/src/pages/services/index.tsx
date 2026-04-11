@@ -23,6 +23,7 @@ export default function ServicesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [suggestedServices, setSuggestedServices] = useState<any[]>([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
 
@@ -208,7 +209,12 @@ export default function ServicesPage() {
     mutationFn: (id: string) => api.delete(`/api/services/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/services"] });
+      setConfirmDeleteId(null);
       toast({ title: "Service deleted" });
+    },
+    onError: (err: any) => {
+      setConfirmDeleteId(null);
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -328,7 +334,7 @@ export default function ServicesPage() {
                         <TableCell>
                           <Button
                             variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => confirm("Delete service?") && remove.mutate(svc.id)}
+                            onClick={() => setConfirmDeleteId(svc.id)}
                             data-testid={`button-delete-service-${svc.id}`}
                           >
                             <Trash2 className="size-3.5" />
@@ -666,6 +672,22 @@ export default function ServicesPage() {
               <Button type="submit" disabled={create.isPending}>Add</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog — replaces confirm() which is blocked on mobile browsers */}
+      <Dialog open={!!confirmDeleteId} onOpenChange={v => { if (!v) setConfirmDeleteId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete service?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">This will remove the service. Pages referencing it will retain their content but lose the service association.</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={remove.isPending} onClick={() => confirmDeleteId && remove.mutate(confirmDeleteId)}>
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

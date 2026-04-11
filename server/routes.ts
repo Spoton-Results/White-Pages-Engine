@@ -1078,8 +1078,13 @@ Choose cities with high population, commercial activity, or strong demand for th
   });
 
   app.delete("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteService((req.params.id as string));
-    return res.json({ message: "Deleted" });
+    try {
+      await storage.deleteService((req.params.id as string));
+      return res.json({ message: "Deleted" });
+    } catch (e: any) {
+      console.error("[delete-service]", e.message);
+      return res.status(500).json({ message: e.message || "Failed to delete service" });
+    }
   });
 
   // ── Industries ────────────────────────────────────────────────────────────
