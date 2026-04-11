@@ -548,12 +548,18 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       )
     }
     ${(linkBaseOverride && linkBaseOverride.startsWith('/sites/')) ? `<script>
-    // Rewrite root-relative body links to use the correct path prefix (admin preview only)
+    // Rewrite root-relative body links to use the correct path prefix (admin preview only).
+    // Strip any stored proxyPath prefix (e.g. /pages) first so content links like
+    // href="/pages/slug" become href="/sites/domain/slug" — not /sites/domain/pages/slug.
     (function(){
       var base = ${JSON.stringify(linkBaseOverride)};
+      var px = ${JSON.stringify(rawSettingsProxy.startsWith('/sites/') ? '' : rawSettingsProxy)};
       document.querySelectorAll('main a[href^="/"]').forEach(function(a){
         var h = a.getAttribute('href');
-        if (!h.startsWith(base)) a.setAttribute('href', base + h);
+        if (!h.startsWith(base)) {
+          if (px && h.startsWith(px + '/')) h = h.slice(px.length);
+          a.setAttribute('href', base + h);
+        }
       });
     })();
     </script>` : ""}
