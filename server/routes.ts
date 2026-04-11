@@ -2965,8 +2965,7 @@ Return ONLY valid JSON (no markdown):
       if (!host
         || host === "localhost"
         || host === "0.0.0.0"
-        || host === landingDomain
-        || host === `www.${landingDomain}`
+        || ((host === landingDomain || host === `www.${landingDomain}`) && req.path === "/")
         || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
         || req.path.startsWith("/api/")
         || req.path.startsWith("/sites/")
