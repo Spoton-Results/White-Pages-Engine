@@ -1837,7 +1837,8 @@ Return ONLY valid JSON (no markdown):
     // the admin app preview. When the incoming Host matches the website's own domain, this is a
     // live-site request and we must use the real proxy path (not the /sites/... admin prefix).
     const reqHost = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
-    const isLiveSiteRequest = reqHost === req.params.domain.toLowerCase();
+    const isLiveSiteRequest = reqHost === req.params.domain.toLowerCase()
+      || !!(req.headers['cf-connecting-ip']);
     let siteLinkBase: string;
     if (isLiveSiteRequest) {
       const rawPx = ((website.settings as any)?.proxyPath || "") as string;
