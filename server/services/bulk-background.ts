@@ -155,7 +155,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   // city pages can link sideways to sibling services in the same city.
   const allRelatedServices = services.map(s => ({
     name: s,
-    slug: s.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    slug: s.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-"),
   }));
 
   // ── Collect new page URLs for Google Indexing API submission ─────────────
@@ -268,7 +268,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     settings.progress[si] = { service: svc, status: "running", created: 0, updated: 0, skipped: 0, errors: 0 };
     await storage.updateGenerationJob(jobId, { settings: settings as any });
 
-    const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
     let svcCreated = 0, svcUpdated = 0, svcSkipped = 0, svcErrors = 0;
 
     // Pending batch for bulk inserts (new pages only)
