@@ -1870,6 +1870,30 @@ Return ONLY valid JSON (no markdown):
     if (host === "subtrackers.spotonresults.com") {
       return res.redirect(301, "https://subtrackers.spotonresults.com/pages/");
     }
+    if (host === "spotonnexus.com") {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SpotOn Nexus</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0a0a0a;color:#fff;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .wrap{text-align:center;padding:2rem}
+    h1{font-size:3rem;font-weight:700;letter-spacing:-.02em;margin-bottom:1rem}
+    p{font-size:1.25rem;color:#a0a0a0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SpotOn Nexus</h1>
+    <p>Managed Local SEO Infrastructure for Agencies &mdash; Coming Soon.</p>
+  </div>
+</body>
+</html>`);
+    }
     return next();
   });
 
