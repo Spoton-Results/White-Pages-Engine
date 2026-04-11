@@ -523,7 +523,23 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       // Strip " in City, ST" from service link text in Related Services lists
       .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
         (_, open, name, close) => `${open}${name.trim()}${close}`)
-      // On live domain: strip stale /sites/{domain} prefix baked into older published content
+      // On live domain: strip stale link prefixes baked into older published content.
+      // Handle all three forms the content may have been stored with:
+      //   1. absolute + /sites/: href="https://sub.domain.com/sites/sub.domain.com/pages/slug"
+      //   2. absolute root:       href="https://sub.domain.com/pages/slug"
+      //   3. relative /sites/:   href="/sites/sub.domain.com/pages/slug"
+      .replace(
+        (linkBaseOverride && !linkBaseOverride.startsWith('/sites/'))
+          ? new RegExp('href="https://' + website.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/sites/' + website.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/', 'g')
+          : /$^/,
+        'href="/'
+      )
+      .replace(
+        (linkBaseOverride && !linkBaseOverride.startsWith('/sites/'))
+          ? new RegExp('href="https://' + website.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/', 'g')
+          : /$^/,
+        'href="/'
+      )
       .replace(
         (linkBaseOverride && !linkBaseOverride.startsWith('/sites/'))
           ? new RegExp('href="/sites/' + website.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/', 'g')
