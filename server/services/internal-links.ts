@@ -37,19 +37,28 @@ export function buildInternalLinks(
   const links: LinkRecord[] = [];
   const seen = new Set<string>(); // deduplicate from+to pairs
 
-  // Index pages by type for quick lookup
+  // Index pages by type for quick lookup.
+  // location_id is often NULL — fall back to extracting the location key from the slug
+  // (everything after the last "-in-") so cross-service grouping still works.
   const stateHubs = allPages.filter(p => p.pageType === "state_hub");
   const serviceCityPages = allPages.filter(
-    p => (p.pageType === "service_city" || p.pageType === "industry_city") && p.serviceId && p.locationId,
+    p => (p.pageType === "service_city" || p.pageType === "industry_city") && p.serviceId,
   );
 
-  // Build index: locationId → pages
+  function locationKey(p: PageStub): string | null {
+    if (p.locationId) return p.locationId;
+    const m = p.slug.match(/-in-(.+)$/);
+    return m ? m[1] : null;
+  }
+
+  // Build index: locationKey → pages
   const byLocation = new Map<string, PageStub[]>();
   for (const p of serviceCityPages) {
-    if (!p.locationId) continue;
-    const arr = byLocation.get(p.locationId) || [];
+    const key = locationKey(p);
+    if (!key) continue;
+    const arr = byLocation.get(key) || [];
     arr.push(p);
-    byLocation.set(p.locationId, arr);
+    byLocation.set(key, arr);
   }
 
   // For state_hub pages, find the state abbreviation from their slug to match location
@@ -89,8 +98,9 @@ export function buildInternalLinks(
 
   // ── 2. service_city → cross-service in same location ─────────────────────
   for (const page of serviceCityPages) {
-    if (!page.locationId) continue;
-    const siblings = (byLocation.get(page.locationId) || [])
+    const key = locationKey(page);
+    if (!key) continue;
+    const siblings = (byLocation.get(key) || [])
       .filter(p => p.id !== page.id && p.serviceId !== page.serviceId);
     // Take up to maxCrossServiceLinks, prioritise pages we haven't linked to yet
     const picked = siblings.slice(0, maxCrossServiceLinks);

@@ -58,7 +58,7 @@ export default function InternalLinksPage() {
       setTimeout(() => {
         setRebuilding(false);
         qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "internal-links-stats"] });
-      }, 25000);
+      }, 90000);
     },
     onError: (e: any) => toast({ title: "Rebuild failed", description: e.message, variant: "destructive" }),
   });

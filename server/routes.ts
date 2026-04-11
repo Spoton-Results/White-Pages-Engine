@@ -3296,7 +3296,7 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     setImmediate(async () => {
       try {
         const { buildInternalLinks } = await import("./services/internal-links");
-        const allPages = await storage.getPagesForLinking(websiteId, 5000);
+        const allPages = await storage.getPagesForLinking(websiteId, 100000);
         const links = buildInternalLinks(websiteId, allPages as any);
         await storage.clearInternalLinks(websiteId);
         const saved = await storage.saveInternalLinks(links);
