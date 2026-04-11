@@ -522,6 +522,13 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       // Strip " in City, ST" from service link text in Related Services lists
       .replace(/(<a\s[^>]*>)([^<]+?)\s+in\s+[A-Za-z\s.''-]+,\s+[A-Z]{2}(<\/a>)/g,
         (_, open, name, close) => `${open}${name.trim()}${close}`)
+      // On live domain: strip stale /sites/{domain} prefix baked into older published content
+      .replace(
+        (linkBaseOverride && !linkBaseOverride.startsWith('/sites/'))
+          ? new RegExp('href="/sites/' + website.domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/', 'g')
+          : /$^/,
+        'href="/'
+      )
     }
     ${(linkBaseOverride && linkBaseOverride.startsWith('/sites/')) ? `<script>
     // Rewrite root-relative body links to use the correct path prefix (admin preview only)
