@@ -1833,20 +1833,19 @@ Return ONLY valid JSON (no markdown):
       return res.send(robotsContent);
     }
 
-    // Detect whether this request is from the live custom domain (Cloudflare-proxied) or from
-    // the admin app preview. When the incoming Host matches the website's own domain, this is a
-    // live-site request and we must use the real proxy path (not the /sites/... admin prefix).
+    // Determine the link base for nav links rendered into the page HTML.
+    // For websites with a real proxy path (/pages, etc.): always use the real path.
+    //   - On live domains, Cloudflare handles /pages/* correctly.
+    //   - In admin preview on sospages.replit.app, the GET /pages/:slug route below
+    //     redirects clicks to /sites/domain/slug so navigation still works.
+    // For websites served at root level (no proxy path), fall back to /sites/domain
+    // in admin preview so clicking nav links works within the Replit admin app.
     const reqHost = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
-    const isLiveSiteRequest = reqHost === req.params.domain.toLowerCase()
-      || !!(req.headers['cf-connecting-ip']);
-    let siteLinkBase: string;
-    if (isLiveSiteRequest) {
-      const rawPx = ((website.settings as any)?.proxyPath || "") as string;
-      siteLinkBase = rawPx.startsWith("/sites/") ? "" : rawPx;
-    } else {
-      siteLinkBase = `/sites/${req.params.domain}`;
-    }
-    console.log(`[sites-route] slug=${slug} reqHost=${reqHost} domain=${req.params.domain} isLive=${isLiveSiteRequest} siteLinkBase=${JSON.stringify(siteLinkBase)}`);
+    const rawPx = ((website.settings as any)?.proxyPath || "") as string;
+    const realProxyPath = rawPx.startsWith("/sites/") ? "" : rawPx;
+    const isAdminPreview = reqHost !== req.params.domain.toLowerCase();
+    const siteLinkBase = realProxyPath || (isAdminPreview ? `/sites/${req.params.domain}` : "");
+    console.log(`[sites-route] slug=${slug} reqHost=${reqHost} isAdminPreview=${isAdminPreview} siteLinkBase=${JSON.stringify(siteLinkBase)}`);
 
     const page = await storage.getPageBySlug(website.id, slug);
     const brandProfiles = await storage.getBrandProfiles(website.accountId);
@@ -2154,6 +2153,21 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       res.setHeader("Cache-Control", "public, max-age=3600");
       console.log(`[page-serve] 200 ${host}/${rawSlug}`);
       return res.send(html);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // Redirect /pages/:slug to /sites/domain/slug for admin preview navigation.
+  // When siteLinkBase="/pages" (always, for sites with a real proxyPath), clicking nav/content
+  // links in admin preview on sospages.replit.app navigates to /pages/slug. This route
+  // redirects those clicks to /sites/domain/slug so the page renders in the admin context.
+  // On live custom domains the domain middleware handles /pages/:slug directly (no redirect).
+  app.get("/pages/:slug", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await storage.getPageBySlugGlobal(req.params.slug);
+      if (!result) return next();
+      return res.redirect(302, `/sites/${result.website.domain}/${req.params.slug}`);
     } catch (err) {
       return next(err);
     }

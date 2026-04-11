@@ -436,6 +436,16 @@ export async function getPageBySlug(websiteId: string, slug: string): Promise<Pa
   return row;
 }
 
+export async function getPageBySlugGlobal(slug: string): Promise<{ page: Page; website: Website } | undefined> {
+  const [row] = await db
+    .select({ page: pages, website: websites })
+    .from(pages)
+    .innerJoin(websites, eq(pages.websiteId, websites.id))
+    .where(and(eq(pages.slug, slug), eq(pages.status, "published")))
+    .limit(1);
+  return row;
+}
+
 export async function createPage(data: InsertPage): Promise<Page> {
   const [row] = await db.insert(pages).values(data).returning();
   return row;
