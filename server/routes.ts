@@ -2158,16 +2158,27 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
   });
 
-  // Redirect /pages/:slug to /sites/domain/slug for admin preview navigation.
-  // When siteLinkBase="/pages" (always, for sites with a real proxyPath), clicking nav/content
-  // links in admin preview on sospages.replit.app navigates to /pages/slug. This route
-  // redirects those clicks to /sites/domain/slug so the page renders in the admin context.
-  // On live custom domains the domain middleware handles /pages/:slug directly (no redirect).
+  // Render /pages/:slug directly — no /sites/ prefix needed.
+  // On live custom domains the domain middleware handles this first.
+  // On sospages.replit.app (admin preview), the domain middleware skips platform hosts,
+  // so this route catches clicks on /pages/slug links and renders the page in-place.
   app.get("/pages/:slug", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await storage.getPageBySlugGlobal(req.params.slug);
       if (!result) return next();
-      return res.redirect(302, `/sites/${result.website.domain}/${req.params.slug}`);
+      const { page, website } = result;
+      if (page.status !== "published") return next();
+      const rawPx = ((website.settings as any)?.proxyPath || "") as string;
+      const linkBase = rawPx.startsWith("/sites/") ? "" : rawPx;
+      const brandProfiles = await storage.getBrandProfiles(website.accountId);
+      const brand = brandProfiles[0];
+      const version = await storage.getActivePageVersion(page.id);
+      const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
+      const internalLinks = await storage.getOutboundLinksForPage(page.id);
+      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, linkBase || undefined);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.send(html);
     } catch (err) {
       return next(err);
     }
