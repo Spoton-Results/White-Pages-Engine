@@ -19,6 +19,7 @@ export default function InternalLinksPage() {
   const qc = useQueryClient();
   const [websiteId, setWebsiteId] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildingAll, setRebuildingAll] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStrategy, setAiStrategy] = useState<{ summary: string; recommendations: Array<{ title: string; description: string; impact: string }> } | null>(null);
 
@@ -46,7 +47,7 @@ export default function InternalLinksPage() {
     queryFn: () =>
       fetch(`/api/websites/${websiteId}/internal-links/stats`, { credentials: "include" }).then(r => r.json()),
     enabled: !!websiteId,
-    refetchInterval: rebuilding ? 8000 : false,
+    refetchInterval: (rebuilding || rebuildingAll) ? 8000 : false,
   });
 
   const rebuild = useMutation({
@@ -63,6 +64,19 @@ export default function InternalLinksPage() {
     onError: (e: any) => toast({ title: "Rebuild failed", description: e.message, variant: "destructive" }),
   });
 
+  const rebuildAll = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/internal-links/rebuild-all`, {}),
+    onSuccess: (data: any) => {
+      setRebuildingAll(true);
+      toast({ title: "Rebuild All started", description: `Processing ${data.count} website(s). Stats will refresh automatically.` });
+      setTimeout(() => {
+        setRebuildingAll(false);
+        qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "internal-links-stats"] });
+      }, 120000);
+    },
+    onError: (e: any) => toast({ title: "Rebuild All failed", description: e.message, variant: "destructive" }),
+  });
+
   const websites = websitesQ.data ?? [];
   const stats = statsQ.data;
 
@@ -77,22 +91,32 @@ export default function InternalLinksPage() {
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "2rem 1.5rem" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.75rem", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.75rem", flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#111827", margin: 0 }}>Internal Links</h1>
             <p style={{ color: "#6b7280", marginTop: 4, fontSize: ".9rem" }}>
               Auto-build contextual links between service, state, and city pages to distribute PageRank.
             </p>
           </div>
-          <select
-            data-testid="select-website"
-            value={websiteId}
-            onChange={e => setWebsiteId(e.target.value)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: ".9rem", minWidth: 220, cursor: "pointer" }}
-          >
-            <option value="">— Select website —</option>
-            {websites.map(w => <option key={w.id} value={w.id}>{w.name} ({w.domain})</option>)}
-          </select>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <button
+              data-testid="btn-rebuild-all"
+              onClick={() => rebuildAll.mutate()}
+              disabled={rebuildAll.isPending || rebuildingAll}
+              style={{ background: rebuildingAll || rebuildAll.isPending ? "#f3f4f6" : "#111827", color: rebuildingAll || rebuildAll.isPending ? "#6b7280" : "#fff", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 18px", fontSize: ".85rem", fontWeight: 700, cursor: rebuildingAll || rebuildAll.isPending ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+            >
+              {rebuildingAll || rebuildAll.isPending ? "Rebuilding All…" : "Rebuild All Accounts"}
+            </button>
+            <select
+              data-testid="select-website"
+              value={websiteId}
+              onChange={e => setWebsiteId(e.target.value)}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: ".9rem", minWidth: 220, cursor: "pointer" }}
+            >
+              <option value="">— Select website to view stats —</option>
+              {websites.map(w => <option key={w.id} value={w.id}>{w.name} ({w.domain})</option>)}
+            </select>
+          </div>
         </div>
 
         {!websiteId && (

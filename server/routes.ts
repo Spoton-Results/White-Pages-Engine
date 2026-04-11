@@ -3307,6 +3307,27 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     });
   });
 
+  app.post("/api/internal-links/rebuild-all", requireAuth, async (req: Request, res: Response) => {
+    const websites = await storage.getWebsites();
+    res.json({ ok: true, count: websites.length, message: `Internal link rebuild started for ${websites.length} website(s).` });
+
+    setImmediate(async () => {
+      const { buildInternalLinks } = await import("./services/internal-links");
+      for (const website of websites) {
+        try {
+          const allPages = await storage.getPagesForLinking(website.id, 100000);
+          const links = buildInternalLinks(website.id, allPages as any);
+          await storage.clearInternalLinks(website.id);
+          const saved = await storage.saveInternalLinks(links);
+          console.log(`[internal-links] Rebuilt: ${saved} links for website ${website.id} (${website.domain})`);
+        } catch (e) {
+          console.error(`[internal-links] rebuild error for ${website.id}:`, e);
+        }
+      }
+      console.log("[internal-links] Rebuild-all complete.");
+    });
+  });
+
   app.post("/api/websites/:id/internal-links/ai-strategy", requireAuth, async (req: Request, res: Response) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: "ANTHROPIC_API_KEY not configured" });
     const websiteId = req.params.id as string;
