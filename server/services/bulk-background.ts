@@ -38,7 +38,7 @@ export interface BulkJobSettings {
 
 function applyBlueprintTemplates(
   blueprint: { titleTemplate: string; h1Template: string; metaDescTemplate: string; slugTemplate: string } | null,
-  vars: { service: string; location: string; state: string; stateAbbr: string; brand: string },
+  vars: { service: string; location: string; state: string; stateAbbr: string; brand: string; cluster?: string },
 ) {
   if (!blueprint) return null;
   const interp = (t: string) =>
@@ -50,6 +50,7 @@ function applyBlueprintTemplates(
       .replace(/\{state\}/gi, vars.state)
       .replace(/\{brand[^}]*\}/gi, vars.brand)
       .replace(/\{keyword[^}]*\}/gi, vars.service)
+      .replace(/\{cluster[^}]*\}/gi, vars.cluster ?? "")
       .replace(/\{industry[^}]*\}/gi, "")
       .replace(/-{2,}/g, "-").replace(/\s{2,}/g, " ").trim();
   const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -189,7 +190,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const basePassedPages = resumePassedPages;
   const baseProcessedPages = resumeProcessedPages;
 
-  const totalPages = services.length * targets.length;
+  const clusterCount = eligibleClusters.length > 0 ? eligibleClusters.length : 1;
+  const totalPages = services.length * clusterCount * targets.length;
   await storage.updateGenerationJob(jobId, { totalPages });
 
   if (completedServiceSet.size > 0) {
@@ -242,21 +244,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     const svc = services[si];
 
-    // Resolve cluster: 1) by serviceId link, 2) keyword fallback for unlinked clusters
     const svcId = serviceIdByName.get(svc.toLowerCase());
-    let svcCluster = svcId ? (clusterByServiceId.get(svcId) ?? null) : null;
-    if (!svcCluster) {
-      const svcLower = svc.toLowerCase();
-      const svcWords = svcLower.split(/\s+/).filter(w => w.length > 3);
-      const fallback = eligibleClusters.find((c: any) =>
-        !c.serviceId && (
-          c.primaryKeyword?.toLowerCase().includes(svcLower) ||
-          c.name?.toLowerCase().includes(svcLower) ||
-          svcWords.some((w: string) => c.primaryKeyword?.toLowerCase().includes(w) || c.name?.toLowerCase().includes(w))
-        )
-      );
-      if (fallback) svcCluster = { id: fallback.id, primaryKeyword: fallback.primaryKeyword, secondaryKeywords: fallback.secondaryKeywords ?? [], intentType: fallback.intentType };
-    }
 
     const banks = await storage.getVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
@@ -372,6 +360,14 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       }
     };
 
+    const clustersToIterate: Array<(typeof eligibleClusters)[0] | null> =
+      eligibleClusters.length > 0 ? eligibleClusters : [null];
+
+    for (const cl of clustersToIterate) {
+      const svcCluster: ClusterContext | null = cl
+        ? { id: cl.id, primaryKeyword: cl.primaryKeyword, secondaryKeywords: (cl as any).secondaryKeywords ?? [], intentType: cl.intentType }
+        : null;
+
     for (const t of targets) {
       try {
         const sd = stateDataMap.get(t.stateAbbr.toUpperCase());
@@ -394,6 +390,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           state: t.stateName,
           stateAbbr: t.stateAbbr,
           brand: brandName,
+          cluster: svcCluster?.primaryKeyword ?? "",
         });
 
         const finalSlug = bpOverride?.slug || result.slug;
@@ -473,7 +470,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           failedPages: totalFailed,
         });
       }
-    }
+    } // end for (const t of targets)
+    } // end for (const cl of clustersToIterate)
 
     // Flush remaining pages in batch before marking service done
     await flushInsertBatch();

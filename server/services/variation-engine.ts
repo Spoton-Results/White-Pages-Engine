@@ -236,22 +236,30 @@ export function buildVariationPage(
 
   const wordCount = contentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
 
+  const clusterSlug = cluster?.primaryKeyword ? slugify(cluster.primaryKeyword) : null;
   const locationSlug =
     locationType === "state"
       ? slugify(stateName)
       : `${slugify(locationName)}-${stateAbbr.toLowerCase()}`;
 
-  const slug = `${serviceSlug}-in-${locationSlug}`;
+  const slug = clusterSlug
+    ? `${serviceSlug}--${clusterSlug}--in-${locationSlug}`
+    : `${serviceSlug}-in-${locationSlug}`;
+
+  const clusterLabel =
+    cluster?.primaryKeyword && cluster.primaryKeyword.toLowerCase() !== serviceName.toLowerCase()
+      ? cluster.primaryKeyword
+      : null;
 
   const title =
     locationType === "state"
-      ? `${serviceName} in ${stateName} | ${brandName}`
-      : `${serviceName} in ${city}, ${stateAbbr} | ${brandName}`;
+      ? `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${stateName} | ${brandName}`
+      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${city}, ${stateAbbr} | ${brandName}`;
 
   const h1 =
     locationType === "state"
-      ? `${serviceName} in ${stateName}`
-      : `${serviceName} in ${city}, ${stateAbbr}`;
+      ? `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${stateName}`
+      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${city}, ${stateAbbr}`;
 
   const targetKeyword = cluster?.primaryKeyword ?? serviceName;
 
