@@ -1174,6 +1174,20 @@ export async function saveInternalLinks(
   return saved;
 }
 
+export async function getOutboundLinksForPage(pageId: string): Promise<Array<{
+  slug: string; anchorText: string; linkType: string;
+}>> {
+  const rows = await db.execute(sql`
+    SELECT p.slug, il.anchor_text AS "anchorText", il.link_type AS "linkType"
+    FROM internal_links il
+    JOIN pages p ON il.to_page_id = p.id
+    WHERE il.from_page_id = ${pageId}
+      AND p.status = 'published'
+    ORDER BY il.link_type
+  `);
+  return (rows as any).rows ?? [];
+}
+
 // Get pages eligible for internal linking (has both serviceId + locationId)
 export async function getPagesForLinking(websiteId: string, limit = 5000): Promise<Array<{
   id: string; title: string; slug: string; pageType: string | null;

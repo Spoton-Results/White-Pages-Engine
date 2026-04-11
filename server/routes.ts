@@ -80,6 +80,7 @@ interface NavData {
   cityPages: { displayName: string; slug: string }[];
   siblingServices: { title: string; slug: string; serviceName: string | null }[];
   stateDisplayName?: string;
+  internalLinks?: { slug: string; anchorText: string; linkType: string }[];
 }
 
 async function resolveNavData(page: any, websiteId: string): Promise<[NavData["statePages"], NavData["cityPages"], string, NavData["siblingServices"]]> {
@@ -668,6 +669,16 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       <div class="loc-nav-title">Explore All Locations</div>
       <div class="loc-grid">
         ${navData.statePages.map(p => `<a href="${proxyPath}/${p.slug}">${p.displayName}</a>`).join("\n        ")}
+      </div>
+    </div>
+  </div>` : ""}
+
+  ${(navData.internalLinks ?? []).length > 0 ? `
+  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
+    <div class="loc-nav">
+      <div class="loc-nav-title">Related Pages</div>
+      <div class="loc-grid">
+        ${(navData.internalLinks ?? []).map(l => `<a href="${proxyPath}/${l.slug}">${l.anchorText}</a>`).join("\n        ")}
       </div>
     </div>
   </div>` : ""}
@@ -1825,8 +1836,9 @@ Return ONLY valid JSON (no markdown):
     const version = await storage.getActivePageVersion(page.id);
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
+    const internalLinks = await storage.getOutboundLinksForPage(page.id);
 
-    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, siteLinkBase || undefined);
+    const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, siteLinkBase || undefined);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.send(html);
@@ -2098,7 +2110,8 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
       const version = await storage.getActivePageVersion(page.id);
       const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, effectiveLinkBase || undefined);
+      const internalLinks = await storage.getOutboundLinksForPage(page.id);
+      const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, effectiveLinkBase || undefined);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=3600");
       console.log(`[page-serve] 200 ${host}/${rawSlug}`);
