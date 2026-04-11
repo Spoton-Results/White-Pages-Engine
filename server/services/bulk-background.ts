@@ -21,6 +21,7 @@ const OVERWRITE_BATCH_SIZE = 50; // overwrite updates per batch SQL
 export interface BulkJobSettings {
   services: string[];
   blueprintId?: string;
+  queryClusterIds?: string[];
   mode: "all_states" | "specific_states" | "specific_cities";
   states?: string[];
   cities?: Array<{ name: string; stateAbbr: string }>;
@@ -103,7 +104,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   if (!job) return;
 
   const settings = job.settings as unknown as BulkJobSettings;
-  const { services, blueprintId, mode, states, cities, overwrite } = settings;
+  const { services, blueprintId, queryClusterIds, mode, states, cities, overwrite } = settings;
 
   await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
 
@@ -124,9 +125,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     storage.getServices(website.accountId!),
     storage.getQueryClusters(website.accountId!),
   ]);
+  // If the job specified particular cluster IDs, restrict to only those clusters
+  const eligibleClusters = queryClusterIds && queryClusterIds.length > 0
+    ? accountClusters.filter((c: any) => queryClusterIds.includes(c.id))
+    : accountClusters;
   // serviceId → cluster
   const clusterByServiceId = new Map<string, ClusterContext>(
-    accountClusters
+    eligibleClusters
       .filter((c: any) => c.serviceId)
       .map((c: any) => [c.serviceId, { id: c.id, primaryKeyword: c.primaryKeyword, secondaryKeywords: c.secondaryKeywords ?? [], intentType: c.intentType }])
   );
@@ -243,7 +248,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     if (!svcCluster) {
       const svcLower = svc.toLowerCase();
       const svcWords = svcLower.split(/\s+/).filter(w => w.length > 3);
-      const fallback = accountClusters.find((c: any) =>
+      const fallback = eligibleClusters.find((c: any) =>
         !c.serviceId && (
           c.primaryKeyword?.toLowerCase().includes(svcLower) ||
           c.name?.toLowerCase().includes(svcLower) ||

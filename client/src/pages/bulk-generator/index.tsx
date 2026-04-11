@@ -27,6 +27,8 @@ export default function BulkGeneratorPage() {
 
   const [websiteId, setWebsiteId] = useState<string>("");
   const [blueprintId, setBlueprintId] = useState<string>("");
+  const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set());
+  const [clusterSearch, setClusterSearch] = useState("");
   const [mode, setMode] = useState<"all_states" | "specific_states" | "specific_cities">("all_states");
   const [selectedStateCodes, setSelectedStateCodes] = useState<Set<string>>(new Set());
   const [selectedCitySlugs, setSelectedCitySlugs] = useState<Set<string>>(new Set());
@@ -82,6 +84,12 @@ export default function BulkGeneratorPage() {
     enabled: !!accountId,
   });
 
+  const clustersQ = useQuery<any[]>({
+    queryKey: ["/api/accounts", accountId, "query-clusters"],
+    queryFn: () => apiFetch(`/api/accounts/${accountId}/query-clusters`),
+    enabled: !!accountId,
+  });
+
   // Poll the active background job every 2 s; stops when it completes or errors
   const activeJobQ = useQuery<any>({
     queryKey: ["/api/jobs/active", activeJobId],
@@ -131,6 +139,7 @@ export default function BulkGeneratorPage() {
   const bankServicesSet = new Set<string>(bankServicesQ.data ?? []);
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
+  const clusters = clustersQ.data ?? [];
 
   // Deduplicate by slug so cities imported twice don't appear twice
   const dbStates = useMemo(() => {
@@ -198,6 +207,7 @@ export default function BulkGeneratorPage() {
       const svcs = Array.from(selectedServices);
       const payload: any = { services: svcs, ...buildLocationPayload(), overwrite };
       if (bpId) payload.blueprintId = bpId;
+      if (selectedClusterIds.size > 0) payload.queryClusterIds = Array.from(selectedClusterIds);
       const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate-job`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -422,7 +432,7 @@ export default function BulkGeneratorPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedServices(new Set()); setBlueprintId(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); setServiceProgress([]); setLastResult(null); }}>
+            <Select value={websiteId} onValueChange={v => { setWebsiteId(v); setSelectedServices(new Set()); setBlueprintId(""); setSelectedClusterIds(new Set()); setClusterSearch(""); setSelectedStateCodes(new Set()); setSelectedCitySlugs(new Set()); setServiceProgress([]); setLastResult(null); }}>
               <SelectTrigger data-testid="select-website" className="w-full max-w-md">
                 <SelectValue placeholder="Choose a website..." />
               </SelectTrigger>
@@ -550,6 +560,66 @@ export default function BulkGeneratorPage() {
                   })}
                 </div>
               </div>
+
+              {/* Query Clusters */}
+              {clusters.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>
+                      Query Clusters{" "}
+                      <span className="text-muted-foreground font-normal text-xs">
+                        ({selectedClusterIds.size === 0 ? "all clusters" : `${selectedClusterIds.size} of ${clusters.length} selected`})
+                      </span>
+                    </Label>
+                    {selectedClusterIds.size > 0 && (
+                      <Button
+                        type="button" variant="ghost" size="sm" className="h-7 text-xs"
+                        onClick={() => setSelectedClusterIds(new Set())}
+                        data-testid="button-clear-clusters"
+                      >
+                        Clear (use all)
+                      </Button>
+                    )}
+                  </div>
+                  <div className="relative max-w-xs">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter clusters..."
+                      className="pl-9 h-9"
+                      value={clusterSearch}
+                      onChange={e => setClusterSearch(e.target.value)}
+                      data-testid="input-cluster-search"
+                    />
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
+                    {clusters
+                      .filter((c: any) => !clusterSearch || c.name?.toLowerCase().includes(clusterSearch.toLowerCase()) || c.primaryKeyword?.toLowerCase().includes(clusterSearch.toLowerCase()))
+                      .map((c: any) => (
+                        <label key={c.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-muted cursor-pointer" data-testid={`label-cluster-${c.id}`}>
+                          <Checkbox
+                            checked={selectedClusterIds.has(c.id)}
+                            onCheckedChange={checked => setSelectedClusterIds(prev => {
+                              const n = new Set(prev);
+                              checked ? n.add(c.id) : n.delete(c.id);
+                              return n;
+                            })}
+                            data-testid={`checkbox-cluster-${c.id}`}
+                          />
+                          <span className="text-sm flex-1 truncate">{c.name || c.primaryKeyword}</span>
+                          {c.intentType && (
+                            <span className="text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5 shrink-0 capitalize">{c.intentType}</span>
+                          )}
+                        </label>
+                      ))
+                    }
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedClusterIds.size === 0
+                      ? "No filter — all account clusters will be used during generation."
+                      : `Only the ${selectedClusterIds.size} selected cluster(s) will be used to enrich pages.`}
+                  </p>
+                </div>
+              )}
 
               {/* Mode */}
               <div className="space-y-1.5">

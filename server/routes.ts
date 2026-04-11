@@ -3491,6 +3491,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       states: z.array(z.string()).optional(),
       cities: z.array(z.object({ name: z.string(), stateAbbr: z.string() })).optional(),
       blueprintId: z.string().uuid().optional(),
+      queryClusterIds: z.array(z.string().uuid()).optional(),
       overwrite: z.boolean().optional(),
     });
     const body = schema.parse(req.body);
