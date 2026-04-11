@@ -543,6 +543,16 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       });
     })();
     </script>` : ""}
+    ${(linkBaseOverride && !linkBaseOverride.startsWith('/sites/')) ? `<script>
+    // Strip stale /sites/{domain} prefix baked into older published content when serving on live domain
+    (function(){
+      var prefix = '/sites/' + ${JSON.stringify(website.domain)};
+      document.querySelectorAll('main a[href^="/sites/"]').forEach(function(a){
+        var h = a.getAttribute('href');
+        if (h.startsWith(prefix)) a.setAttribute('href', h.slice(prefix.length));
+      });
+    })();
+    </script>` : ""}
 
     <div class="contact-section">
       <h2>${ctaHeading}</h2>
