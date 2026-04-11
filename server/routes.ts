@@ -1863,6 +1863,16 @@ Return ONLY valid JSON (no markdown):
   // instead of requiring the /sites/{domain}/{slug} path.
   const PLATFORM_SUFFIXES = [".replit.app", ".replit.dev", ".repl.co", ".worf.replit.dev", ".janeway.replit.dev"];
 
+  // Root redirect for custom domains — catches GET / before static-file middleware
+  // can serve index.html. Checks the Host header; non-matching hosts call next().
+  app.get("/", (req: Request, res: Response, next: NextFunction) => {
+    const host = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+    if (host === "subtrackers.spotonresults.com") {
+      return res.redirect(301, "https://subtrackers.spotonresults.com/pages/");
+    }
+    return next();
+  });
+
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Use req.hostname which respects X-Forwarded-Host from trusted proxies (Cloudflare/Replit)
