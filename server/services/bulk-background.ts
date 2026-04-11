@@ -137,7 +137,26 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   // ── Pre-load all state data once ─────────────────────────────────────────────
   const stateDataMap = await storage.getAllStateData();
-  const targets = await buildTargets(mode, stateDataMap, states, cities);
+  let targets = await buildTargets(mode, stateDataMap, states, cities);
+
+  // ── Auto-deduplicate: state-level blueprint used with city targets ────────────
+  // If the blueprint slug template references {state} but NOT {location}/{city},
+  // every city in the same state generates the same slug. Collapse targets to one
+  // representative per state so the job creates unique pages without false skips.
+  if (blueprintTemplate) {
+    const slugUsesLocation = /\{location|\{city/i.test(blueprintTemplate.slugTemplate);
+    const slugUsesState   = /\{state/i.test(blueprintTemplate.slugTemplate);
+    const hasCityTargets  = targets.some(t => t.locationType === "city");
+    if (slugUsesState && !slugUsesLocation && hasCityTargets) {
+      const seenStates = new Set<string>();
+      targets = targets.filter(t => {
+        if (seenStates.has(t.stateAbbr.toUpperCase())) return false;
+        seenStates.add(t.stateAbbr.toUpperCase());
+        return true;
+      });
+      console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets`);
+    }
+  }
 
   // ── Build city-by-state index for internal linking on state hub pages ─────────
   // Maps stateAbbr (uppercase) → list of city names being generated in this job
