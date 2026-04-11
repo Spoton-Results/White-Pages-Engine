@@ -1295,22 +1295,32 @@ Return ONLY valid JSON (no markdown):
   app.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (req: Request, res: Response) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
     const accountId = req.params.accountId as string;
-    const { pageTypes, services: serviceNames } = z.object({
-      pageTypes: z.array(z.string()).min(1),
-      services: z.array(z.string()).optional().default([""]),
-    }).parse(req.body);
+    let pageTypes: string[], serviceNames: string[];
+    try {
+      const parsed = z.object({
+        pageTypes: z.array(z.string()).min(1),
+        services: z.array(z.string()).optional().default([""]),
+      }).parse(req.body);
+      pageTypes = parsed.pageTypes;
+      serviceNames = parsed.services;
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message || "Invalid request body" });
+    }
     const account = await storage.getAccount(accountId);
     if (!account) return res.status(404).json({ message: "Account not found" });
-    const [brand, industries] = await Promise.all([
+    const [brand, industries, accountWebsites] = await Promise.all([
       account ? storage.getBrandProfiles(accountId).then(bs => bs[0]) : Promise.resolve(null),
       storage.getIndustries(accountId),
+      storage.getWebsites(accountId),
     ]);
+    const jobWebsiteId = accountWebsites[0]?.id;
+    if (!jobWebsiteId) return res.status(400).json({ message: "No website found for this account" });
     const businessName = brand?.name || account.name;
     const industry = industries[0]?.name || account.name;
     const combos: Array<{ pageType: string; service: string }> = [];
     for (const pt of pageTypes) for (const svc of (serviceNames.length ? serviceNames : [""])) combos.push({ pageType: pt, service: svc });
     const job = await storage.createGenerationJob({
-      accountId, websiteId: "", name: `Bulk Blueprint Generate (${combos.length} blueprints)`,
+      accountId, websiteId: jobWebsiteId, name: `Bulk Blueprint Generate (${combos.length} blueprints)`,
       status: "pending", totalPages: combos.length, processedPages: 0, passedPages: 0, failedPages: 0,
       settings: { type: "blueprint_bulk", combos, businessName, industry, progress: combos.map(c => ({ pageType: c.pageType, service: c.service, status: "pending" })) } as any,
     });

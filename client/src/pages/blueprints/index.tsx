@@ -43,6 +43,7 @@ export default function BlueprintsPage() {
   const [bulkPageTypes, setBulkPageTypes] = useState<Set<string>>(new Set());
   const [bulkSvcs, setBulkSvcs] = useState<Set<string>>(new Set());
   const [bulkBpJobId, setBulkBpJobId] = useState<string | null>(null);
+  const [isSubmittingBulkBp, setIsSubmittingBulkBp] = useState(false);
 
   const LS_KEY = "nexus_blueprint_wizard";
 
@@ -138,12 +139,23 @@ export default function BlueprintsPage() {
   const bulkBpDone = bulkBpJob?.status === "completed" || bulkBpJob?.status === "failed";
 
   const submitBulkBp = async () => {
-    const resp = await api.post<any>(`/api/accounts/${selectedAccount}/blueprints/bulk-generate`, {
-      pageTypes: [...bulkPageTypes],
-      services: bulkSvcs.size > 0 ? [...bulkSvcs] : [""],
-    });
-    if (resp.jobId) setBulkBpJobId(resp.jobId);
-    else toast({ title: "Error starting job", variant: "destructive" });
+    if (!selectedAccount) {
+      toast({ title: "No account selected", variant: "destructive" });
+      return;
+    }
+    setIsSubmittingBulkBp(true);
+    try {
+      const resp = await api.post<any>(`/api/accounts/${selectedAccount}/blueprints/bulk-generate`, {
+        pageTypes: [...bulkPageTypes],
+        services: bulkSvcs.size > 0 ? [...bulkSvcs] : [""],
+      });
+      if (resp?.jobId) setBulkBpJobId(resp.jobId);
+      else toast({ title: "Error starting job", description: "No job ID returned", variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Failed to start", description: e.message || "Server error", variant: "destructive" });
+    } finally {
+      setIsSubmittingBulkBp(false);
+    }
   };
 
   const closeBulkBp = () => { setShowBulkBp(false); setBulkBpJobId(null); setBulkPageTypes(new Set()); setBulkSvcs(new Set()); };
@@ -582,8 +594,8 @@ export default function BlueprintsPage() {
             {!bulkBpJobId ? (
               <>
                 <Button variant="outline" onClick={closeBulkBp}>Cancel</Button>
-                <Button onClick={submitBulkBp} disabled={bulkPageTypes.size === 0} data-testid="btn-bulk-bp-submit">
-                  Generate {bulkPageTypes.size * Math.max(bulkSvcs.size, 1)} Blueprint{bulkPageTypes.size * Math.max(bulkSvcs.size, 1) !== 1 ? "s" : ""}
+                <Button onClick={submitBulkBp} disabled={bulkPageTypes.size === 0 || isSubmittingBulkBp} data-testid="btn-bulk-bp-submit">
+                  {isSubmittingBulkBp ? "Starting…" : `Generate ${bulkPageTypes.size * Math.max(bulkSvcs.size, 1)} Blueprint${bulkPageTypes.size * Math.max(bulkSvcs.size, 1) !== 1 ? "s" : ""}`}
                 </Button>
               </>
             ) : bulkBpDone ? (
