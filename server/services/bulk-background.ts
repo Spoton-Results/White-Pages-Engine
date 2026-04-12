@@ -59,6 +59,12 @@ function applyBlueprintTemplates(
   if (stateLower && rawSlug.endsWith(`-${stateLower}-${stateLower}`)) {
     rawSlug = rawSlug.slice(0, rawSlug.length - stateLower.length - 1);
   }
+  // If a cluster was provided but the blueprint template has no {cluster} placeholder,
+  // append the cluster slug so each (service, cluster, location) combination is unique.
+  if (vars.cluster && !/\{cluster/i.test(blueprint.slugTemplate)) {
+    const cs = vars.cluster.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (cs) rawSlug = `${rawSlug}--${cs}`;
+  }
   return {
     title: interp(blueprint.titleTemplate),
     h1: interp(blueprint.h1Template),
