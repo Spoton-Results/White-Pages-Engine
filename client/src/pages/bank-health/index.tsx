@@ -246,6 +246,7 @@ export default function BankHealthPage() {
   const [websiteId, setWebsiteId] = useState("");
   const [thinJobId, setThinJobId] = useState<string | null>(null);
   const [thinWriting, setThinWriting] = useState(false);
+  const [fillAllProgress, setFillAllProgress] = useState<{ running: boolean; done: number; total: number }>({ running: false, done: 0, total: 0 });
 
   const websitesQ = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -306,6 +307,29 @@ export default function BankHealthPage() {
     }
   };
 
+  const fillAllMissing = async () => {
+    const banksWithMissing = banks.filter(b =>
+      getMissingCore(b).length > 0 || getMissingExt(b).length > 0
+    );
+    if (banksWithMissing.length === 0) {
+      toast({ title: "Nothing to fill", description: "All sections are already present." });
+      return;
+    }
+    setFillAllProgress({ running: true, done: 0, total: banksWithMissing.length });
+    let totalFilled = 0;
+    for (let i = 0; i < banksWithMissing.length; i++) {
+      const b = banksWithMissing[i];
+      try {
+        const result: any = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: b.service });
+        totalFilled += result?.filled?.length ?? 0;
+      } catch (_) { /* continue on error */ }
+      setFillAllProgress({ running: true, done: i + 1, total: banksWithMissing.length });
+    }
+    setFillAllProgress({ running: false, done: 0, total: 0 });
+    qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+    toast({ title: `Fill complete`, description: `Filled ${totalFilled} section(s) across ${banksWithMissing.length} service(s).` });
+  };
+
   const websites = websitesQ.data ?? [];
   const banks = healthQ.data ?? [];
   const eligible = banks.filter(b => b.isEligibleForTier1).length;
@@ -349,6 +373,22 @@ export default function BankHealthPage() {
                   }}
                 >
                   {thinWriting ? "Starting…" : thinJobId ? `Writing ${thinJobQ.data?.done ?? 0}/${thinJobQ.data?.total ?? "?"} banks…` : "Bulk Write Thin Banks"}
+                </button>
+                <button
+                  data-testid="btn-fill-missing-all"
+                  onClick={fillAllMissing}
+                  disabled={fillAllProgress.running || thinWriting || !!thinJobId}
+                  style={{
+                    background: fillAllProgress.running ? "#e5e7eb" : "#059669",
+                    color: fillAllProgress.running ? "#9ca3af" : "#fff",
+                    border: "none", borderRadius: 8, padding: "8px 18px",
+                    fontSize: ".9rem", fontWeight: 600,
+                    cursor: fillAllProgress.running ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {fillAllProgress.running
+                    ? `Filling ${fillAllProgress.done}/${fillAllProgress.total}…`
+                    : "Fill Missing All"}
                 </button>
                 <button
                   data-testid="btn-recompute-all"
