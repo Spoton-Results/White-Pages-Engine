@@ -350,7 +350,7 @@ export default function NexusLandingPage() {
       .nx-founding {
         border: 1px dashed rgba(16,185,129,0.35);
         background: rgba(16,185,129,0.03);
-        border-radius: 12px; padding: 32px 36px; text-align: center; margin-top: 40px;
+        border-radius: 12px; padding: 60px 40px; text-align: center; margin-top: 40px;
       }
 
       .nx-enterprise {
@@ -398,11 +398,48 @@ export default function NexusLandingPage() {
       @media (max-width: 768px) {
         .nx-section { padding: 80px 20px; }
         .nx-btn-primary, .nx-btn-ghost, .nx-btn-featured { width: 100%; justify-content: center; }
-        .nx-founding { padding: 24px 20px; }
         .nx-enterprise { padding: 24px 20px; }
       }
       @media (max-width: 480px) {
         .nx-pricing-card { padding: 28px 20px; }
+      }
+
+      /* Hamburger nav */
+      .nx-desktop-nav { display: flex; align-items: center; gap: 8px; }
+      .nx-hamburger-btn {
+        display: none; background: none; border: none; cursor: pointer;
+        color: #fafafa; padding: 8px; border-radius: 6px;
+        flex-direction: column; gap: 5px; align-items: center; justify-content: center;
+      }
+      .nx-hamburger-bar {
+        display: block; width: 22px; height: 2px;
+        background: #fafafa; border-radius: 2px;
+        transition: transform 0.2s, opacity 0.2s;
+      }
+      .nx-mobile-overlay {
+        position: fixed; inset: 0; z-index: 200;
+        background: rgba(9,9,11,0.98);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 8px;
+      }
+      .nx-mobile-link {
+        font-family: 'Satoshi', 'Syne', sans-serif;
+        font-size: 28px; font-weight: 700; color: #fafafa;
+        text-decoration: none; padding: 16px 32px;
+        letter-spacing: -0.02em;
+        transition: color 0.15s;
+      }
+      .nx-mobile-link:hover { color: #3b82f6; }
+      .nx-mobile-close {
+        position: absolute; top: 20px; right: 24px;
+        background: none; border: none; cursor: pointer;
+        color: #71717a; font-size: 28px; line-height: 1; padding: 8px;
+      }
+      .nx-mobile-close:hover { color: #fafafa; }
+      @media (max-width: 768px) {
+        .nx-desktop-nav { display: none; }
+        .nx-hamburger-btn { display: flex; }
       }
     `;
     document.head.appendChild(style);
@@ -424,6 +461,11 @@ export default function NexusLandingPage() {
       document.head.removeChild(style);
     };
   }, []);
+
+  // ── Mobile menu ─────────────────────────────────────────────────────────────
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
   // ── Data ────────────────────────────────────────────────────────────────────
 
@@ -562,21 +604,44 @@ export default function NexusLandingPage() {
   return (
     <div style={{ background: "#09090b", minHeight: "100vh", color: "#fafafa", overflowX: "hidden" }}>
 
+      {/* ── MOBILE MENU OVERLAY ── */}
+      {mobileMenuOpen && (
+        <div className="nx-mobile-overlay" role="dialog" aria-modal="true">
+          <button className="nx-mobile-close" onClick={closeMobileMenu} aria-label="Close menu">✕</button>
+          <a href="#how-it-works" className="nx-mobile-link" onClick={closeMobileMenu}>How it works</a>
+          <a href="#pricing" className="nx-mobile-link" onClick={closeMobileMenu}>Pricing</a>
+          <a href="#faq" className="nx-mobile-link" onClick={closeMobileMenu}>FAQ</a>
+          <a
+            href={BOOKING_URL}
+            onClick={closeMobileMenu}
+            className="nx-btn-primary"
+            style={{ marginTop: 16, padding: "16px 40px", fontSize: 16 }}
+            data-testid="link-mobile-cta"
+          >
+            Book a call
+          </a>
+        </div>
+      )}
+
       {/* ── NAV ── */}
       <nav style={{
         position: "sticky", top: 0, zIndex: 100,
         background: "rgba(9,9,11,0.85)", backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         borderBottom: "1px solid #18181b", padding: "0 24px",
+        overflow: "hidden",
       }}>
         <div className="nx-container" style={{ height: 64, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{
             fontFamily: "'Satoshi', 'Syne', sans-serif",
-            fontWeight: 900, fontSize: 17, letterSpacing: "-0.03em", color: "#fafafa",
+            fontWeight: 900, fontSize: "clamp(14px, 2.5vw, 17px)",
+            letterSpacing: "-0.03em", color: "#fafafa", flexShrink: 0,
           }}>
-            Nexus <span style={{ color: "#52525b", fontWeight: 400, fontSize: 15 }}>by SpotOn</span>
+            Nexus <span style={{ color: "#52525b", fontWeight: 400, fontSize: "clamp(12px, 2vw, 15px)" }}>by SpotOn</span>
           </span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+
+          {/* Desktop nav */}
+          <div className="nx-desktop-nav">
             <a href="#how-it-works" className="nx-nav-link" style={{ padding: "0 12px" }}>How it works</a>
             <a href="#pricing" className="nx-nav-link" style={{ padding: "0 12px" }}>Pricing</a>
             <a href="#faq" className="nx-nav-link" style={{ padding: "0 12px" }}>FAQ</a>
@@ -589,6 +654,19 @@ export default function NexusLandingPage() {
               Book a call
             </a>
           </div>
+
+          {/* Hamburger button — mobile only */}
+          <button
+            className="nx-hamburger-btn"
+            onClick={() => setMobileMenuOpen(o => !o)}
+            aria-label="Open menu"
+            aria-expanded={mobileMenuOpen}
+            data-testid="btn-mobile-menu"
+          >
+            <span className="nx-hamburger-bar" />
+            <span className="nx-hamburger-bar" />
+            <span className="nx-hamburger-bar" />
+          </button>
         </div>
       </nav>
 
@@ -1072,7 +1150,7 @@ export default function NexusLandingPage() {
             fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
             fontSize: 12, color: "#3f3f46",
           }}>
-            © {new Date().getFullYear()} SpotOn Results
+            © {new Date().getFullYear()} SpotOn Nexus
           </span>
         </div>
       </footer>
