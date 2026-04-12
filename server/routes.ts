@@ -2256,20 +2256,35 @@ Return ONLY valid JSON (no markdown):
     const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
     const serviceNameToId = new Map(allServices.map((s: any) => [s.name.toLowerCase(), s.id]));
     const { generateQueryClusters } = await import("./services/claude");
+    const existingKeywordsArr = existingClusters.map((c: any) => c.primaryKeyword);
+
+    // Parallelize all Claude calls — sequential was causing timeouts (8-9s × N services)
+    const resultsByService = await Promise.all(
+      serviceNames.map(async (svcName) => {
+        try {
+          const suggested = await generateQueryClusters({
+            businessName: account.name,
+            industry: (account as any).settings?.industry || account.name,
+            services: [svcName],
+            existingClusters: existingKeywordsArr,
+          });
+          const serviceId = serviceNameToId.get(svcName.toLowerCase()) ?? null;
+          const clusters = suggested
+            .filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase()))
+            .map(c => ({ ...c, accountId, serviceId, serviceName: svcName }));
+          return { service: svcName, clusters };
+        } catch (_) {
+          return { service: svcName, clusters: [] };
+        }
+      })
+    );
+
+    // Deduplicate across services (first occurrence wins)
     const results: Array<{ service: string; clusters: any[] }> = [];
-    for (const svcName of serviceNames) {
-      const suggested = await generateQueryClusters({
-        businessName: account.name,
-        industry: (account as any).settings?.industry || account.name,
-        services: [svcName],
-        existingClusters: existingClusters.map((c: any) => c.primaryKeyword),
-      });
-      const filtered = suggested.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase())).map(c => {
-        const serviceId = serviceNameToId.get(svcName.toLowerCase()) ?? null;
-        return { ...c, accountId, serviceId, serviceName: svcName };
-      });
-      filtered.forEach(c => existingKeywords.add(c.primaryKeyword.toLowerCase()));
-      results.push({ service: svcName, clusters: filtered });
+    for (const r of resultsByService) {
+      const unique = r.clusters.filter(c => !existingKeywords.has(c.primaryKeyword.toLowerCase()));
+      unique.forEach(c => existingKeywords.add(c.primaryKeyword.toLowerCase()));
+      results.push({ service: r.service, clusters: unique });
     }
     return res.json({ suggestions: results });
   });
