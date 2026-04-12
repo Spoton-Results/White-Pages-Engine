@@ -12,7 +12,31 @@ import * as storage from "../storage";
 import { buildVariationPage, ClusterContext } from "./variation-engine";
 import { submitUrlsToGoogle } from "./gsc-indexing";
 import { scorePageContent, computeBankCompleteness } from "./scoring";
-import { pool } from "../db";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import * as schema from "@shared/schema";
+
+// ── Dedicated pool for bulk operations ───────────────────────────────────────
+// This pool is COMPLETELY SEPARATE from the main API pool (server/db.ts).
+// The background job never touches the main pool, so 142K-page generation jobs
+// can't starve API request handlers of connections.
+const bulkPool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL!,
+  max: 2,               // 2 dedicated connections: one for inserts, one for overwrites
+  idleTimeoutMillis: 60000,
+  connectionTimeoutMillis: 30000, // bulk ops may legitimately take longer
+});
+const bulkDb = drizzle(bulkPool, { schema });
+
+// Local insert helpers that use the dedicated bulk pool (not storage.ts / main pool)
+async function insertPagesBulk(data: schema.InsertPage[]): Promise<schema.Page[]> {
+  if (data.length === 0) return [];
+  return bulkDb.insert(schema.pages).values(data).onConflictDoNothing().returning() as Promise<schema.Page[]>;
+}
+async function insertVersionsBulk(data: schema.InsertPageVersion[]): Promise<void> {
+  if (data.length === 0) return;
+  await bulkDb.insert(schema.pageVersions).values(data);
+}
 
 const INSERT_BATCH_SIZE = 25;  // pages per bulk INSERT — keep batches small to avoid long connection holds
 const PAGE_BATCH_SIZE = 300;  // flush job counters to DB every N pages
@@ -313,7 +337,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const flushOverwriteBatch = async () => {
       if (pendingOverwrites.length === 0) return;
       const batch = pendingOverwrites.splice(0);
-      const client = await pool.connect();
+      const client = await bulkPool.connect();
       try {
         await client.query("BEGIN");
         for (const item of batch) {
@@ -361,9 +385,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       const batchContent = pendingContent.splice(0);
       const slugToContent = new Map<string, string>();
       batchData.forEach((d, i) => slugToContent.set(d.slug, batchContent[i]));
-      const created = await storage.createPagesBatch(batchData); // onConflictDoNothing
+      const created = await insertPagesBulk(batchData as schema.InsertPage[]); // uses dedicated pool
       if (created.length > 0) {
-        await storage.createPageVersionsBatch(
+        await insertVersionsBulk(
           created.map(p => ({ pageId: p.id, version: 1, contentHtml: slugToContent.get(p.slug) ?? "", isActive: true }))
         );
         // Collect URLs for Google Indexing API submission at job end
