@@ -41,12 +41,18 @@ function applyBlueprintTemplates(
   vars: { service: string; location: string; state: string; stateAbbr: string; brand: string; cluster?: string },
 ) {
   if (!blueprint) return null;
+  const slugifyStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const interp = (t: string) =>
     t.replace(/\{service[^}]*\}/gi, vars.service)
       .replace(/\{location[^}]*\}/gi, vars.location)
       .replace(/\{city[^}]*\}/gi, vars.location)
-      .replace(/\{state_abbr\}/gi, vars.stateAbbr)
-      .replace(/\{abbr\}/gi, vars.stateAbbr)
+      // state_abbr / state-abbr must come before the generic {state…} catch-alls
+      .replace(/\{state[-_]abbr[^}]*\}/gi, vars.stateAbbr)
+      .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
+      // {state-slug}, {state_slug}, {state|slugify}, {state|lowercase|hyphenate} → slugified state name
+      .replace(/\{state[-_]slug[^}]*\}/gi, slugifyStr(vars.state))
+      .replace(/\{state\|[^}]*\}/gi, slugifyStr(vars.state))
+      // bare {state} → raw state name (e.g. "New York")
       .replace(/\{state\}/gi, vars.state)
       .replace(/\{brand[^}]*\}/gi, vars.brand)
       .replace(/\{keyword[^}]*\}/gi, vars.service)

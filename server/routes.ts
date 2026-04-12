@@ -3363,15 +3363,21 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       if (!blueprint) return null;
       // Handle {service}, {service-lowercase-hyphenate}, {service_slug} and all other modifier forms
       // by matching anything that starts with the variable name inside {}
+      const slugifyStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       const interp = (t: string) => t
         .replace(/\{service[^}]*\}/gi, vars.service)
         .replace(/\{location[^}]*\}/gi, vars.location)
         .replace(/\{city[^}]*\}/gi, vars.location)
-        .replace(/\{state[^}]*\}/gi, vars.state)
+        // abbr/state_abbr must come before generic {state…} catch-all
+        .replace(/\{state[-_]abbr[^}]*\}/gi, vars.stateAbbr)
+        .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
+        // {state-slug}, {state_slug}, {state|slugify} → slugified state name
+        .replace(/\{state[-_]slug[^}]*\}/gi, slugifyStr(vars.state))
+        .replace(/\{state\|[^}]*\}/gi, slugifyStr(vars.state))
+        // bare {state} → raw state name
+        .replace(/\{state\}/gi, vars.state)
         .replace(/\{brand[^}]*\}/gi, vars.brand)
         .replace(/\{keyword[^}]*\}/gi, vars.service)
-        .replace(/\{state_abbr[^}]*\}/gi, vars.stateAbbr)
-        .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
         .replace(/-{2,}/g, "-").trim();
       const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       return {
