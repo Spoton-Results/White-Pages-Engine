@@ -70,12 +70,33 @@ app.use((req, res, next) => {
     const { sql } = await import("drizzle-orm");
     await db.execute(sql`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`);
     console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_website_status ON pages(website_id, status)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`);
+    // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
+    const idxStatements = [
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_status ON pages(website_id, status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_id ON pages(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`,
+      `CREATE INDEX IF NOT EXISTS idx_websites_account_id ON websites(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_locations_account_id ON locations(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_services_account_id ON services(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_blueprints_account_id ON blueprints(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_blueprints_website_id ON blueprints(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_hub_pages_account_id ON hub_pages(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_hub_pages_website_id ON hub_pages(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_generation_jobs_account_id ON generation_jobs(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_generation_jobs_website_id ON generation_jobs(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemaps_website_id ON sitemaps(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_query_clusters_account_id ON query_clusters(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_internal_links_website_id ON internal_links(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_accounts_agency_id ON accounts(agency_id)`,
+    ];
+    for (const stmt of idxStatements) {
+      try { await db.execute(sql.raw(stmt)); } catch (_) { /* already exists or column absent — skip */ }
+    }
     console.log("[startup] Database indexes ensured.");
 
     // Automation tables (added in automation phase)

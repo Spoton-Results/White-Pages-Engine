@@ -646,25 +646,22 @@ export async function getWebsiteMetricsSummary(websiteId: string) {
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 
 export async function getDashboardStats() {
-  // Single parallel fetch: 2 cheap meta queries + 1 grouped status count + 1 job count
-  const [metaRows, statusRows, jobRows] = await Promise.all([
-    db.select({ count: count() }).from(accounts)
-      .then(async ([a]) => ({ accounts: a.count, websites: (await db.select({ count: count() }).from(websites))[0].count })),
-    db.select({ status: pages.status, count: count() }).from(pages)
-      .where(sql`${pages.status} IN ('published','draft','review')`)
-      .groupBy(pages.status),
+  // Use cached publishedPages column (updated by syncWebsitePublishedCount) to avoid
+  // a full COUNT over millions of page rows on every request.
+  const [accountRows, websiteRows, jobRows] = await Promise.all([
+    db.select({ count: count() }).from(accounts),
+    db.select({ publishedPages: websites.publishedPages }).from(websites),
     db.select({ count: count() }).from(generationJobs).where(eq(generationJobs.status, "running")),
   ]);
 
-  const statusMap: Record<string, number> = {};
-  for (const r of statusRows) statusMap[r.status] = Number(r.count);
+  const publishedPages = websiteRows.reduce((s, w) => s + (w.publishedPages || 0), 0);
 
   return {
-    totalAccounts: metaRows.accounts,
-    totalWebsites: metaRows.websites,
-    publishedPages: statusMap["published"] ?? 0,
-    draftPages: statusMap["draft"] ?? 0,
-    reviewPages: statusMap["review"] ?? 0,
+    totalAccounts: Number(accountRows[0].count),
+    totalWebsites: websiteRows.length,
+    publishedPages,
+    draftPages: 0,
+    reviewPages: 0,
     activeJobs: Number(jobRows[0].count),
   };
 }
