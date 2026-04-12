@@ -14,9 +14,12 @@ import { submitUrlsToGoogle } from "./gsc-indexing";
 import { scorePageContent, computeBankCompleteness } from "./scoring";
 import { pool } from "../db";
 
-const INSERT_BATCH_SIZE = 100; // pages per bulk INSERT statement
-const PAGE_BATCH_SIZE = 200;  // flush job counters to DB every N pages
-const OVERWRITE_BATCH_SIZE = 50; // overwrite updates per batch SQL
+const INSERT_BATCH_SIZE = 25;  // pages per bulk INSERT — keep batches small to avoid long connection holds
+const PAGE_BATCH_SIZE = 300;  // flush job counters to DB every N pages
+const OVERWRITE_BATCH_SIZE = 25; // overwrite updates per batch SQL
+const YIELD_EVERY = 50;       // yield event loop every N pages so pending I/O (DB releases, HTTP) can run
+
+const yieldEventLoop = () => new Promise<void>(r => setImmediate(r));
 
 export interface BulkJobSettings {
   services: string[];
@@ -458,10 +461,15 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         console.error("[bulk-background] error", svc, t.locationName, err);
       }
 
+      // Yield the event loop every YIELD_EVERY pages so pending I/O
+      // (DB connection releases, HTTP request handlers) can run and prevent
+      // connection-pool exhaustion on large 100K+ page jobs.
+      pagesSinceLastFlush++;
+      if (pagesSinceLastFlush % YIELD_EVERY === 0) await yieldEventLoop();
+
       // Flush progress counters to DB every PAGE_BATCH_SIZE pages.
       // Always flush the insert batch first so totalCreated is accurate
       // even when most pages are skips (batch may not have reached INSERT_BATCH_SIZE yet).
-      pagesSinceLastFlush++;
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
         await flushInsertBatch();
