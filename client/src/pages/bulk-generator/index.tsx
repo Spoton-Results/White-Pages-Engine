@@ -279,7 +279,8 @@ export default function BulkGeneratorPage() {
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every((l: any) => selectedCitySlugs.has(l.slug));
 
   const MAX_SAFE_PAGES = 500_000;
-  const estimatedPages = selectedServices.size * targetCount;
+  const clusterCountForEstimate = selectedClusterIds.size > 0 ? selectedClusterIds.size : (clusters.length > 0 ? clusters.length : 1);
+  const estimatedPages = selectedServices.size * clusterCountForEstimate * targetCount;
   const overLimit = estimatedPages > MAX_SAFE_PAGES;
 
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -859,7 +860,7 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {targetCount.toLocaleString()} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
+                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {targetCount.toLocaleString()} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
                 {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
               </CardDescription>
             </CardHeader>
