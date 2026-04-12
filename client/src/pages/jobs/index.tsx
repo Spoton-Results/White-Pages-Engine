@@ -35,6 +35,8 @@ export default function JobsPage() {
   const [cityTierFilter, setCityTierFilter] = useState<number | null>(null);
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [siteFilter, setSiteFilter] = useState<string>("all");
 
   // Guards so auto-select fires once per dialog session and never overrides explicit user edits
   const didAutoSelectServices = useRef(false);
@@ -180,7 +182,17 @@ export default function JobsPage() {
     },
   });
 
-  const finishedJobs = jobs.filter((j: any) => j.status === "completed" || j.status === "cancelled" || j.status === "error");
+  const isDeletable = (status: string) => ["completed", "cancelled", "failed", "error", "pending"].includes(status);
+  const finishedJobs = jobs.filter((j: any) => isDeletable(j.status));
+
+  const visibleJobs = useMemo(() => {
+    return jobs.filter((j: any) => {
+      const matchStatus = statusFilter === "all" || j.status === statusFilter;
+      const matchSite = siteFilter === "all" || j.websiteId === siteFilter;
+      return matchStatus && matchSite;
+    });
+  }, [jobs, statusFilter, siteFilter]);
+
   const toggleJobSelect = (id: string) => {
     setSelectedJobs(prev => {
       const next = new Set(prev);
@@ -331,6 +343,46 @@ export default function JobsPage() {
           </Alert>
         )}
 
+        {/* Filter bar */}
+        {jobs.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-36 h-8 text-xs" data-testid="select-status-filter">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="running">Running</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={siteFilter} onValueChange={setSiteFilter}>
+              <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-site-filter">
+                <SelectValue placeholder="All websites" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All websites</SelectItem>
+                {websites.map((w: any) => (
+                  <SelectItem key={w.id} value={w.id}>{w.domain}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(statusFilter !== "all" || siteFilter !== "all") && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs px-2 text-muted-foreground"
+                onClick={() => { setStatusFilter("all"); setSiteFilter("all"); }}
+                data-testid="button-clear-filters">
+                Clear filters
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground ml-auto">
+              {visibleJobs.length} of {jobs.length} job{jobs.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 w-full" />)}
@@ -346,12 +398,19 @@ export default function JobsPage() {
               <Button onClick={() => setShowCreate(true)} data-testid="button-create-first-job">Create First Job</Button>
             </CardContent>
           </Card>
+        ) : visibleJobs.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-10 gap-3">
+              <p className="text-muted-foreground text-sm">No jobs match the current filters.</p>
+              <Button variant="outline" size="sm" onClick={() => { setStatusFilter("all"); setSiteFilter("all"); }}>Clear filters</Button>
+            </CardContent>
+          </Card>
         ) : (
           <div className="space-y-3">
-            {jobs.map((job: any) => (
+            {visibleJobs.map((job: any) => (
               <Card key={job.id} data-testid={`card-job-${job.id}`}>
                 <CardContent className="p-4 flex items-start gap-3">
-                  {(job.status === "completed" || job.status === "cancelled" || job.status === "error") ? (
+                  {isDeletable(job.status) ? (
                     <Checkbox
                       checked={selectedJobs.has(job.id)}
                       onCheckedChange={() => toggleJobSelect(job.id)}
@@ -446,11 +505,25 @@ export default function JobsPage() {
                     )}
                   </div>
 
-                  {job.status === "running" && (
-                    <Button variant="outline" size="sm" className="shrink-0" onClick={() => cancel.mutate(job.id)} data-testid={`button-cancel-${job.id}`}>
-                      <Square className="size-3 mr-1" />Cancel
-                    </Button>
-                  )}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    {job.status === "running" && (
+                      <Button variant="outline" size="sm" onClick={() => cancel.mutate(job.id)} data-testid={`button-cancel-${job.id}`}>
+                        <Square className="size-3 mr-1" />Cancel
+                      </Button>
+                    )}
+                    {isDeletable(job.status) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 px-2"
+                        onClick={() => deleteJob.mutate(job.id)}
+                        disabled={deleteJob.isPending}
+                        data-testid={`button-delete-job-${job.id}`}
+                      >
+                        <Trash2 className="size-3.5 mr-1" />Delete
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
