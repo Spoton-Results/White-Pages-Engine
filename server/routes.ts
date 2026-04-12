@@ -4847,5 +4847,38 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     return res.json({ logs });
   });
 
+  // ── Stripe Checkout ───────────────────────────────────────────────────────────
+
+  app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
+    const { tier } = req.body as { tier?: string };
+    const priceIdMap: Record<string, string | undefined> = {
+      bundle: process.env.STRIPE_PRICE_BUNDLE,
+      scale: process.env.STRIPE_PRICE_SCALE,
+    };
+    const priceId = tier ? priceIdMap[tier] : undefined;
+    if (!priceId) {
+      return res.json({ error: "coming_soon" });
+    }
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey) {
+      return res.json({ error: "coming_soon" });
+    }
+    try {
+      const Stripe = (await import("stripe")).default;
+      const stripe = new Stripe(stripeSecretKey);
+      const origin = req.headers.origin || "https://spotonnexus.com";
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${origin}/welcome`,
+        cancel_url: `${origin}/#pricing`,
+      });
+      return res.json({ url: session.url });
+    } catch (err: any) {
+      console.error("[stripe] checkout session error:", err?.message);
+      return res.status(500).json({ error: "checkout_failed" });
+    }
+  });
+
   return httpServer;
 }

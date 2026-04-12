@@ -65,6 +65,7 @@ import InternalLinksPage from "@/pages/internal-links";
 import AutomationPage from "@/pages/automation";
 import AgenciesPage from "@/pages/agencies";
 import NexusLandingPage from "@/pages/NexusLandingPage";
+import WelcomePage from "@/pages/WelcomePage";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -122,7 +123,12 @@ function Router() {
   const landingDomain = (import.meta as any).env?.VITE_LANDING_DOMAIN || "spotonnexus.com";
   const hostname = typeof window !== "undefined" ? window.location.hostname : "";
   if (hostname === landingDomain || hostname === `www.${landingDomain}`) {
-    return <NexusLandingPage />;
+    return (
+      <Switch>
+        <Route path="/welcome"><WelcomePage /></Route>
+        <Route><NexusLandingPage /></Route>
+      </Switch>
+    );
   }
 
   return (
