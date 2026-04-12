@@ -179,14 +179,11 @@ export async function deleteBrandProfile(id: string): Promise<void> {
 // ─── Websites ─────────────────────────────────────────────────────────────────
 
 export async function getWebsites(accountId?: string): Promise<Website[]> {
-  // Use raw SQL string identifiers — Drizzle table/column refs in sql`` become bound params
-  // in correlated subquery position and return 0. Raw strings produce the correct SQL.
-  const liveCount = sql<number>`(SELECT COUNT(*)::int FROM pages WHERE pages.website_id = websites.id AND pages.status = 'published')`;
-  const query = db.select({ id: websites.id, accountId: websites.accountId, brandProfileId: websites.brandProfileId, name: websites.name, domain: websites.domain, subdomain: websites.subdomain, status: websites.status, primaryIndustry: websites.primaryIndustry, targetLocale: websites.targetLocale, robotsTxt: websites.robotsTxt, customHead: websites.customHead, r2Prefix: websites.r2Prefix, publishedPages: liveCount, settings: websites.settings, createdAt: websites.createdAt, updatedAt: websites.updatedAt }).from(websites);
+  const query = db.select().from(websites);
   if (accountId) {
-    return query.where(eq(websites.accountId, accountId)).orderBy(desc(websites.createdAt)) as any;
+    return query.where(eq(websites.accountId, accountId)).orderBy(desc(websites.createdAt));
   }
-  return query.orderBy(desc(websites.createdAt)) as any;
+  return query.orderBy(desc(websites.createdAt));
 }
 
 export async function getWebsite(id: string): Promise<Website | undefined> {
