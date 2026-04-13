@@ -13,6 +13,7 @@ import { buildVariationPage, ClusterContext } from "./variation-engine";
 import { submitUrlsToGoogle } from "./gsc-indexing";
 import { scorePageContent, computeBankCompleteness } from "./scoring";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "@shared/schema";
 
@@ -22,7 +23,7 @@ import * as schema from "@shared/schema";
 // can't starve API request handlers of connections.
 const bulkPool = new pg.Pool({
   connectionString: process.env.DATABASE_URL!,
-  max: 2,               // 2 dedicated connections: one for inserts, one for overwrites
+  max: 5,               // 5 dedicated connections — all job DB ops use this pool now
   idleTimeoutMillis: 60000,
   connectionTimeoutMillis: 30000, // bulk ops may legitimately take longer
 });
@@ -41,9 +42,99 @@ async function insertVersionsBulk(data: schema.InsertPageVersion[]): Promise<voi
 const INSERT_BATCH_SIZE = 25;  // pages per bulk INSERT — keep batches small to avoid long connection holds
 const PAGE_BATCH_SIZE = 300;  // flush job counters to DB every N pages
 const OVERWRITE_BATCH_SIZE = 25; // overwrite updates per batch SQL
-const YIELD_EVERY = 50;       // yield event loop every N pages so pending I/O (DB releases, HTTP) can run
+const YIELD_EVERY = 10;       // yield event loop every N pages — frequent yields keep health checks responsive
 
 const yieldEventLoop = () => new Promise<void>(r => setImmediate(r));
+
+// ── Bulk-pool DB helpers ──────────────────────────────────────────────────────
+// ALL background-job DB operations go through bulkDb/bulkPool so the job never
+// competes with API request handlers on the main pool — even for bookkeeping calls.
+async function bulkGetJob(id: string) {
+  const [row] = await bulkDb.select().from(schema.generationJobs).where(eq(schema.generationJobs.id, id));
+  return row ?? null;
+}
+async function bulkUpdateJob(id: string, data: Record<string, unknown>) {
+  await bulkDb.update(schema.generationJobs).set(data as any).where(eq(schema.generationJobs.id, id));
+}
+async function bulkGetWebsite(id: string) {
+  const [row] = await bulkDb.select().from(schema.websites).where(eq(schema.websites.id, id));
+  return row ?? null;
+}
+async function bulkGetBrandProfile(id: string) {
+  const [row] = await bulkDb.select().from(schema.brandProfiles).where(eq(schema.brandProfiles.id, id));
+  return row ?? null;
+}
+async function bulkGetBlueprint(id: string) {
+  const [row] = await bulkDb.select().from(schema.blueprints).where(eq(schema.blueprints.id, id));
+  return row ?? null;
+}
+async function bulkGetServices(accountId: string) {
+  return bulkDb.select().from(schema.services).where(eq(schema.services.accountId, accountId));
+}
+async function bulkGetQueryClusters(accountId: string) {
+  return bulkDb.select().from(schema.queryClusters).where(eq(schema.queryClusters.accountId, accountId));
+}
+async function bulkGetAllStateData() {
+  const rows = await bulkDb.select().from(schema.stateData);
+  return new Map(rows.map(r => [r.stateAbbr.toUpperCase(), r]));
+}
+async function bulkGetPageSlugSet(websiteId: string): Promise<Set<string>> {
+  const rows = await bulkDb.select({ slug: schema.pages.slug }).from(schema.pages).where(eq(schema.pages.websiteId, websiteId));
+  return new Set(rows.map(r => r.slug));
+}
+async function bulkGetVariationBanks(websiteId: string, service: string) {
+  return bulkDb.select().from(schema.contentVariationBanks).where(
+    and(eq(schema.contentVariationBanks.websiteId, websiteId), eq(schema.contentVariationBanks.service, service))
+  );
+}
+async function bulkUpsertBankCompleteness(data: any) {
+  const client = await bulkPool.connect();
+  try {
+    await client.query(
+      `INSERT INTO variation_bank_completeness
+        (id, website_id, service,
+         has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
+         has_local_context, has_use_case, has_proof_trust, has_pain_point, has_local_stat,
+         total_variations, avg_variations_per_section, completeness_score, is_eligible_for_tier1, last_computed_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+       ON CONFLICT (website_id, service) DO UPDATE SET
+         has_intro = EXCLUDED.has_intro, has_how_it_works = EXCLUDED.has_how_it_works,
+         has_benefits = EXCLUDED.has_benefits, has_faq = EXCLUDED.has_faq, has_cta = EXCLUDED.has_cta,
+         has_local_context = EXCLUDED.has_local_context, has_use_case = EXCLUDED.has_use_case,
+         has_proof_trust = EXCLUDED.has_proof_trust, has_pain_point = EXCLUDED.has_pain_point,
+         has_local_stat = EXCLUDED.has_local_stat, total_variations = EXCLUDED.total_variations,
+         avg_variations_per_section = EXCLUDED.avg_variations_per_section,
+         completeness_score = EXCLUDED.completeness_score,
+         is_eligible_for_tier1 = EXCLUDED.is_eligible_for_tier1, last_computed_at = NOW()`,
+      [
+        data.websiteId, data.service,
+        data.hasIntro, data.hasHowItWorks, data.hasBenefits, data.hasFaq, data.hasCta,
+        data.hasLocalContext ?? false, data.hasUseCase ?? false,
+        data.hasProofTrust ?? false, data.hasPainPoint ?? false, data.hasLocalStat ?? false,
+        data.totalVariations, data.avgVariationsPerSection, data.completenessScore, data.isEligibleForTier1,
+      ]
+    );
+  } finally {
+    client.release();
+  }
+}
+async function bulkSyncPublishedCount(websiteId: string) {
+  const client = await bulkPool.connect();
+  try {
+    const res = await client.query(
+      `SELECT COUNT(*) AS n FROM pages WHERE website_id=$1 AND status='published'`,
+      [websiteId]
+    );
+    const n = parseInt(res.rows[0].n, 10);
+    await client.query(`UPDATE websites SET published_pages=$1, updated_at=NOW() WHERE id=$2`, [n, websiteId]);
+  } finally {
+    client.release();
+  }
+}
+async function bulkCreateJob(data: typeof schema.generationJobs.$inferInsert) {
+  const [row] = await bulkDb.insert(schema.generationJobs).values(data).returning();
+  return row;
+}
 
 export interface BulkJobSettings {
   services: string[];
@@ -98,6 +189,16 @@ function applyBlueprintTemplates(
     const cs = vars.cluster.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     if (cs) rawSlug = `${rawSlug}--${cs}`;
   }
+  // If the blueprint slug template doesn't include {service} AND the service name isn't
+  // hardcoded in the template itself, append the service slug so pages stay unique when
+  // one blueprint is used for multiple services (e.g. a generic state-hub template).
+  if (vars.service && !/\{service/i.test(blueprint.slugTemplate)) {
+    const ss = slugify(vars.service);
+    const templateLower = blueprint.slugTemplate.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (ss && !templateLower.includes(ss)) {
+      rawSlug = `${rawSlug}--${ss}`;
+    }
+  }
   return {
     title: interp(blueprint.titleTemplate),
     h1: interp(blueprint.h1Template),
@@ -140,30 +241,30 @@ async function buildTargets(
 }
 
 export async function runBulkBackgroundJob(jobId: string): Promise<void> {
-  const job = await storage.getGenerationJob(jobId);
+  const job = await bulkGetJob(jobId);
   if (!job) return;
 
   const settings = job.settings as unknown as BulkJobSettings;
   const { services, blueprintId, queryClusterIds, mode, states, cities, overwrite } = settings;
 
-  await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
+  await bulkUpdateJob(jobId, { status: "running", startedAt: new Date() });
 
-  const website = await storage.getWebsite(job.websiteId);
+  const website = await bulkGetWebsite(job.websiteId);
   if (!website) {
-    await storage.updateGenerationJob(jobId, { status: "failed", completedAt: new Date() });
+    await bulkUpdateJob(jobId, { status: "failed", completedAt: new Date() });
     return;
   }
 
-  const brand = await storage.getBrandProfile(website.brandProfileId as string);
+  const brand = await bulkGetBrandProfile(website.brandProfileId as string);
   const brandName = brand?.name || website.name || website.domain;
 
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
-  const blueprint = effectiveBlueprintId ? await storage.getBlueprint(effectiveBlueprintId) : null;
+  const blueprint = effectiveBlueprintId ? await bulkGetBlueprint(effectiveBlueprintId) : null;
 
   // ── Pre-load clusters once — keyed by service name (lowercase) ────────────────
   const [accountServices, accountClusters] = await Promise.all([
-    storage.getServices(website.accountId!),
-    storage.getQueryClusters(website.accountId!),
+    bulkGetServices(website.accountId!),
+    bulkGetQueryClusters(website.accountId!),
   ]);
   // If the job specified particular cluster IDs, restrict to only those clusters
   const eligibleClusters = queryClusterIds && queryClusterIds.length > 0
@@ -181,7 +282,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   );
 
   // ── Pre-load all state data once ─────────────────────────────────────────────
-  const stateDataMap = await storage.getAllStateData();
+  const stateDataMap = await bulkGetAllStateData();
   let targets = await buildTargets(mode, stateDataMap, states, cities);
 
   // ── Build city-by-state index for internal linking on state hub pages ─────────
@@ -231,7 +332,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   const clusterCount = eligibleClusters.length > 0 ? eligibleClusters.length : 1;
   const totalPages = services.length * clusterCount * targets.length;
-  await storage.updateGenerationJob(jobId, { totalPages });
+  await bulkUpdateJob(jobId, { totalPages });
 
   if (completedServiceSet.size > 0) {
     console.log(`[bulk-background] Resuming job ${jobId} — ${completedServiceSet.size}/${services.length} services already done, skipping them`);
@@ -260,13 +361,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         return true;
       });
       const dedupedTotal = services.length * targets.length;
-      await storage.updateGenerationJob(jobId, { totalPages: dedupedTotal });
+      await bulkUpdateJob(jobId, { totalPages: dedupedTotal });
       console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets (${dedupedTotal} total pages)`);
     }
   }
 
   // ── Load slug set ONCE for the entire job (not once per service) ─────────────
-  const existingSlugSet = await storage.getPageSlugSet(job.websiteId);
+  const existingSlugSet = await bulkGetPageSlugSet(job.websiteId);
 
   // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
@@ -274,10 +375,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     // Check for cancellation before starting each service so Cancel actually stops the job.
     // Without this check the worker runs through all services even after the user cancels.
-    const liveJob = await storage.getGenerationJob(jobId);
+    const liveJob = await bulkGetJob(jobId);
     if (!liveJob || liveJob.status === "cancelled") {
       console.log(`[bulk-background] Job ${jobId} was cancelled — stopping at service ${si}/${services.length}`);
-      await storage.syncWebsitePublishedCount(job.websiteId);
+      await bulkSyncPublishedCount(job.websiteId);
       return;
     }
 
@@ -285,17 +386,17 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     const svcId = serviceIdByName.get(svc.toLowerCase());
 
-    const banks = await storage.getVariationBanks(job.websiteId, svc);
+    const banks = await bulkGetVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
       settings.progress[si] = { service: svc, status: "no-bank", created: 0, updated: 0, skipped: 0, errors: 0 };
-      await storage.updateGenerationJob(jobId, { settings: settings as any });
+      await bulkUpdateJob(jobId, { settings: settings as any });
       continue;
     }
 
     // Compute and persist bank completeness once per service
     try {
       const completeness = computeBankCompleteness(banks);
-      await storage.upsertBankCompleteness({
+      await bulkUpsertBankCompleteness({
         websiteId: job.websiteId,
         service: svc,
         hasIntro: completeness.hasIntro,
@@ -319,13 +420,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
 
     settings.progress[si] = { service: svc, status: "running", created: 0, updated: 0, skipped: 0, errors: 0 };
-    await storage.updateGenerationJob(jobId, { settings: settings as any });
+    await bulkUpdateJob(jobId, { settings: settings as any });
 
     const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
     let svcCreated = 0, svcUpdated = 0, svcSkipped = 0, svcErrors = 0;
 
     // Pending batch for bulk inserts (new pages only)
-    const pendingPageData: Parameters<typeof storage.createPage>[0][] = [];
+    const pendingPageData: schema.InsertPage[] = [];
     const pendingContent: string[] = [];
 
     // Pending batch for overwrites
@@ -496,23 +597,29 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       // even when most pages are skips (batch may not have reached INSERT_BATCH_SIZE yet).
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
-        await flushInsertBatch();
-        await flushOverwriteBatch();
-        // Check cancellation every PAGE_BATCH_SIZE pages — reuses the same DB
-        // round-trip window so we don't add extra overhead per page.
-        const liveJob = await storage.getGenerationJob(jobId);
-        if (!liveJob || liveJob.status === "cancelled") {
-          console.log(`[bulk-background] Job ${jobId} cancelled mid-service — stopping`);
-          await storage.syncWebsitePublishedCount(job.websiteId);
-          return;
+        try {
+          await flushInsertBatch();
+          await flushOverwriteBatch();
+          // Check cancellation every PAGE_BATCH_SIZE pages — reuses the same DB
+          // round-trip window so we don't add extra overhead per page.
+          const midJob = await bulkGetJob(jobId);
+          if (!midJob || midJob.status === "cancelled") {
+            console.log(`[bulk-background] Job ${jobId} cancelled mid-service — stopping`);
+            await bulkSyncPublishedCount(job.websiteId);
+            return;
+          }
+          const rawProcessed = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
+          const rawPassed = basePassedPages + totalCreated + totalUpdated;
+          await bulkUpdateJob(jobId, {
+            processedPages: Math.min(rawProcessed, totalPages),
+            passedPages: Math.min(rawPassed, totalPages),
+            failedPages: totalFailed,
+          });
+        } catch (chkErr) {
+          // A transient DB error in the checkpoint should not crash the whole job.
+          // Log it and continue — the next checkpoint will retry.
+          console.error("[bulk-background] checkpoint flush error (continuing):", chkErr);
         }
-        const rawProcessed = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
-        const rawPassed = basePassedPages + totalCreated + totalUpdated;
-        await storage.updateGenerationJob(jobId, {
-          processedPages: Math.min(rawProcessed, totalPages),
-          passedPages: Math.min(rawPassed, totalPages),
-          failedPages: totalFailed,
-        });
       }
     } // end for (const t of targets)
     } // end for (const cl of clustersToIterate)
@@ -524,7 +631,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     settings.progress[si] = { service: svc, status: "done", created: svcCreated, updated: svcUpdated, skipped: svcSkipped, errors: svcErrors };
     const rawProcessed2 = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
     const rawPassed2 = basePassedPages + totalCreated + totalUpdated;
-    await storage.updateGenerationJob(jobId, {
+    await bulkUpdateJob(jobId, {
       settings: settings as any,
       processedPages: Math.min(rawProcessed2, totalPages),
       passedPages: Math.min(rawPassed2, totalPages),
@@ -533,10 +640,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   }
 
   // Final sync and sitemap
-  await storage.syncWebsitePublishedCount(job.websiteId);
+  await bulkSyncPublishedCount(job.websiteId);
   const rawFinal = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
   const rawPassedFinal = basePassedPages + totalCreated + totalUpdated;
-  await storage.updateGenerationJob(jobId, {
+  await bulkUpdateJob(jobId, {
     status: "completed",
     completedAt: new Date(),
     processedPages: Math.min(rawFinal, totalPages),
@@ -568,7 +675,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   // Auto 1 + 2 + 3 + 4: Create a separate scoring job visible in the Jobs dashboard
   try {
     const { runAutoScoringJob } = await import("./automation");
-    const scoringJob = await storage.createGenerationJob({
+    const scoringJob = await bulkCreateJob({
       accountId: website.accountId!,
       websiteId: job.websiteId,
       name: `Auto-Score: ${website.domain}`,
