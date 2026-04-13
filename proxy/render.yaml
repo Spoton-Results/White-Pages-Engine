@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: nexus-proxy
+    runtime: node
+    rootDir: proxy
+    buildCommand: ""
+    startCommand: node server.js
+    envVars:
+      - key: NEXUS_ORIGIN
+        value: sospages.replit.app
