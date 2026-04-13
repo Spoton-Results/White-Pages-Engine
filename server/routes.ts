@@ -2966,9 +2966,16 @@ Return ONLY valid JSON (no markdown):
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Use req.hostname which respects X-Forwarded-Host from trusted proxies (Cloudflare/Replit)
-      // Fall back to parsing the raw Host header if hostname is unavailable
-      const host = (req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+      // Resolve the actual client-facing hostname.
+      // Priority: X-Forwarded-Host (set by Cloudflare/Replit) → req.hostname (Express-computed
+      // from X-Forwarded-Host when trust proxy is set) → raw Host header fallback.
+      const xfh = ((req.headers["x-forwarded-host"] as string) || "").split(",")[0].trim();
+      const host = (xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+
+      // DEBUG: log raw headers for all non-asset, non-API requests to diagnose custom domain routing
+      if (!req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {
+        console.log(`[domain-mw-debug] req.hostname=${req.hostname} host_header=${req.headers.host} x-forwarded-host=${req.headers["x-forwarded-host"]} x-replit-custom-domain=${req.headers["x-replit-custom-domain"]} path=${req.path}`);
+      }
 
       // Log every non-API, non-asset request to diagnose custom domain routing
       if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__")) {
