@@ -24,8 +24,9 @@ export default {
     const origin = env.NEXUS_ORIGIN || NEXUS_ORIGIN;
     const url = new URL(request.url);
 
-    // The original client-facing hostname (e.g. subdraw.com)
-    const clientHost = url.hostname;
+    // The original client-facing hostname sent by Cloudflare for SaaS in the Host header
+    // (url.hostname would be "fallback.spotonresults.com" — the route pattern, not the custom domain)
+    const clientHost = request.headers.get("host") || url.hostname;
 
     // Build the forwarded URL — same path/query, different host
     const targetUrl = `${origin}${url.pathname}${url.search}`;
