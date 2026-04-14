@@ -3041,7 +3041,9 @@ Return ONLY valid JSON (no markdown):
 
       // Skip Replit platform domains, localhost, landing page root, and internal asset paths
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
-      const isLandingRoot = (host === landingDomain || host === `www.${landingDomain}`) && (req.path === "/" || req.path === "");
+      const isLandingDomain = host === landingDomain || host === `www.${landingDomain}`;
+      const isStaticAsset = req.path.startsWith("/assets/") || !!req.path.match(/\.(js|css|png|ico|svg|woff2?|json|txt|webmanifest)$/);
+      const isLandingRoot = isLandingDomain && (req.path === "/" || req.path === "" || isStaticAsset);
       if (!host
         || host === "localhost"
         || host === "0.0.0.0"
