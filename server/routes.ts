@@ -3044,12 +3044,13 @@ Return ONLY valid JSON (no markdown):
         console.log(`[domain-mw] host=${host} path=${req.path}`);
       }
 
-      // Skip Replit platform domains, localhost, landing page domain, and internal asset paths
+      // Skip Replit platform domains, localhost, landing page root, and internal asset paths
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
+      const isLandingRoot = (host === landingDomain || host === `www.${landingDomain}`) && (req.path === "/" || req.path === "");
       if (!host
         || host === "localhost"
         || host === "0.0.0.0"
-        || (host === landingDomain || host === `www.${landingDomain}`)
+        || isLandingRoot
         || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
         || req.path.startsWith("/api/")
         || req.path.startsWith("/sites/")
