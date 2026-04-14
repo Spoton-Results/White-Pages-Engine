@@ -16,6 +16,45 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 
+// ── Cloudflare for SaaS custom hostname registration ─────────────────────────
+// When a client domain is saved, auto-register it as a CF custom hostname so
+// Cloudflare for SaaS routes their traffic to Nexus without any manual steps.
+
+async function registerCFCustomHostname(domain: string): Promise<{ ok: boolean; status?: string; error?: string }> {
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (!zoneId || !apiToken) {
+    console.log(`[cf-hostname] Skipping registration for ${domain} — CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN not set`);
+    return { ok: false, error: "CF credentials not configured" };
+  }
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/custom_hostnames`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hostname: domain,
+        ssl: { method: "http", type: "dv", settings: { http2: "on", min_tls_version: "1.2", tls_1_3: "on" } },
+      }),
+    });
+    const json: any = await res.json();
+    if (json.success) {
+      console.log(`[cf-hostname] Registered ${domain} — status: ${json.result?.status}`);
+      return { ok: true, status: json.result?.status };
+    }
+    const errCode = json.errors?.[0]?.code;
+    // 1406 = hostname already exists — treat as success
+    if (errCode === 1406) {
+      console.log(`[cf-hostname] ${domain} already registered in CF for SaaS`);
+      return { ok: true, status: "already_exists" };
+    }
+    console.error(`[cf-hostname] Failed to register ${domain}:`, json.errors);
+    return { ok: false, error: json.errors?.[0]?.message ?? "CF API error" };
+  } catch (err: any) {
+    console.error(`[cf-hostname] Exception registering ${domain}:`, err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 // ── Sitemap chunk cache ───────────────────────────────────────────────────────
 // Each child sitemap holds up to URLS_PER_SITEMAP (10K) URLs.
 // Cache the built XML for 1 hour so Googlebot never times out on retry.
@@ -978,13 +1017,28 @@ Return ONLY valid JSON (no markdown) with these exact keys:
   app.post("/api/websites", requireAuth, async (req: Request, res: Response) => {
     const parsed = insertWebsiteSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    return res.status(201).json(await storage.createWebsite(parsed.data));
+    const website = await storage.createWebsite(parsed.data);
+    if (website.domain) registerCFCustomHostname(website.domain).catch(() => {});
+    return res.status(201).json(website);
   });
 
   app.patch("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
+    const existing = await storage.getWebsite(req.params.id as string);
     const website = await storage.updateWebsite((req.params.id as string), req.body);
     if (!website) return res.status(404).json({ message: "Not found" });
+    if (website.domain && website.domain !== existing?.domain) {
+      registerCFCustomHostname(website.domain).catch(() => {});
+    }
     return res.json(website);
+  });
+
+  // Manual trigger: register a website's domain with Cloudflare for SaaS
+  app.post("/api/websites/:id/register-domain", requireAuth, async (req: Request, res: Response) => {
+    const website = await storage.getWebsite(req.params.id as string);
+    if (!website) return res.status(404).json({ message: "Not found" });
+    if (!website.domain) return res.status(400).json({ message: "Website has no domain set" });
+    const result = await registerCFCustomHostname(website.domain);
+    return res.json(result);
   });
 
   app.delete("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
