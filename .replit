@@ -41,3 +41,8 @@ waitForPort = 5000
 [agent]
 stack = "MOCKUP_JS"
 mockupState = "FULLSTACK"
+
+[userenv]
+
+[userenv.shared]
+CLOUDFLARE_ZONE_ID = "8fc5544bff85fbfe1b8580a0e75c1ede"
