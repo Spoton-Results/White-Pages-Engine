@@ -1,44 +1,19 @@
-/**
- * Nexus Domain Proxy — Cloudflare Worker
- *
- * Deploy this once on Cloudflare. Each client then CNAMEs their domain to
- * the Worker's custom domain (e.g. proxy.spotonnexus.com). The Worker
- * captures the original hostname and forwards it to the Nexus platform
- * as X-Forwarded-Host, which the Nexus domain middleware reads to serve
- * the correct client's pages.
- *
- * Client DNS setup (one-time, no Replit configuration needed):
- *   subdraw.com  CNAME  proxy.spotonnexus.com
- *   OR point to the Worker's *.workers.dev URL for testing
- *
- * Env vars (set in Cloudflare Worker settings):
- *   NEXUS_ORIGIN  — the platform's deployment URL, e.g. https://sospages.replit.app
- */
-
-const NEXUS_ORIGIN = typeof NEXUS_ORIGIN_ENV !== "undefined"
-  ? NEXUS_ORIGIN_ENV
-  : "https://sospages.replit.app";
-
 export default {
   async fetch(request, env) {
-    const origin = env.NEXUS_ORIGIN || NEXUS_ORIGIN;
+    const origin = env.NEXUS_ORIGIN || "https://sospages.replit.app";
     const url = new URL(request.url);
 
-    // Cloudflare for SaaS sets request.cf.hostname to the custom hostname (e.g. pages.subdraw.com).
-    // request.headers.get("host") only gives the fallback origin hostname (fallback.spotonresults.com).
+    // Cloudflare for SaaS puts the real custom hostname here (e.g. pages.subdraw.com)
     const clientHost = request.cf?.hostname || request.headers.get("host") || url.hostname;
 
-    // Build the forwarded URL — same path/query, different host
     const targetUrl = `${origin}${url.pathname}${url.search}`;
 
-    // Copy all incoming headers, then set the host-forwarding headers
     const headers = new Headers(request.headers);
     headers.set("X-Forwarded-Host", clientHost);
     headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
-    // X-Nexus-Host survives Replit's ingress rewriting of X-Forwarded-Host
     headers.set("X-Nexus-Host", clientHost);
-    headers.set("host", new URL(origin).hostname); // must match origin so Replit accepts it
-    headers.delete("CF-Connecting-IP"); // strip Cloudflare internal header
+    headers.set("host", new URL(origin).hostname);
+    headers.delete("CF-Connecting-IP");
 
     const response = await fetch(targetUrl, {
       method: request.method,
@@ -47,7 +22,6 @@ export default {
       redirect: "manual",
     });
 
-    // Pass response through, adding CORS permissiveness if needed
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
