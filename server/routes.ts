@@ -779,6 +779,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // Temporary debug endpoint — remove after diagnosing CF for SaaS headers
+  app.get("/cf-debug", (req: Request, res: Response) => {
+    res.json({ headers: req.headers, hostname: req.hostname, ip: req.ip });
+  });
+
   app.get("/api/auth/me", async (req: Request, res: Response) => {
     if (!req.session.userId) {
       return res.status(401).json({ message: "Not authenticated" });
