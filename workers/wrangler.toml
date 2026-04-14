@@ -1,10 +1,11 @@
 name = "nexus-domain-proxy"
 main = "nexus-domain-proxy.js"
 compatibility_date = "2024-01-01"
+account_id = "d50cb9c8e028ae248d2bf9f057053a0b"
 
 [vars]
 NEXUS_ORIGIN = "https://sospages.replit.app"
 
-# After deploying, add a custom domain in the Cloudflare Workers dashboard
-# so clients can CNAME their domain to e.g. proxy.spotonnexus.com
-# Example: Workers & Pages -> nexus-domain-proxy -> Settings -> Custom Domains
+routes = [
+  { pattern = "nexus-direct.spotonresults.com", custom_domain = true, zone_name = "spotonresults.com" }
+]
