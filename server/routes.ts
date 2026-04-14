@@ -3027,14 +3027,16 @@ Return ONLY valid JSON (no markdown):
     try {
       // Resolve the actual client-facing hostname.
       // Priority: X-Nexus-Host (set by Cloudflare Worker, survives Replit ingress rewriting)
+      // → CF-Custom-Hostname (set by Cloudflare for SaaS on fallback origin requests)
       // → X-Forwarded-Host → req.hostname → raw Host header fallback.
       const nexusHost = ((req.headers["x-nexus-host"] as string) || "").split(",")[0].trim();
+      const cfCustomHostname = ((req.headers["cf-custom-hostname"] as string) || "").split(",")[0].trim();
       const xfh = ((req.headers["x-forwarded-host"] as string) || "").split(",")[0].trim();
-      const host = (nexusHost || xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+      const host = (nexusHost || cfCustomHostname || xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
 
       // DEBUG: log raw headers for all non-asset, non-API requests to diagnose custom domain routing
       if (!req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {
-        console.log(`[domain-mw-debug] req.hostname=${req.hostname} host_header=${req.headers.host} x-forwarded-host=${req.headers["x-forwarded-host"]} x-replit-custom-domain=${req.headers["x-replit-custom-domain"]} path=${req.path}`);
+        console.log(`[domain-mw-debug] req.hostname=${req.hostname} host_header=${req.headers.host} x-forwarded-host=${req.headers["x-forwarded-host"]} x-nexus-host=${req.headers["x-nexus-host"]} cf-custom-hostname=${req.headers["cf-custom-hostname"]} path=${req.path}`);
       }
 
       // Log every non-API, non-asset request to diagnose custom domain routing
