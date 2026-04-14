@@ -34,6 +34,7 @@ export default {
     const headers = new Headers(request.headers);
     headers.set("X-Forwarded-Host", clientHost);
     headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+    headers.set("host", new URL(origin).hostname); // must match origin so Replit accepts it
     headers.delete("CF-Connecting-IP"); // strip Cloudflare internal header
 
     const response = await fetch(targetUrl, {
