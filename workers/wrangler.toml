@@ -1,11 +1,6 @@
 name = "nexus-domain-proxy"
 main = "nexus-domain-proxy.js"
 compatibility_date = "2024-01-01"
-account_id = "d50cb9c8e028ae248d2bf9f057053a0b"
 
 [vars]
 NEXUS_ORIGIN = "https://sospages.replit.app"
-
-routes = [
-  { pattern = "nexus-direct.spotonresults.com", custom_domain = true, zone_name = "spotonresults.com" }
-]

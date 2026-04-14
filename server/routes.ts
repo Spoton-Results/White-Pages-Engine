@@ -3034,13 +3034,8 @@ Return ONLY valid JSON (no markdown):
       const xfh = ((req.headers["x-forwarded-host"] as string) || "").split(",")[0].trim();
       const host = (nexusHost || cfCustomHostname || xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
 
-      // DEBUG: log raw headers for all non-asset, non-API requests to diagnose custom domain routing
-      if (!req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {
-        console.log(`[domain-mw-debug] req.hostname=${req.hostname} host_header=${req.headers.host} x-forwarded-host=${req.headers["x-forwarded-host"]} x-nexus-host=${req.headers["x-nexus-host"]} cf-custom-hostname=${req.headers["cf-custom-hostname"]} path=${req.path}`);
-      }
-
-      // Log every non-API, non-asset request to diagnose custom domain routing
-      if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__")) {
+      // Log custom domain requests for non-asset, non-API paths
+      if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {
         console.log(`[domain-mw] host=${host} path=${req.path}`);
       }
 
