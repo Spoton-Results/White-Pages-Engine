@@ -2967,10 +2967,11 @@ Return ONLY valid JSON (no markdown):
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Resolve the actual client-facing hostname.
-      // Priority: X-Forwarded-Host (set by Cloudflare/Replit) → req.hostname (Express-computed
-      // from X-Forwarded-Host when trust proxy is set) → raw Host header fallback.
+      // Priority: X-Nexus-Host (set by Cloudflare Worker, survives Replit ingress rewriting)
+      // → X-Forwarded-Host → req.hostname → raw Host header fallback.
+      const nexusHost = ((req.headers["x-nexus-host"] as string) || "").split(",")[0].trim();
       const xfh = ((req.headers["x-forwarded-host"] as string) || "").split(",")[0].trim();
-      const host = (xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
+      const host = (nexusHost || xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
 
       // DEBUG: log raw headers for all non-asset, non-API requests to diagnose custom domain routing
       if (!req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {

@@ -35,6 +35,8 @@ export default {
     const headers = new Headers(request.headers);
     headers.set("X-Forwarded-Host", clientHost);
     headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+    // X-Nexus-Host survives Replit's ingress rewriting of X-Forwarded-Host
+    headers.set("X-Nexus-Host", clientHost);
     headers.set("host", new URL(origin).hostname); // must match origin so Replit accepts it
     headers.delete("CF-Connecting-IP"); // strip Cloudflare internal header
 
