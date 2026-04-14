@@ -111,33 +111,43 @@ async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?
 function StripeButton({ tier, label, featured = false }: { tier: Tier; label: string; featured?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [comingSoon, setComingSoon] = useState(false);
+  const [errored, setErrored] = useState(false);
 
   const handleClick = async () => {
     if (loading || comingSoon) return;
     setLoading(true);
+    setErrored(false);
     try {
       const { url, error } = await createCheckoutSession(tier);
       if (error === "coming_soon") { setComingSoon(true); return; }
+      if (error) { setErrored(true); return; }
       if (url) window.location.href = url;
     } catch {
-      // silently fail
+      setErrored(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const text = comingSoon ? "Coming Soon" : loading ? "Loading…" : label;
+  const text = comingSoon ? "Coming Soon" : errored ? "Try Again" : loading ? "Loading…" : label;
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={loading}
-      className={featured ? "nx-btn-featured" : "nx-btn-primary"}
-      style={{ width: "100%", justifyContent: "center" }}
-      data-testid={`btn-stripe-${tier}`}
-    >
-      {text}
-    </button>
+    <div style={{ width: "100%" }}>
+      <button
+        onClick={handleClick}
+        disabled={loading}
+        className={featured ? "nx-btn-featured" : "nx-btn-primary"}
+        style={{ width: "100%", justifyContent: "center" }}
+        data-testid={`btn-stripe-${tier}`}
+      >
+        {text}
+      </button>
+      {errored && (
+        <p style={{ color: "#f87171", fontSize: 13, marginTop: 8, textAlign: "center" }}>
+          Something went wrong. Please try again or email us at hello@spotonnexus.com
+        </p>
+      )}
+    </div>
   );
 }
 

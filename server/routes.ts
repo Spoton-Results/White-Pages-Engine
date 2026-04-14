@@ -4875,6 +4875,55 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     return res.json({ logs });
   });
 
+  // ── Stripe Webhook ────────────────────────────────────────────────────────────
+
+  app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
+    const sig = req.headers["stripe-signature"] as string;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey || !webhookSecret) {
+      return res.status(400).json({ error: "Stripe not configured" });
+    }
+    let event: any;
+    try {
+      const Stripe = (await import("stripe")).default;
+      const stripe = new Stripe(stripeSecretKey);
+      event = stripe.webhooks.constructEvent(req.rawBody as Buffer, sig, webhookSecret);
+    } catch (err: any) {
+      console.error("[stripe-webhook] signature verification failed:", err.message);
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    console.log(`[stripe-webhook] event=${event.type} id=${event.id}`);
+
+    try {
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as any;
+        const email = session.customer_details?.email || session.customer_email || "unknown";
+        const customerId = session.customer;
+        const subscriptionId = session.subscription;
+        console.log(`[stripe-webhook] New subscription — email=${email} customer=${customerId} subscription=${subscriptionId}`);
+      }
+
+      if (event.type === "invoice.payment_failed") {
+        const invoice = event.data.object as any;
+        const customerId = invoice.customer;
+        const email = invoice.customer_email || "unknown";
+        console.error(`[stripe-webhook] Payment failed — customer=${customerId} email=${email}`);
+      }
+
+      if (event.type === "customer.subscription.deleted") {
+        const sub = event.data.object as any;
+        const customerId = sub.customer;
+        console.log(`[stripe-webhook] Subscription cancelled — customer=${customerId}`);
+      }
+    } catch (err: any) {
+      console.error("[stripe-webhook] handler error:", err.message);
+    }
+
+    return res.json({ received: true });
+  });
+
   // ── Stripe Checkout ───────────────────────────────────────────────────────────
 
   app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
