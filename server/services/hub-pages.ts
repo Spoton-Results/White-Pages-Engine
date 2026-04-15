@@ -75,7 +75,8 @@ export function renderHubPageHtml(opts: HubPageRenderOptions): string {
   const brandName = brand?.name || website.settings?.brandName || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || website.settings?.phone || "";
-  const mainWebsiteUrl = website.settings?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const rawMainUrl = website.settings?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const mainWebsiteUrl = rawMainUrl && !/^https?:\/\//i.test(rawMainUrl) ? `https://${rawMainUrl}` : rawMainUrl;
   const parentDomain = website.settings?.parentDomain;
   const rawProxyPath = (website.settings?.proxyPath || "") as string;
   // Sanitize: admin-preview paths (starting with /sites/) must never be used in live page content

@@ -368,7 +368,8 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const primaryColor = brand?.primaryColor || "#2563eb";
   const phone = brand?.phone || (website.settings as any)?.phone || "";
   const tagline = brand?.tagline || (website.settings as any)?.tagline || "";
-  const mainWebsiteUrl = (website.settings as any)?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const rawMainUrl = (website.settings as any)?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const mainWebsiteUrl = rawMainUrl && !/^https?:\/\//i.test(rawMainUrl) ? `https://${rawMainUrl}` : rawMainUrl;
   const ctaHeading = (website.settings as any)?.ctaHeading || `Visit ${brandName}`;
   const ctaText = (website.settings as any)?.ctaText || "See how we can help your business grow.";
   const ctaButtonLabel = (website.settings as any)?.ctaButtonLabel || "Learn More";
