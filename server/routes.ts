@@ -5058,7 +5058,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     const { tier } = req.body as { tier?: string };
     const priceIdMap: Record<string, string | undefined> = {
       bundle: process.env.STRIPE_PRICE_BUNDLE,
-      scale: process.env.STRIPE_PRICE_SCALE,
+      pilot: process.env.STRIPE_PRICE_PILOT,
     };
     const priceId = tier ? priceIdMap[tier] : undefined;
     if (!priceId) {

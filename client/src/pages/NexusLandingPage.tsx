@@ -95,7 +95,7 @@ function Accordion({ items }: { items: { q: string; a: string }[] }) {
 
 // ── Stripe checkout helper ────────────────────────────────────────────────────
 
-type Tier = "bundle" | "scale";
+type Tier = "bundle" | "pilot";
 
 async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?: string }> {
   const resp = await fetch("/api/stripe/create-checkout-session", {
@@ -293,7 +293,7 @@ export default function NexusLandingPage() {
         display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
       }
       .nx-pricing-grid {
-        display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start;
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: stretch;
       }
 
       .nx-pricing-card {
@@ -399,6 +399,7 @@ export default function NexusLandingPage() {
       @media (max-width: 900px) {
         .nx-grid-3 { grid-template-columns: 1fr; }
         .nx-pricing-grid { grid-template-columns: 1fr; }
+        .nx-pricing-card.featured { transform: none !important; }
         .nx-enterprise { flex-direction: column; align-items: flex-start; }
       }
       @media (max-width: 700px) {
@@ -579,6 +580,17 @@ export default function NexusLandingPage() {
     },
   ];
 
+  const pilotFeatures = [
+    "1 client website",
+    "Up to 1,000 pages",
+    "90-day rollout schedule",
+    "Quality scoring and tiering",
+    "Automated sitemaps and indexing",
+    "Internal linking and hub pages",
+    "Weekly performance report",
+    "Setup: $1,500",
+  ];
+
   const bundleFeatures = [
     "3 client websites",
     "Up to 1,000 pages per site",
@@ -594,19 +606,21 @@ export default function NexusLandingPage() {
     "Annual option: $2,500/mo",
   ];
 
-  const scaleFeatures = [
-    "10 client websites",
-    "5,000 pages per site included",
+  const customFeatures = [
+    "4+ client websites",
+    "Higher page volumes per site",
+    "Statewide and national coverage",
     "White-label dashboard",
     "Monthly strategy call",
-    "Setup: $1,500/site",
-    "Everything in the Bundle plus higher volume",
+    "Custom rollout plan",
+    "Dedicated onboarding",
   ];
 
-  const addOns = [
-    { pages: "5,000 pages", price: "+$500/mo", note: "Regional coverage" },
-    { pages: "15,000 pages", price: "+$1,500/mo", note: "Statewide coverage" },
-    { pages: "50,000 pages", price: "+$3,500/mo", note: "Nationwide domination" },
+  const addOnItems = [
+    { label: "Regional coverage", detail: "5,000 pages/site", price: "+$500/mo" },
+    { label: "Statewide coverage", detail: "15,000 pages/site", price: "+$1,500/mo" },
+    { label: "National coverage", detail: "50,000 pages/site", price: "+$3,500/mo" },
+    { label: "Additional client site", detail: "", price: "+$1,000/mo + $1,500 setup" },
   ];
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -959,48 +973,37 @@ export default function NexusLandingPage() {
           <FadeIn delay={80}>
             <div className="nx-pricing-grid">
 
-              {/* Left — Add-Ons */}
-              <div className="nx-pricing-card" data-testid="card-pricing-addons">
-                <div style={{ marginBottom: 28 }}>
-                  <span className="nx-label" style={{ marginBottom: 8 }}>Growth Add-Ons</span>
+              {/* Left — Pilot */}
+              <div className="nx-pricing-card" data-testid="card-pricing-pilot" style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ marginBottom: 24 }}>
+                  <span className="nx-label" style={{ marginBottom: 8 }}>Pilot</span>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 8 }}>
+                    <span className="nx-mono" style={{
+                      fontSize: "clamp(36px, 5vw, 48px)", fontWeight: 500, color: "#fafafa", lineHeight: 1,
+                    }}>$1,500</span>
+                    <span style={{
+                      fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                      fontSize: 14, color: "#71717a",
+                    }}>/mo</span>
+                  </div>
                   <p style={{
                     fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
                     fontSize: 14, color: "#71717a", marginBottom: 0,
-                  }}>Per site upgrades</p>
+                  }}>For agencies testing programmatic SEO with their first client.</p>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 0, flex: 1 }}>
-                  {addOns.map((ao, i) => (
-                    <div key={i} style={{
-                      padding: "16px 0",
-                      borderBottom: i < addOns.length - 1 ? "1px solid #27272a" : "none",
-                    }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                        <span style={{
-                          fontFamily: "'Satoshi', 'Syne', sans-serif",
-                          fontSize: 15, fontWeight: 700, color: "#fafafa",
-                        }}>{ao.pages}</span>
-                        <span className="nx-mono" style={{ fontSize: 14, color: "#3b82f6", fontWeight: 500 }}>{ao.price}</span>
-                      </div>
-                      <p style={{
-                        fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                        fontSize: 13, color: "#71717a",
-                      }}>{ao.note}</p>
+                <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
+                  {pilotFeatures.map((f, i) => (
+                    <div key={i} className="nx-pricing-feature">
+                      <span className="nx-pricing-feature-bullet">●</span>
+                      <span>{f}</span>
                     </div>
                   ))}
-                  <div style={{ paddingTop: 16 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                      <span style={{
-                        fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                        fontSize: 14, color: "#a1a1aa",
-                      }}>Additional client site</span>
-                      <span className="nx-mono" style={{ fontSize: 13, color: "#3b82f6" }}>+$1,000/mo + $1,500 setup</span>
-                    </div>
-                  </div>
                 </div>
+                <StripeButton tier="pilot" label="Get Started — $1,500/mo" />
               </div>
 
               {/* Center — Bundle (featured) */}
-              <div className="nx-pricing-card featured" data-testid="card-pricing-bundle">
+              <div className="nx-pricing-card featured" data-testid="card-pricing-bundle" style={{ display: "flex", flexDirection: "column", transform: "scale(1.05)", transformOrigin: "center center", zIndex: 1 }}>
                 <span className="nx-badge">Most Popular</span>
                 <div style={{ marginBottom: 24 }}>
                   <span className="nx-label" style={{ marginBottom: 8 }}>The No-Brainer Bundle</span>
@@ -1013,8 +1016,12 @@ export default function NexusLandingPage() {
                       fontSize: 14, color: "#71717a",
                     }}>/mo</span>
                   </div>
+                  <p style={{
+                    fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                    fontSize: 14, color: "#71717a", marginBottom: 0,
+                  }}>3 clients. Full automation. Your highest-margin SEO offer.</p>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", marginBottom: 28 }}>
+                <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
                   {bundleFeatures.map((f, i) => (
                     <div key={i} className="nx-pricing-feature">
                       <span className="nx-pricing-feature-bullet">●</span>
@@ -1025,50 +1032,68 @@ export default function NexusLandingPage() {
                 <StripeButton tier="bundle" label="Get Started — $3,000/mo" featured />
               </div>
 
-              {/* Right — Scale */}
-              <div className="nx-pricing-card" data-testid="card-pricing-scale">
+              {/* Right — Custom */}
+              <div className="nx-pricing-card" data-testid="card-pricing-custom" style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ marginBottom: 24 }}>
-                  <span className="nx-label" style={{ marginBottom: 8 }}>Scale Tier</span>
+                  <span className="nx-label" style={{ marginBottom: 8 }}>Custom</span>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 8 }}>
                     <span className="nx-mono" style={{
-                      fontSize: "clamp(36px, 5vw, 48px)", fontWeight: 500, color: "#fafafa", lineHeight: 1,
-                    }}>$7,500</span>
-                    <span style={{
-                      fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                      fontSize: 14, color: "#71717a",
-                    }}>/mo</span>
+                      fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 500, color: "#fafafa", lineHeight: 1,
+                    }}>Let's talk</span>
                   </div>
+                  <p style={{
+                    fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                    fontSize: 14, color: "#71717a", marginBottom: 0,
+                  }}>For agencies scaling beyond 3 clients or needing national coverage.</p>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
-                  {scaleFeatures.map((f, i) => (
+                  {customFeatures.map((f, i) => (
                     <div key={i} className="nx-pricing-feature">
                       <span className="nx-pricing-feature-bullet">●</span>
                       <span>{f}</span>
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="scale" label="Get Started — $7,500/mo" />
+                <a
+                  href={BOOKING_URL}
+                  className="nx-btn-ghost"
+                  style={{ width: "100%", justifyContent: "center" }}
+                  data-testid="link-pricing-custom-cta"
+                >
+                  Book a Strategy Call
+                </a>
               </div>
 
             </div>
           </FadeIn>
 
-          {/* Enterprise */}
-          <FadeIn delay={160}>
-            <div className="nx-enterprise" data-testid="card-pricing-enterprise">
-              <div>
-                <span className="nx-label" style={{ marginBottom: 6 }}>Enterprise — Starting at $15,000/mo</span>
-                <p style={{
-                  fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                  fontSize: 15, color: "#a1a1aa", maxWidth: 540,
-                }}>
-                  Unlimited sites. Up to 50,000 pages per site. Dedicated infrastructure.
-                  Custom blueprints. Quarterly business review.
-                </p>
+          {/* Add-on strip */}
+          <FadeIn delay={120}>
+            <div style={{
+              marginTop: 48, borderTop: "1px solid #27272a", paddingTop: 32,
+            }}>
+              <p style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11, fontWeight: 500, letterSpacing: "0.12em",
+                textTransform: "uppercase", color: "#52525b", marginBottom: 20,
+              }}>Optional upgrades</p>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "12px 32px",
+              }}>
+                {addOnItems.map((ao, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                    <span style={{
+                      fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                      fontSize: 13, color: "#a1a1aa",
+                    }}>
+                      {ao.label}{ao.detail ? ` (${ao.detail})` : ""}
+                    </span>
+                    <span className="nx-mono" style={{ fontSize: 13, color: "#3b82f6", whiteSpace: "nowrap" }}>{ao.price}</span>
+                  </div>
+                ))}
               </div>
-              <a href={BOOKING_URL} className="nx-btn-ghost" data-testid="link-enterprise-contact">
-                Contact Us
-              </a>
             </div>
           </FadeIn>
 

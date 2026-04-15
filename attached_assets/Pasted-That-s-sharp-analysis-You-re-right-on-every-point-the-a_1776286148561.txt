@@ -1,0 +1,145 @@
+That's sharp analysis. You're right on every point — the add-on card competing with the plans is confusing, the volume language shifts the frame away from value, and exposing the $7,500 number lets people reverse-engineer your margins. Here's the Replit prompt to rebuild the pricing section:
+
+---
+
+Read AGENT_RULES.md before doing anything.
+
+## TASK
+
+Rebuild the pricing section on the SpotOn Nexus landing page at spotonnexus.com. Only change the pricing section and the area directly below it. Do not touch any other sections, content, routes, or files.
+
+## REMOVE
+
+Delete the current three pricing cards (Growth Add-Ons, No-Brainer Bundle, Scale Tier) and the Enterprise callout below them. We are replacing all of it with a new structure.
+
+## NEW PRICING SECTION LAYOUT
+
+The section heading and subheading stay the same:
+
+```
+Section label: PRICING
+Headline: Simple, transparent pricing
+Subheadline: Starting at $1 per page. Built to be cash-flow positive for agencies from month one.
+```
+
+### Three pricing cards side by side (stacked on mobile)
+
+All three cards should be equal height. The center card (No-Brainer Bundle) should be visually elevated with the blue gradient border, the "MOST POPULAR" badge at the top, and slightly larger scale (105% on desktop). The left and right cards use the standard dark card style.
+
+**LEFT CARD — PILOT**
+
+```
+PILOT
+$1,500 /mo
+
+For agencies testing programmatic SEO with their first client.
+
+• 1 client website
+• Up to 1,000 pages
+• 90-day rollout schedule
+• Quality scoring and tiering
+• Automated sitemaps and indexing
+• Internal linking and hub pages
+• Weekly performance report
+• Setup: $1,500
+
+[Get Started — $1,500/mo] (Stripe checkout button)
+```
+
+The Stripe button should use environment variable STRIPE_PRICE_PILOT for the price ID. If not set, show "Coming Soon" in a disabled state.
+
+**CENTER CARD — NO-BRAINER BUNDLE (featured)**
+
+```
+MOST POPULAR
+
+THE NO-BRAINER BUNDLE
+$3,000 /mo
+
+3 clients. Full automation. Your highest-margin SEO offer.
+
+• 3 client websites
+• Up to 1,000 pages per site
+• 90-day rollout schedule
+• Proprietary content engine
+• Quality scoring and tiering
+• Automated sitemaps and indexing
+• Internal linking and hub pages
+• Fallback demand monitoring
+• Weekly performance report
+• Setup: $1,500 per client site
+• 3-month minimum
+• Annual option: $2,500/mo
+
+[Get Started — $3,000/mo] (Stripe checkout button)
+```
+
+Keep the existing Stripe integration using STRIPE_PRICE_BUNDLE.
+
+**RIGHT CARD — CUSTOM**
+
+```
+CUSTOM
+Let's talk
+
+For agencies scaling beyond 3 clients or needing national coverage.
+
+• 4+ client websites
+• Higher page volumes per site
+• Statewide and national coverage
+• White-label dashboard
+• Monthly strategy call
+• Custom rollout plan
+• Dedicated onboarding
+
+[Book a Strategy Call] (links to BOOKING_URL, not Stripe)
+```
+
+This card does NOT have a Stripe button. It links to the booking URL. Style the button as a ghost/outline button instead of the solid blue, to visually differentiate it from the purchase buttons.
+
+### Add-on strip below the three cards
+
+Below the three cards, add a horizontal strip (stacks vertically on mobile) with a subtle top border separating it from the cards. Use a muted style — this should feel like supplementary information, not a competing offer.
+
+```
+Heading: Optional upgrades
+
+Four items in a row (or 2x2 on mobile), each with a short label and price:
+
+Regional coverage (5,000 pages/site) — +$500/mo
+Statewide coverage (15,000 pages/site) — +$1,500/mo  
+National coverage (50,000 pages/site) — +$3,500/mo
+Additional client site — +$1,000/mo + $1,500 setup
+```
+
+Style these as small text items, not cards. Use muted text color for the descriptions and the accent blue for the prices. Keep it compact — this strip should take up minimal vertical space compared to the main cards.
+
+### Founding Agency Offer below the add-on strip
+
+Keep the existing Founding Agency Offer callout exactly as it is with the dashed emerald border:
+
+```
+FOUNDING AGENCY OFFER — First 5 agencies only
+Setup reduced to $500/site. 6-month commitment required. Case study and testimonial rights.
+```
+
+## STRIPE ENVIRONMENT VARIABLES
+
+Add support for one new environment variable:
+- STRIPE_PRICE_PILOT for the $1,500/mo Pilot plan
+
+The existing STRIPE_PRICE_BUNDLE for the $3,000/mo plan stays the same. Remove STRIPE_PRICE_SCALE since the Scale tier no longer exists as a self-serve checkout.
+
+## WHAT NOT TO DO
+
+- Do not change any sections above or below the pricing section
+- Do not change the FAQ content
+- Do not change the final CTA section
+- Do not change the footer
+- Do not change any existing routes or files outside the landing page
+- Do not modify the admin interface
+- Do not mention AI anywhere
+
+---
+
+Once you paste that and it builds, you'll need to create one new product in Stripe — the Pilot plan at $1,500/mo — and add the price ID as `STRIPE_PRICE_PILOT` in your Replit environment variables.
