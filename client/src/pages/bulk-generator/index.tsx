@@ -224,15 +224,6 @@ export default function BulkGeneratorPage() {
     const svcs = Array.from(selectedServices);
     if (svcs.length === 0) return;
 
-    if (overLimit) {
-      toast({
-        title: "Job too large — not started",
-        description: `${estimatedPages.toLocaleString()} estimated pages exceeds the 500,000-page safety limit. Switch to "Specific States" mode or select fewer cities.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
     // Build the blueprint queue: all blueprints when cycling, else just the selected one
     const queue = cycleBlueprints && blueprints.length > 1
       ? blueprints.map((bp: any) => bp.id)
@@ -278,10 +269,8 @@ export default function BulkGeneratorPage() {
   const allStatesSelected = filteredStates.length > 0 && filteredStates.every((l: any) => selectedStateCodes.has(l.stateCode));
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every((l: any) => selectedCitySlugs.has(l.slug));
 
-  const MAX_SAFE_PAGES = 500_000;
   const clusterCountForEstimate = selectedClusterIds.size > 0 ? selectedClusterIds.size : (clusters.length > 0 ? clusters.length : 1);
   const estimatedPages = selectedServices.size * clusterCountForEstimate * targetCount;
-  const overLimit = estimatedPages > MAX_SAFE_PAGES;
 
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -865,18 +854,13 @@ export default function BulkGeneratorPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {overLimit && (
-                <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2.5 text-sm text-destructive" data-testid="alert-over-limit">
-                  <AlertCircle className="size-4 mt-0.5 shrink-0" />
-                  <span><strong>{estimatedPages.toLocaleString()} pages</strong> exceeds the 500,000-page safety limit. Switch to "Specific States" mode or select fewer cities before generating.</span>
-                </div>
-              )}
+
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
                   <Button
                     size="lg"
                     onClick={runAllServices}
-                    disabled={isRunningAll || targetCount === 0 || overLimit}
+                    disabled={isRunningAll || targetCount === 0}
                     data-testid="button-generate"
                     className="gap-2"
                   >
