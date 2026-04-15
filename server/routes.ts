@@ -3091,27 +3091,6 @@ Return ONLY valid JSON (no markdown):
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
       console.log(`[domain-mw] storedProxy=${JSON.stringify(storedProxyPath)} effectiveLinkBase=${JSON.stringify(effectiveLinkBase)} rawSlug=${rawSlug}`);
 
-      // subdraw.com: proxy non-page paths from the SubDraw landing page (subtrackers.spotonresults.com)
-      if (host === "subdraw.com" || host === "www.subdraw.com") {
-        const isPageSlug = rawSlug.includes("-in-");
-        const isSeoFile = rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap" || rawSlug === "robots.txt" || !!rawSlug.match(/^sitemap-\d+\.xml$/);
-        if (!isPageSlug && !isSeoFile) {
-          try {
-            const qs = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
-            const proxyUrl = `https://subtrackers.spotonresults.com/${rawSlug}${qs}`;
-            const proxyRes = await fetch(proxyUrl, { headers: { "User-Agent": req.headers["user-agent"] || "Nexus-Proxy" } });
-            const contentType = proxyRes.headers.get("content-type") || "text/html";
-            res.setHeader("Content-Type", contentType);
-            res.status(proxyRes.status);
-            const body = await proxyRes.text();
-            return res.send(body);
-          } catch (e) {
-            console.error(`[subdraw-proxy] error fetching landing page:`, e);
-            return next();
-          }
-        }
-      }
-
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
         const sitemapList = await storage.getSitemapsMeta(website.id);
@@ -3192,8 +3171,27 @@ Return ONLY valid JSON (no markdown):
         return res.send(robotsContent);
       }
 
+      // subdraw.com root and non-page paths: proxy from landing page at subtrackers.spotonresults.com
+      const isSubdrawHost = host === "subdraw.com" || host === "www.subdraw.com";
+      async function proxySubdrawLanding(slug: string): Promise<boolean> {
+        try {
+          const qs = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+          const proxyUrl = `https://subtrackers.spotonresults.com/${slug}${qs}`;
+          const proxyRes = await fetch(proxyUrl, { headers: { "User-Agent": req.headers["user-agent"] || "Nexus-Proxy" } });
+          const contentType = proxyRes.headers.get("content-type") || "text/html";
+          res.setHeader("Content-Type", contentType);
+          res.status(proxyRes.status);
+          res.send(await proxyRes.text());
+          return true;
+        } catch (e) {
+          console.error(`[subdraw-proxy] error:`, e);
+          return false;
+        }
+      }
+
       // Root — show a simple page index for the domain
       if (!rawSlug) {
+        if (isSubdrawHost) { await proxySubdrawLanding(""); return; }
         const pages = await storage.getPages(website.id, { status: "published", limit: 50 });
         const total = await storage.getPageCount(website.id, "published");
         const brand = (await storage.getBrandProfiles(website.accountId))[0];
@@ -3232,6 +3230,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
           console.log(`[dynamic-page] 200 on-the-fly: ${host}/${rawSlug}`);
           return res.send(dynamic.html);
         }
+        if (isSubdrawHost) { await proxySubdrawLanding(rawSlug); return; }
         console.log(`[page-serve] 404 ${host}/${rawSlug} — ${!page ? "not found" : "not published"}`);
         return res.status(404).send(notFoundHtml("Page not found or not yet published"));
       }
