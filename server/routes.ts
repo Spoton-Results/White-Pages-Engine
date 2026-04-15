@@ -3460,7 +3460,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     const jobs = await storage.getGenerationJobs(websiteId);
     const active = jobs.find(j => {
       const s = j.settings as any;
-      return s?.type === "bank_write" && (j.status === "running" || j.status === "pending");
+      return s?.type === "bank_write" && s?.mode === "write_all" && (j.status === "running" || j.status === "pending");
     });
     if (!active) return res.json(null);
     const s = active.settings as any;

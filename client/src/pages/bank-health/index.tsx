@@ -302,6 +302,18 @@ export default function BankHealthPage() {
     }
   }, [fillRestoreQ.data?.jobId]);
 
+  const thinRestoreQ = useQuery<any>({
+    queryKey: ["/api/websites", websiteId, "bank-write-job"],
+    queryFn: () => fetch(`/api/websites/${websiteId}/bank-write-job`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!websiteId && !thinJobId,
+  });
+
+  useEffect(() => {
+    if (thinRestoreQ.data?.jobId && !thinJobId) {
+      setThinJobId(thinRestoreQ.data.jobId);
+    }
+  }, [thinRestoreQ.data?.jobId]);
+
   useEffect(() => {
     const status = thinJobQ.data?.status;
     if ((status === "done" || status === "error") && thinJobId) {
