@@ -128,10 +128,14 @@ app.use((req, res, next) => {
     `);
     await db.execute(sql`
       UPDATE websites
-      SET domain = 'subtrackers.spotonresults.com',
+      SET domain = 'pagessubtrackers.spotonresults.com',
           name   = CASE WHEN name = 'Subtracker pages' OR name = 'SubTrackers' THEN 'SubTrackers' ELSE name END,
-          settings = settings || '{"proxyPath":"/pages","parentDomain":"subtrackers.spotonresults.com"}'::jsonb
-      WHERE domain = 'pagessubtrackers.spotonresults.com'
+          settings = settings
+            - 'proxyPath'
+            - 'parentDomain'
+            || '{"proxyPath":"","parentDomain":"pagessubtrackers.spotonresults.com"}'::jsonb
+      WHERE domain IN ('subtrackers.spotonresults.com', 'pagessubtrackers.spotonresults.com')
+        AND id = (SELECT id FROM websites WHERE name = 'SubTrackers' OR name = 'Subtracker pages' LIMIT 1)
     `);
     console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
   } catch (err) {
