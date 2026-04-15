@@ -3441,6 +3441,19 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ started: true, total: toProcess.length, jobId });
   });
 
+  // Active fill-missing job status for a website (used by UI to restore progress bar on page refresh)
+  // Covers both fill_missing and write_all modes so any active bank-write job is restored.
+  app.get("/api/websites/:id/fill-missing-job", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const jobs = await storage.getGenerationJobs(websiteId);
+    const active = jobs.find(j => {
+      const s = j.settings as any;
+      return s?.type === "bank_write" && (s?.mode === "fill_missing" || s?.mode === "write_all") && (j.status === "running" || j.status === "pending");
+    });
+    if (!active) return res.json(null);
+    return res.json({ jobId: active.id, processedPages: active.processedPages, totalPages: active.totalPages, status: active.status });
+  });
+
   // Active bank-write job status for a website (used by UI to restore progress bar on page refresh)
   app.get("/api/websites/:id/bank-write-job", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
