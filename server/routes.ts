@@ -3091,13 +3091,24 @@ Return ONLY valid JSON (no markdown):
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
       console.log(`[domain-mw] storedProxy=${JSON.stringify(storedProxyPath)} effectiveLinkBase=${JSON.stringify(effectiveLinkBase)} rawSlug=${rawSlug}`);
 
-      // subdraw.com: redirect non-page paths to the SubDraw landing page
+      // subdraw.com: proxy non-page paths from the SubDraw landing page (subtrackers.spotonresults.com)
       if (host === "subdraw.com" || host === "www.subdraw.com") {
         const isPageSlug = rawSlug.includes("-in-");
-        const isSeoFile = rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap" || rawSlug === "robots.txt" || rawSlug.match(/^sitemap-\d+\.xml$/);
+        const isSeoFile = rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap" || rawSlug === "robots.txt" || !!rawSlug.match(/^sitemap-\d+\.xml$/);
         if (!isPageSlug && !isSeoFile) {
-          const target = `https://subtrackers.spotonresults.com/${rawSlug}`;
-          return res.redirect(301, target);
+          try {
+            const qs = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+            const proxyUrl = `https://subtrackers.spotonresults.com/${rawSlug}${qs}`;
+            const proxyRes = await fetch(proxyUrl, { headers: { "User-Agent": req.headers["user-agent"] || "Nexus-Proxy" } });
+            const contentType = proxyRes.headers.get("content-type") || "text/html";
+            res.setHeader("Content-Type", contentType);
+            res.status(proxyRes.status);
+            const body = await proxyRes.text();
+            return res.send(body);
+          } catch (e) {
+            console.error(`[subdraw-proxy] error fetching landing page:`, e);
+            return next();
+          }
         }
       }
 
