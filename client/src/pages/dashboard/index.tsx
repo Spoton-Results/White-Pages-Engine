@@ -98,7 +98,7 @@ export default function Dashboard() {
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium truncate">{job.name}</div>
                           <div className="text-xs text-muted-foreground">
-                            {job.processedPages}/{job.totalPages} pages · {job.passedPages} passed
+                            {Math.min(job.processedPages, job.totalPages)}/{job.totalPages} pages · {Math.min(job.passedPages, job.totalPages)} passed
                           </div>
                         </div>
                         <Badge variant="outline" className={`text-xs ${

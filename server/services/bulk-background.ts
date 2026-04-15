@@ -331,7 +331,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const baseProcessedPages = resumeProcessedPages;
 
   const clusterCount = eligibleClusters.length > 0 ? eligibleClusters.length : 1;
-  const totalPages = services.length * clusterCount * targets.length;
+  let totalPages = services.length * clusterCount * targets.length;
   await bulkUpdateJob(jobId, { totalPages });
 
   if (completedServiceSet.size > 0) {
@@ -360,7 +360,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         seenStates.add(t.stateAbbr.toUpperCase());
         return true;
       });
-      const dedupedTotal = services.length * targets.length;
+      const dedupedTotal = services.length * clusterCount * targets.length;
+      totalPages = dedupedTotal;
       await bulkUpdateJob(jobId, { totalPages: dedupedTotal });
       console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets (${dedupedTotal} total pages)`);
     }
