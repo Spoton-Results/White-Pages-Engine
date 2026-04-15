@@ -28,6 +28,11 @@ export default function PublishedPagesPage() {
   const [editSlugPage, setEditSlugPage] = useState<any>(null);
   const [slugInput, setSlugInput] = useState("");
   const [slugError, setSlugError] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [scoreMinFilter, setScoreMinFilter] = useState("");
+  const [scoreMaxFilter, setScoreMaxFilter] = useState("");
+  const [tierFilter, setTierFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const [showBulkTier, setShowBulkTier] = useState(false);
   const [tierFilters, setTierFilters] = useState<{ serviceId: string; locationName: string; blueprintId: string; scoreMin: string; scoreMax: string }>({ serviceId: "", locationName: "", blueprintId: "", scoreMin: "", scoreMax: "" });
   const [tierTarget, setTierTarget] = useState("1");
@@ -196,9 +201,18 @@ export default function PublishedPagesPage() {
     } finally { setGoogleSubmitting(false); }
   };
 
-  const pages = (pagesData?.pages || []).filter((p: any) =>
-    !searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.slug.includes(searchText.toLowerCase())
-  );
+  const activeFilterCount = [typeFilter, scoreMinFilter, scoreMaxFilter, tierFilter].filter(Boolean).length;
+  const pages = (pagesData?.pages || []).filter((p: any) => {
+    if (searchText && !p.title.toLowerCase().includes(searchText.toLowerCase()) && !p.slug.includes(searchText.toLowerCase())) return false;
+    if (typeFilter && p.pageType !== typeFilter) return false;
+    if (tierFilter && String(p.tier ?? "") !== tierFilter) return false;
+    const score = p.publishScore != null ? parseFloat(p.publishScore) * 100 : null;
+    if (scoreMinFilter && (score == null || score < parseFloat(scoreMinFilter))) return false;
+    if (scoreMaxFilter && (score == null || score > parseFloat(scoreMaxFilter))) return false;
+    return true;
+  });
+
+  const pageTypes = Array.from(new Set((pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean))) as string[];
 
   const platformBase = window.location.origin;
   const pageUrl = (page: any) => {
@@ -320,21 +334,84 @@ export default function PublishedPagesPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 bg-card p-3 rounded-lg border flex-wrap">
-          <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
-            <SelectTrigger className="w-52">
-              <SelectValue placeholder="Select website" />
-            </SelectTrigger>
-            <SelectContent>
-              {websites.map((w: any) => (
-                <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search pages..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} />
+        <div className="flex flex-col gap-2 bg-card rounded-lg border overflow-hidden">
+          <div className="flex items-center gap-3 p-3 flex-wrap">
+            <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
+              <SelectTrigger className="w-52" data-testid="select-website">
+                <SelectValue placeholder="Select website" />
+              </SelectTrigger>
+              <SelectContent>
+                {websites.map((w: any) => (
+                  <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Search pages..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-pages" />
+            </div>
+            <Button
+              variant={showFilters ? "secondary" : "outline"}
+              size="sm"
+              className="h-9 gap-2"
+              onClick={() => setShowFilters(f => !f)}
+              data-testid="button-toggle-filters"
+            >
+              <Filter className="size-4" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="bg-primary text-primary-foreground rounded-full text-xs w-4 h-4 flex items-center justify-center">{activeFilterCount}</span>
+              )}
+            </Button>
+            {activeFilterCount > 0 && (
+              <Button variant="ghost" size="sm" className="h-9 text-muted-foreground" onClick={() => { setTypeFilter(""); setScoreMinFilter(""); setScoreMaxFilter(""); setTierFilter(""); }} data-testid="button-clear-filters">
+                Clear
+              </Button>
+            )}
           </div>
+          {showFilters && (
+            <div className="border-t px-3 pb-3 pt-2.5 flex items-end gap-3 flex-wrap bg-muted/30">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Page Type</Label>
+                <Select value={typeFilter || "all"} onValueChange={v => setTypeFilter(v === "all" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs w-44" data-testid="select-filter-type">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {pageTypes.map(t => (
+                      <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Tier</Label>
+                <Select value={tierFilter || "all"} onValueChange={v => setTierFilter(v === "all" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs w-28" data-testid="select-filter-tier">
+                    <SelectValue placeholder="All tiers" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All tiers</SelectItem>
+                    <SelectItem value="1">Tier 1</SelectItem>
+                    <SelectItem value="2">Tier 2</SelectItem>
+                    <SelectItem value="3">Tier 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Score Min (%)</Label>
+                <Input className="h-8 text-xs w-24" placeholder="e.g. 70" value={scoreMinFilter} onChange={e => setScoreMinFilter(e.target.value)} type="number" min="0" max="100" data-testid="input-filter-score-min" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Score Max (%)</Label>
+                <Input className="h-8 text-xs w-24" placeholder="e.g. 100" value={scoreMaxFilter} onChange={e => setScoreMaxFilter(e.target.value)} type="number" min="0" max="100" data-testid="input-filter-score-max" />
+              </div>
+              <p className="text-xs text-muted-foreground self-end pb-1">
+                Showing {pages.length.toLocaleString()} of {(pagesData?.pages || []).length.toLocaleString()} loaded
+              </p>
+            </div>
+          )}
         </div>
 
         {!selectedWebsite ? (
