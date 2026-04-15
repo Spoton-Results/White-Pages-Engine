@@ -121,10 +121,8 @@ function LoginGuard() {
 
 function Router() {
   const landingDomain = (import.meta as any).env?.VITE_LANDING_DOMAIN || "spotonnexus.com";
-  const extraLandingDomains = ["subdraw.com"];
-  const allLandingDomains = [landingDomain, ...extraLandingDomains];
   const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-  if (allLandingDomains.some(d => hostname === d || hostname === `www.${d}`)) {
+  if (hostname === landingDomain || hostname === `www.${landingDomain}`) {
     return (
       <Switch>
         <Route path="/welcome"><WelcomePage /></Route>

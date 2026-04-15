@@ -3041,9 +3041,7 @@ Return ONLY valid JSON (no markdown):
 
       // Skip Replit platform domains, localhost, landing page root, and internal asset paths
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
-      const extraLandingDomains = (process.env.EXTRA_LANDING_DOMAINS || "subdraw.com").toLowerCase().split(",").map(d => d.trim()).filter(Boolean);
-      const allLandingDomains = [landingDomain, ...extraLandingDomains];
-      const isLandingDomain = allLandingDomains.some(d => host === d || host === `www.${d}`);
+      const isLandingDomain = host === landingDomain || host === `www.${landingDomain}`;
       const isStaticAsset = req.path.startsWith("/assets/") || !!req.path.match(/\.(js|css|png|ico|svg|woff2?|json|txt|webmanifest)$/);
       const isLandingRoot = isLandingDomain && (req.path === "/" || req.path === "" || isStaticAsset);
       if (!host
@@ -3092,6 +3090,16 @@ Return ONLY valid JSON (no markdown):
       }
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
       console.log(`[domain-mw] storedProxy=${JSON.stringify(storedProxyPath)} effectiveLinkBase=${JSON.stringify(effectiveLinkBase)} rawSlug=${rawSlug}`);
+
+      // subdraw.com: redirect non-page paths to the SubDraw landing page
+      if (host === "subdraw.com" || host === "www.subdraw.com") {
+        const isPageSlug = rawSlug.includes("-in-");
+        const isSeoFile = rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap" || rawSlug === "robots.txt" || rawSlug.match(/^sitemap-\d+\.xml$/);
+        if (!isPageSlug && !isSeoFile) {
+          const target = `https://subtrackers.spotonresults.com/${rawSlug}`;
+          return res.redirect(301, target);
+        }
+      }
 
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
