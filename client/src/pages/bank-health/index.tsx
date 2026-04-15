@@ -87,13 +87,18 @@ function ServiceCard({
 
   const fillMissing = useMutation({
     mutationFn: () =>
-      apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: bank.service }),
+      apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: bank.service }).then(r => r.json()),
     onSuccess: (data: any) => {
       const filled = data?.filled ?? [];
-      toast({
-        title: filled.length > 0 ? `Filled ${filled.length} section(s)` : "Nothing to fill",
-        description: filled.length > 0 ? filled.join(", ") : "All sections already present.",
-      });
+      const errors = data?.errors ?? [];
+      if (errors.length > 0 && filled.length === 0) {
+        toast({ title: "Fill failed", description: errors[0], variant: "destructive" });
+      } else {
+        toast({
+          title: filled.length > 0 ? `Filled ${filled.length} section(s)` : "Nothing to fill",
+          description: filled.length > 0 ? filled.join(", ") : "All sections already present.",
+        });
+      }
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
       onAction();
     },
@@ -262,7 +267,7 @@ export default function BankHealthPage() {
 
   const recompute = useMutation({
     mutationFn: () =>
-      apiRequest("POST", `/api/websites/${websiteId}/bank-completeness/recompute`, {}),
+      apiRequest("POST", `/api/websites/${websiteId}/bank-completeness/recompute`, {}).then(r => r.json()),
     onSuccess: (data: any) => {
       toast({ title: `Recomputed ${data?.computed ?? 0} service(s)` });
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
@@ -336,7 +341,7 @@ export default function BankHealthPage() {
   const writeThinBanks = async () => {
     setThinWriting(true);
     try {
-      const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/write-thin`, { threshold: 70 });
+      const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/write-thin`, { threshold: 70 }).then(r => r.json());
       if (result.started) {
         setThinJobId(result.jobId);
         toast({ title: `Writing ${result.total} thin bank(s)…` });
@@ -361,7 +366,7 @@ export default function BankHealthPage() {
     try {
       const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing-all-job`, {
         services: banksWithMissing.map(b => b.service),
-      });
+      }).then(r => r.json());
       if (result.started) {
         setFillJobId(result.jobId);
         toast({ title: `Filling missing sections for ${result.total} service(s)…`, description: "Running in background — you can navigate away." });
