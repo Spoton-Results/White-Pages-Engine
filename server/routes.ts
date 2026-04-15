@@ -3407,6 +3407,40 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     return res.json({ started: true, total: toProcess.length, jobId, thinCount: thinWarnings.length });
   });
 
+  // Fill-missing-all: start a background job that fills only missing sections (no rewrites)
+  app.post("/api/websites/:id/variation-banks/fill-missing-all-job", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { services: serviceNames } = z.object({ services: z.array(z.string()).min(1) }).parse(req.body);
+    const [allServices, brand, industries] = await Promise.all([
+      storage.getServices(website.accountId),
+      website.brandProfileId ? storage.getBrandProfile(website.brandProfileId) : Promise.resolve(undefined),
+      storage.getIndustries(website.accountId),
+    ]);
+    const nameSet = new Set(serviceNames.map(n => n.toLowerCase()));
+    const toProcess = allServices.filter(s => nameSet.has(s.name.toLowerCase()));
+    if (toProcess.length === 0) return res.json({ started: false, total: 0, message: "No matching services found" });
+
+    const industry = industries[0];
+    const ctx: BrandContext = {
+      brandName: brand?.name,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name,
+      industryDescription: industry?.description ?? undefined,
+    };
+    const { startBankWriteJob } = await import("./services/bank-write-background");
+    const jobId = await startBankWriteJob(
+      websiteId, website.accountId,
+      toProcess.map(s => ({ id: s.id, name: s.name })),
+      ctx,
+      "fill_missing",
+    );
+    return res.json({ started: true, total: toProcess.length, jobId });
+  });
+
   // Active bank-write job status for a website (used by UI to restore progress bar on page refresh)
   app.get("/api/websites/:id/bank-write-job", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;

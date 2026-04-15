@@ -246,7 +246,7 @@ export default function BankHealthPage() {
   const [websiteId, setWebsiteId] = useState("");
   const [thinJobId, setThinJobId] = useState<string | null>(null);
   const [thinWriting, setThinWriting] = useState(false);
-  const [fillAllProgress, setFillAllProgress] = useState<{ running: boolean; done: number; total: number }>({ running: false, done: 0, total: 0 });
+  const [fillJobId, setFillJobId] = useState<string | null>(null);
 
   const websitesQ = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -280,6 +280,16 @@ export default function BankHealthPage() {
     },
   });
 
+  const fillJobQ = useQuery<any>({
+    queryKey: ["/api/jobs", fillJobId],
+    queryFn: () => fetch(`/api/jobs/${fillJobId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!fillJobId,
+    refetchInterval: (q: any) => {
+      const status = q.state.data?.status;
+      return status === "completed" || status === "failed" || !status ? false : 1500;
+    },
+  });
+
   useEffect(() => {
     const status = thinJobQ.data?.status;
     if ((status === "done" || status === "error") && thinJobId) {
@@ -289,6 +299,15 @@ export default function BankHealthPage() {
       toast({ title: "Thin bank write complete" });
     }
   }, [thinJobQ.data?.status, thinJobId]);
+
+  useEffect(() => {
+    const status = fillJobQ.data?.status;
+    if ((status === "completed" || status === "failed") && fillJobId) {
+      setFillJobId(null);
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+      toast({ title: status === "completed" ? "Fill Missing complete" : "Fill Missing finished with errors" });
+    }
+  }, [fillJobQ.data?.status, fillJobId]);
 
   const writeThinBanks = async () => {
     setThinWriting(true);
@@ -315,19 +334,19 @@ export default function BankHealthPage() {
       toast({ title: "Nothing to fill", description: "All sections are already present." });
       return;
     }
-    setFillAllProgress({ running: true, done: 0, total: banksWithMissing.length });
-    let totalFilled = 0;
-    for (let i = 0; i < banksWithMissing.length; i++) {
-      const b = banksWithMissing[i];
-      try {
-        const result: any = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: b.service });
-        totalFilled += result?.filled?.length ?? 0;
-      } catch (_) { /* continue on error */ }
-      setFillAllProgress({ running: true, done: i + 1, total: banksWithMissing.length });
+    try {
+      const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing-all-job`, {
+        services: banksWithMissing.map(b => b.service),
+      });
+      if (result.started) {
+        setFillJobId(result.jobId);
+        toast({ title: `Filling missing sections for ${result.total} service(s)…`, description: "Running in background — you can navigate away." });
+      } else {
+        toast({ title: result.message || "Nothing to fill" });
+      }
+    } catch (e: any) {
+      toast({ title: "Failed to start fill job", description: e.message, variant: "destructive" });
     }
-    setFillAllProgress({ running: false, done: 0, total: 0 });
-    qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
-    toast({ title: `Fill complete`, description: `Filled ${totalFilled} section(s) across ${banksWithMissing.length} service(s).` });
   };
 
   const websites = websitesQ.data ?? [];
@@ -377,17 +396,17 @@ export default function BankHealthPage() {
                 <button
                   data-testid="btn-fill-missing-all"
                   onClick={fillAllMissing}
-                  disabled={fillAllProgress.running || thinWriting || !!thinJobId}
+                  disabled={!!fillJobId || thinWriting || !!thinJobId}
                   style={{
-                    background: fillAllProgress.running ? "#e5e7eb" : "#059669",
-                    color: fillAllProgress.running ? "#9ca3af" : "#fff",
+                    background: fillJobId ? "#e5e7eb" : "#059669",
+                    color: fillJobId ? "#9ca3af" : "#fff",
                     border: "none", borderRadius: 8, padding: "8px 18px",
                     fontSize: ".9rem", fontWeight: 600,
-                    cursor: fillAllProgress.running ? "not-allowed" : "pointer",
+                    cursor: fillJobId ? "not-allowed" : "pointer",
                   }}
                 >
-                  {fillAllProgress.running
-                    ? `Filling ${fillAllProgress.done}/${fillAllProgress.total}…`
+                  {fillJobId
+                    ? `Filling ${fillJobQ.data?.processedPages ?? 0}/${fillJobQ.data?.totalPages ?? "…"}…`
                     : "Fill Missing All"}
                 </button>
                 <button

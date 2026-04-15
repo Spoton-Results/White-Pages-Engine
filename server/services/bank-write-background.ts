@@ -5,11 +5,12 @@
  * On startup the server resumes any interrupted jobs automatically.
  */
 import * as storage from "../storage";
-import { writeVariationsForService } from "./variation-writer";
+import { writeVariationsForService, fillMissingSectionsForService } from "./variation-writer";
 import type { BrandContext } from "./variation-writer";
 
 export interface BankWriteSettings {
   type: "bank_write";
+  mode?: "write_all" | "fill_missing";
   ctx: BrandContext;
   progress: Array<{
     serviceId: string;
@@ -24,9 +25,11 @@ export async function startBankWriteJob(
   accountId: string,
   services: Array<{ id: string; name: string }>,
   ctx: BrandContext,
+  mode: "write_all" | "fill_missing" = "write_all",
 ): Promise<string> {
   const settings: BankWriteSettings = {
     type: "bank_write",
+    mode,
     ctx,
     progress: services.map(s => ({ serviceId: s.id, serviceName: s.name, status: "pending" })),
   };
@@ -34,7 +37,9 @@ export async function startBankWriteJob(
   const job = await storage.createGenerationJob({
     accountId,
     websiteId,
-    name: `Write variation banks (${services.length} services)`,
+    name: mode === "fill_missing"
+      ? `Fill missing sections (${services.length} services)`
+      : `Write variation banks (${services.length} services)`,
     status: "pending",
     totalPages: services.length,
     processedPages: 0,
@@ -65,7 +70,8 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
   console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services`);
 
-  const { ctx, progress } = settings;
+  const { ctx, progress, mode } = settings;
+  const isFillMissing = mode === "fill_missing";
   let done = 0;
   let failed = 0;
 
@@ -92,11 +98,38 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
 
     await Promise.all(batch.map(async ({ i, entry }) => {
       try {
-        await storage.deleteVariationBanks(job.websiteId, entry.serviceName);
-        const result = await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
-        const partialErrors = Object.keys(result.errors).length;
-        if (partialErrors > 0) {
-          console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/10 sections; ${partialErrors} section(s) failed`);
+        if (isFillMissing) {
+          const result = await fillMissingSectionsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
+          if (result.errors.length > 0) {
+            console.warn(`[bank-write] fill-missing "${entry.serviceName}" filled ${result.filled.length} sections; ${result.errors.length} error(s)`);
+          }
+          // Recompute completeness after filling
+          try {
+            const { computeBankCompleteness } = await import("./scoring");
+            const banks = await storage.getVariationBanks(job.websiteId, entry.serviceName);
+            const completeness = computeBankCompleteness(banks);
+            await storage.upsertBankCompleteness({
+              websiteId: job.websiteId, service: entry.serviceName,
+              hasIntro: completeness.hasIntro, hasHowItWorks: completeness.hasHowItWorks,
+              hasBenefits: completeness.hasBenefits, hasFaq: completeness.hasFaq, hasCta: completeness.hasCta,
+              hasLocalContext: completeness.hasLocalContext, hasUseCase: completeness.hasUseCase,
+              hasProofTrust: completeness.hasProofTrust, hasPainPoint: completeness.hasPainPoint,
+              hasLocalStat: completeness.hasLocalStat,
+              totalVariations: completeness.totalVariations,
+              avgVariationsPerSection: completeness.avgVariationsPerSection,
+              completenessScore: completeness.completenessScore,
+              isEligibleForTier1: completeness.isEligibleForTier1,
+            });
+          } catch (scoreErr) {
+            console.warn(`[bank-write] Completeness recompute failed for "${entry.serviceName}":`, scoreErr);
+          }
+        } else {
+          await storage.deleteVariationBanks(job.websiteId, entry.serviceName);
+          const result = await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
+          const partialErrors = Object.keys(result.errors).length;
+          if (partialErrors > 0) {
+            console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/10 sections; ${partialErrors} section(s) failed`);
+          }
         }
         progress[i] = { ...entry, status: "done" };
         done++;
