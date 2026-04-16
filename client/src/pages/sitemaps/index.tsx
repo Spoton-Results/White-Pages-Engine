@@ -17,7 +17,7 @@ const OFFSET_KEY = (websiteId: string) => `gsc_submit_offset_${websiteId}`;
 export default function SitemapsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [overrideWebsite, setOverrideWebsite] = useState<string>("");
+  const [overrideWebsite, setOverrideWebsite] = useState<string>(() => new URLSearchParams(window.location.search).get("websiteId") || "");
   const [copied, setCopied] = useState(false);
   const [submitOffset, setSubmitOffset] = useState(0);
   const [submitTotal, setSubmitTotal] = useState<number | null>(null);

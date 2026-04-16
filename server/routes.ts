@@ -844,6 +844,52 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(accts);
   });
 
+  app.get("/api/accounts/:accountId/client-summary", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    const accountWebsites = await storage.getWebsites(accountId);
+    const website = accountWebsites[0] ?? null;
+
+    let pageCounts = { total: 0, tier1: 0, tier2: 0, tier3: 0 };
+    let bankHealth = { totalServices: 0, safeToScale: 0, needsWork: 0, avgCompleteness: 0 };
+    let hubStats = { total: 0, published: 0, drafts: 0 };
+    let lastJob: any = null;
+
+    if (website) {
+      const { pool } = await import("./db");
+      const tiersResult = await pool.query(
+        `SELECT tier, COUNT(*)::int as count FROM pages WHERE website_id = $1 AND status = 'published' GROUP BY tier`,
+        [website.id]
+      );
+      pageCounts.total = tiersResult.rows.reduce((s: number, r: any) => s + r.count, 0);
+      for (const row of tiersResult.rows) {
+        if (row.tier === 1) pageCounts.tier1 = row.count;
+        else if (row.tier === 2) pageCounts.tier2 = row.count;
+        else if (row.tier === 3) pageCounts.tier3 = row.count;
+      }
+
+      const banks = await storage.getBankCompleteness(website.id);
+      bankHealth.totalServices = banks.length;
+      bankHealth.safeToScale = banks.filter((b: any) => (b.completenessScore ?? 0) >= 70).length;
+      bankHealth.needsWork = banks.filter((b: any) => (b.completenessScore ?? 0) < 70).length;
+      bankHealth.avgCompleteness = banks.length > 0
+        ? Math.round(banks.reduce((s: number, b: any) => s + (b.completenessScore ?? 0), 0) / banks.length)
+        : 0;
+
+      const hubs = await storage.getHubPages(website.id);
+      hubStats.total = hubs.length;
+      hubStats.published = hubs.filter((h: any) => h.status === "published").length;
+      hubStats.drafts = hubs.filter((h: any) => h.status !== "published").length;
+
+      const jobs = await storage.getGenerationJobs(website.id);
+      lastJob = jobs[0] ?? null;
+    }
+
+    return res.json({ account, website, pages: pageCounts, bankHealth, hubPages: hubStats, lastJob });
+  });
+
   // ── Accounts ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {

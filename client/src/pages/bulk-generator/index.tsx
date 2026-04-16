@@ -25,7 +25,7 @@ export default function BulkGeneratorPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [websiteId, setWebsiteId] = useState<string>("");
+  const [websiteId, setWebsiteId] = useState<string>(() => new URLSearchParams(window.location.search).get("websiteId") || "");
   const [blueprintId, setBlueprintId] = useState<string>("");
   const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set());
   const [clusterSearch, setClusterSearch] = useState("");

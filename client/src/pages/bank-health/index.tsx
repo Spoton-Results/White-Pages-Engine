@@ -248,7 +248,7 @@ function ServiceCard({
 export default function BankHealthPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [websiteId, setWebsiteId] = useState("");
+  const [websiteId, setWebsiteId] = useState(() => new URLSearchParams(window.location.search).get("websiteId") || "");
   const [thinJobId, setThinJobId] = useState<string | null>(null);
   const [thinWriting, setThinWriting] = useState(false);
   const [fillJobId, setFillJobId] = useState<string | null>(null);
