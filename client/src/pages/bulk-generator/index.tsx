@@ -516,6 +516,24 @@ export default function BulkGeneratorPage() {
                         )}
                       </div>
                     )}
+                    {blueprints.length > 1 && (
+                      <div className={`rounded-md border px-3 py-2.5 transition-colors mt-1 ${cycleBlueprints ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+                        <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-cycle-blueprints">
+                          <Checkbox
+                            checked={cycleBlueprints}
+                            onCheckedChange={v => setCycleBlueprints(!!v)}
+                            data-testid="checkbox-cycle-blueprints"
+                          />
+                          <Repeat2 className={`size-3.5 ${cycleBlueprints ? "text-blue-600" : "text-muted-foreground"}`} />
+                          <span className="text-sm font-semibold">Run all {blueprints.length} blueprints in sequence</span>
+                        </label>
+                        <p className="text-xs text-muted-foreground mt-1 ml-6">
+                          {cycleBlueprints
+                            ? `Each blueprint creates its own job and the next starts automatically when it finishes. Total pages = ${blueprints.length} blueprints × pages per blueprint.`
+                            : "Only the blueprint selected above will run."}
+                        </p>
+                      </div>
+                    )}
                     {!selectedWebsite?.settings?.defaultBlueprintId && !cycleBlueprints && (
                       <p className="text-xs text-muted-foreground">Tip: Set a default blueprint in Website Settings so it's always pre-selected.</p>
                     )}
@@ -896,25 +914,6 @@ export default function BulkGeneratorPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-
-              {blueprints.length > 1 && (
-                <div className={`rounded-md border px-3 py-2.5 transition-colors ${cycleBlueprints ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
-                  <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-cycle-blueprints">
-                    <Checkbox
-                      checked={cycleBlueprints}
-                      onCheckedChange={v => setCycleBlueprints(!!v)}
-                      data-testid="checkbox-cycle-blueprints"
-                    />
-                    <Repeat2 className={`size-3.5 ${cycleBlueprints ? "text-blue-600" : "text-muted-foreground"}`} />
-                    <span className="text-sm font-semibold">Run all {blueprints.length} blueprints in sequence</span>
-                  </label>
-                  <p className="text-xs text-muted-foreground mt-1 ml-6">
-                    {cycleBlueprints
-                      ? `Each blueprint runs one after the other automatically — no manual restarts needed. Each creates its own job you can monitor in Generation Jobs.`
-                      : "Only the selected blueprint above will run. Check this to run all blueprints automatically in sequence."}
-                  </p>
-                </div>
-              )}
 
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
