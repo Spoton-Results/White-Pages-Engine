@@ -472,6 +472,36 @@ export default function JobsPage() {
                           </div>
                         </div>
                         <Progress value={Math.min((job.processedPages / job.totalPages) * 100, 100)} className="h-1.5" />
+                        {/* Skip reason breakdown */}
+                        {(() => {
+                          const s = job.settings as any;
+                          if (!Array.isArray(s?.progress)) return null;
+                          const slugSkipped = s.progress.reduce((sum: number, p: any) => sum + (p.skipped ?? 0), 0);
+                          const noBankServices = s.progress.filter((p: any) => p.status === "no-bank").length;
+                          const passed = Math.min(job.passedPages, job.totalPages);
+                          const processed = Math.min(job.processedPages, job.totalPages);
+                          const skipRate = processed > 0 ? (processed - passed) / processed : 0;
+                          const isHighSkip = job.status === "completed" && (passed === 0 || skipRate > 0.5) && processed > 0;
+                          return (
+                            <>
+                              {isHighSkip && (
+                                <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid={`banner-high-skip-${job.id}`}>
+                                  <span className="font-semibold">⚠ High skip rate</span> — most pages were not generated. Check skip reasons below. If regenerating existing content, enable <span className="font-semibold">Overwrite existing pages</span> before running again.
+                                </div>
+                              )}
+                              {(slugSkipped > 0 || noBankServices > 0) && (
+                                <div className="mt-1.5 space-y-0.5" data-testid={`text-skip-breakdown-${job.id}`}>
+                                  {slugSkipped > 0 && (
+                                    <p className="text-xs text-amber-600">⊘ {slugSkipped.toLocaleString()} skipped — slug already exists (enable Overwrite to regenerate)</p>
+                                  )}
+                                  {noBankServices > 0 && (
+                                    <p className="text-xs text-amber-600">⊘ {noBankServices} service{noBankServices !== 1 ? "s" : ""} skipped — variation bank not written yet</p>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
 

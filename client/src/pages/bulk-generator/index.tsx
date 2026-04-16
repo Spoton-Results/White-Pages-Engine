@@ -824,17 +824,21 @@ export default function BulkGeneratorPage() {
 
               {/* Options */}
               <div className="pt-1 border-t">
-                <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-overwrite">
-                  <Checkbox
-                    checked={overwrite}
-                    onCheckedChange={v => setOverwrite(!!v)}
-                    data-testid="checkbox-overwrite"
-                  />
-                  <span className="text-sm font-medium">Overwrite existing pages</span>
-                </label>
-                <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  When checked, pages that already exist will be regenerated with fresh content from the variation bank. Leave unchecked to skip existing pages.
-                </p>
+                <div className={`rounded-md border px-3 py-2.5 transition-colors ${overwrite ? "border-blue-300 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-overwrite">
+                    <Checkbox
+                      checked={overwrite}
+                      onCheckedChange={v => setOverwrite(!!v)}
+                      data-testid="checkbox-overwrite"
+                    />
+                    <span className="text-sm font-semibold">Overwrite existing pages</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground mt-1 ml-6">
+                    {overwrite
+                      ? "Overwrite ON — pages that already exist will be regenerated with fresh content from the variation bank."
+                      : "⚠ Overwrite OFF — pages with a slug that already exists will be skipped. If you are re-running generation on a site that already has pages, check this box or all pages will be skipped."}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
