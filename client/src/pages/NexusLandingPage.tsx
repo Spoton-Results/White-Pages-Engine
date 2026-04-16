@@ -582,18 +582,17 @@ export default function NexusLandingPage() {
 
   const pilotFeatures = [
     "1 client website",
-    "Up to 1,000 pages",
-    "90-day rollout schedule",
+    "Up to 5,000 pages",
+    "60-day minimum commitment",
     "Quality scoring and tiering",
     "Automated sitemaps and indexing",
     "Internal linking and hub pages",
     "Weekly performance report",
-    "Setup: $1,500",
   ];
 
   const bundleFeatures = [
     "3 client websites",
-    "Up to 1,000 pages per site",
+    "Up to 10,000 pages per site",
     "90-day rollout schedule",
     "Proprietary content engine",
     "Quality scoring and tiering",
@@ -601,14 +600,13 @@ export default function NexusLandingPage() {
     "Internal linking and hub pages",
     "Fallback demand monitoring",
     "Weekly performance report",
-    "Setup: $1,500 per client site",
     "3-month minimum",
     "Annual option: $2,500/mo",
   ];
 
   const customFeatures = [
     "4+ client websites",
-    "Higher page volumes per site",
+    "Up to 50,000 pages per site",
     "Statewide and national coverage",
     "White-label dashboard",
     "Monthly strategy call",
@@ -617,10 +615,12 @@ export default function NexusLandingPage() {
   ];
 
   const addOnItems = [
-    { label: "Regional coverage", detail: "5,000 pages/site", price: "+$500/mo" },
-    { label: "Statewide coverage", detail: "15,000 pages/site", price: "+$1,500/mo" },
-    { label: "National coverage", detail: "50,000 pages/site", price: "+$3,500/mo" },
-    { label: "Additional client site", detail: "", price: "+$1,000/mo + $1,500 setup" },
+    { label: "Additional site (matches plan page cap)", detail: "", price: "+$1,000/mo per site" },
+    { label: "Coverage upgrade: Regional → Statewide", detail: "", price: "+$500/mo per site" },
+    { label: "Coverage upgrade: Regional → National", detail: "", price: "+$1,000/mo per site" },
+    { label: "Page cap upgrade: +5,000 pages", detail: "", price: "+$300/mo per site" },
+    { label: "Page cap upgrade: +10,000 pages", detail: "", price: "+$500/mo per site" },
+    { label: "Page cap upgrade: +25,000 pages", detail: "", price: "+$900/mo per site" },
   ];
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -976,11 +976,11 @@ export default function NexusLandingPage() {
               {/* Left — Pilot */}
               <div className="nx-pricing-card" data-testid="card-pricing-pilot" style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ marginBottom: 24 }}>
-                  <span className="nx-label" style={{ marginBottom: 8 }}>Pilot</span>
+                  <span className="nx-label" style={{ marginBottom: 8 }}>LOCAL LAUNCH</span>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 8 }}>
                     <span className="nx-mono" style={{
                       fontSize: "clamp(36px, 5vw, 48px)", fontWeight: 500, color: "#fafafa", lineHeight: 1,
-                    }}>$1,500</span>
+                    }}>$1,997</span>
                     <span style={{
                       fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
                       fontSize: 14, color: "#71717a",
@@ -999,7 +999,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="pilot" label="Get Started — $1,500/mo" />
+                <StripeButton tier="pilot" label="Get Started — $1,997/mo" />
               </div>
 
               {/* Center — Bundle (featured) */}
