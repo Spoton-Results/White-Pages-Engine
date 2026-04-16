@@ -1,6 +1,7 @@
 import { generateFirstPass, type PageContext } from "./claude";
 import { savePageArtifact, saveLog, isR2Configured } from "./r2";
 import * as db from "../storage";
+import { logApiUsage } from "./usage-logger";
 import type { Blueprint, Location, Service, Industry, Website, BrandProfile, GenerationJob } from "@shared/schema";
 
 export interface GenerationTask {
@@ -180,6 +181,19 @@ export async function runGenerationJob(
         log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
 
         const generated = await generateFirstPass(ctx);
+
+        try {
+          await logApiUsage({
+            accountId: task.accountId,
+            websiteId: task.websiteId,
+            generationType: "page_generation",
+            modelUsed: "claude-haiku-4-5-20251001",
+            inputTokens: generated.promptTokens,
+            outputTokens: generated.completionTokens,
+          });
+        } catch (logErr: any) {
+          console.warn("[usage-logger] page_generation log failed (non-fatal):", logErr?.message);
+        }
 
         const qaResult = runRuleQA(generated, blueprint);
 

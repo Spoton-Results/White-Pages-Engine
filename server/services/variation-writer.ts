@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
+import { logApiUsage } from "./usage-logger";
 
 const MODEL = "claude-haiku-4-5-20251001";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 3 });
@@ -334,6 +335,20 @@ async function writeSingleSection(
     max_tokens: 2500,
     messages: [{ role: "user", content: prompt }],
   });
+
+  try {
+    await logApiUsage({
+      accountId,
+      websiteId,
+      generationType: `variation_writing:${section}`,
+      modelUsed: MODEL,
+      inputTokens: message.usage.input_tokens,
+      outputTokens: message.usage.output_tokens,
+    });
+  } catch (logErr: any) {
+    console.warn("[usage-logger] variation_writing log failed (non-fatal):", logErr?.message);
+  }
+
   const raw = (message.content[0] as any).text as string;
   const variations = parseVariations(raw);
   if (variations.length === 0) {

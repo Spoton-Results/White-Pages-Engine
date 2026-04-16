@@ -38,7 +38,8 @@ export default function AgenciesPage() {
   const [settingStatus, setSettingStatus] = useState(false);
   const [scorePromoting, setScorePromoting] = useState(false);
   const [resetingToken, setResetingToken] = useState(false);
-  const [agencyTab, setAgencyTab] = useState<"clients" | "jobs">("clients");
+  const [agencyTab, setAgencyTab] = useState<"clients" | "jobs" | "usage">("clients");
+  const [usageDateRange, setUsageDateRange] = useState<"this_month" | "last_month" | "last_90_days" | "all_time">("this_month");
   const [bulkScoreProgress, setBulkScoreProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
   const [bulkSitemapProgress, setBulkSitemapProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
 
@@ -69,6 +70,12 @@ export default function AgenciesPage() {
     queryKey: ["/api/agencies", viewAgency?.id, "jobs"],
     queryFn: () => api.get<any[]>(`/api/agencies/${viewAgency.id}/jobs`),
     enabled: !!viewAgency && agencyTab === "jobs",
+  });
+
+  const { data: agencyUsage, isLoading: loadingAgencyUsage } = useQuery({
+    queryKey: ["/api/agencies", viewAgency?.id, "usage", usageDateRange],
+    queryFn: () => api.get<any>(`/api/agencies/${viewAgency.id}/usage?dateRange=${usageDateRange}`),
+    enabled: !!viewAgency && agencyTab === "usage",
   });
 
   const confirmSetStatus = async () => {
@@ -649,6 +656,13 @@ export default function AgenciesPage() {
                 >
                   Jobs
                 </button>
+                <button
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${agencyTab === "usage" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setAgencyTab("usage")}
+                  data-testid="tab-usage"
+                >
+                  Usage
+                </button>
                 {agencyTab === "clients" && (
                   <button
                     className={`ml-auto flex items-center gap-1 pb-2 text-xs transition-colors ${showArchived ? "text-red-600" : "text-muted-foreground hover:text-foreground"}`}
@@ -722,7 +736,7 @@ export default function AgenciesPage() {
                   });
                   })()}
                 </div>
-              ) : (
+              ) : agencyTab === "jobs" ? (
                 /* ── Jobs tab ── */
                 <div className="mt-3">
                   {loadingAgencyJobs ? (
@@ -762,6 +776,62 @@ export default function AgenciesPage() {
                               </td>
                             </tr>
                           ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* ── Usage tab ── */
+                <div className="mt-3 space-y-4" data-testid="panel-usage">
+                  {/* Date range selector */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(["this_month", "last_month", "last_90_days", "all_time"] as const).map(r => (
+                      <button
+                        key={r}
+                        data-testid={`usage-range-${r}`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${usageDateRange === r ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                        onClick={() => setUsageDateRange(r)}
+                      >
+                        {{ this_month: "This Month", last_month: "Last Month", last_90_days: "Last 90 Days", all_time: "All Time" }[r]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Usage table */}
+                  {loadingAgencyUsage ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full rounded" />)}
+                    </div>
+                  ) : !agencyUsage ? (
+                    <div className="text-center py-12 text-muted-foreground text-sm">No usage data available.</div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/40">
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Client</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">API Calls</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Total Tokens</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Est. Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(agencyUsage.rows as any[]).map((row: any) => (
+                            <tr key={row.accountId} className="border-b last:border-0 hover:bg-muted/30" data-testid={`usage-row-${row.accountId}`}>
+                              <td className="px-3 py-2 font-medium">{row.clientName}</td>
+                              <td className="px-3 py-2 text-right text-muted-foreground">{row.apiCalls.toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right text-muted-foreground">{row.totalTokens.toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right font-medium">${(row.estimatedCostCents / 100).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                          {/* Totals row */}
+                          <tr className="bg-muted/40 font-semibold border-t-2" data-testid="usage-totals-row">
+                            <td className="px-3 py-2">Total</td>
+                            <td className="px-3 py-2 text-right">{agencyUsage.totals.apiCalls.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right">{agencyUsage.totals.totalTokens.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right">${(agencyUsage.totals.estimatedCostCents / 100).toFixed(2)}</td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>

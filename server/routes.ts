@@ -973,6 +973,59 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json(result.rows);
   });
 
+  app.get("/api/agencies/:id/usage", requireAuth, async (req: Request, res: Response) => {
+    const agencyId = req.params.id as string;
+    const dateRange = (req.query.dateRange as string) || "this_month";
+
+    let sinceClause = "";
+    if (dateRange === "this_month") {
+      sinceClause = `AND ul.created_at >= date_trunc('month', now())`;
+    } else if (dateRange === "last_month") {
+      sinceClause = `AND ul.created_at >= date_trunc('month', now() - interval '1 month')
+                     AND ul.created_at < date_trunc('month', now())`;
+    } else if (dateRange === "last_90_days") {
+      sinceClause = `AND ul.created_at >= now() - interval '90 days'`;
+    }
+    // "all_time" → no filter
+
+    const agencyAccounts = await storage.getAgencyAccounts(agencyId);
+    const accountIds = agencyAccounts.map((a: any) => a.id);
+    if (accountIds.length === 0) return res.json({ rows: [], totals: { apiCalls: 0, totalTokens: 0, estimatedCostCents: 0 } });
+
+    const { pool } = await import("./db");
+    const result = await pool.query(
+      `SELECT a.id AS account_id, a.name AS client_name,
+              COUNT(ul.id)::int AS api_calls,
+              COALESCE(SUM(ul.total_tokens), 0)::bigint AS total_tokens,
+              COALESCE(SUM(ul.estimated_cost_cents), 0)::bigint AS estimated_cost_cents
+       FROM accounts a
+       LEFT JOIN api_usage_log ul ON ul.account_id = a.id ${sinceClause}
+       WHERE a.id = ANY($1)
+       GROUP BY a.id, a.name
+       ORDER BY estimated_cost_cents DESC`,
+      [accountIds]
+    );
+
+    const rows = result.rows.map((r: any) => ({
+      accountId: r.account_id,
+      clientName: r.client_name,
+      apiCalls: Number(r.api_calls),
+      totalTokens: Number(r.total_tokens),
+      estimatedCostCents: Number(r.estimated_cost_cents),
+    }));
+
+    const totals = rows.reduce(
+      (acc: any, r: any) => ({
+        apiCalls: acc.apiCalls + r.apiCalls,
+        totalTokens: acc.totalTokens + r.totalTokens,
+        estimatedCostCents: acc.estimatedCostCents + r.estimatedCostCents,
+      }),
+      { apiCalls: 0, totalTokens: 0, estimatedCostCents: 0 }
+    );
+
+    return res.json({ rows, totals });
+  });
+
   app.get("/api/agencies/:id/export-report", requireAuth, async (req: Request, res: Response) => {
     const agencyId = req.params.id as string;
     const agencyAccounts = await storage.getAgencyAccounts(agencyId);
