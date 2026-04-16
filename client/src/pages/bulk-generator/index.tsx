@@ -38,6 +38,7 @@ export default function BulkGeneratorPage() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
   const [cycleBlueprints, setCycleBlueprints] = useState(false);
+  const [showBlueprintList, setShowBlueprintList] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const lastCityIdx = useRef<number | null>(null);
   const lastStateIdx = useRef<number | null>(null);
@@ -468,19 +469,31 @@ export default function BulkGeneratorPage() {
                       <p className="text-sm text-amber-600">No blueprint selected — pages will use default title/slug format.</p>
                     )}
                     {blueprints.length > 1 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
-                        {blueprints.map((bp: any) => (
-                          <button
-                            key={bp.id}
-                            onClick={() => setBlueprintId(prev => prev === bp.id ? "" : bp.id)}
-                            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors text-xs ${blueprintId === bp.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}
-                            data-testid={`button-blueprint-${bp.id}`}
-                          >
-                            <FileText className={`size-3 mt-0.5 shrink-0 ${blueprintId === bp.id ? "text-primary" : "text-muted-foreground"}`} />
-                            <span className="truncate font-medium">{bp.name}</span>
-                            {blueprintId === bp.id && <CheckCircle2 className="size-3 text-primary ml-auto shrink-0 mt-0.5" />}
-                          </button>
-                        ))}
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setShowBlueprintList(v => !v)}
+                          className="text-xs text-primary underline-offset-2 hover:underline"
+                          data-testid="button-toggle-blueprint-list"
+                        >
+                          {showBlueprintList ? "Hide blueprint list" : `Change blueprint (${blueprints.length} available)`}
+                        </button>
+                        {showBlueprintList && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl mt-2">
+                            {blueprints.map((bp: any) => (
+                              <button
+                                key={bp.id}
+                                onClick={() => { setBlueprintId(prev => prev === bp.id ? "" : bp.id); setShowBlueprintList(false); }}
+                                className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors text-xs ${blueprintId === bp.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}
+                                data-testid={`button-blueprint-${bp.id}`}
+                              >
+                                <FileText className={`size-3 mt-0.5 shrink-0 ${blueprintId === bp.id ? "text-primary" : "text-muted-foreground"}`} />
+                                <span className="truncate font-medium">{bp.name}</span>
+                                {blueprintId === bp.id && <CheckCircle2 className="size-3 text-primary ml-auto shrink-0 mt-0.5" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     {blueprints.length > 1 && (
