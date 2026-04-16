@@ -890,6 +890,129 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ account, website, pages: pageCounts, bankHealth, hubPages: hubStats, lastJob });
   });
 
+  app.get("/api/agencies/:id/overview", requireAuth, async (req: Request, res: Response) => {
+    const agencyId = req.params.id as string;
+    const agencyAccounts = await storage.getAgencyAccounts(agencyId);
+    const accountIds = agencyAccounts.map((a: any) => a.id);
+    if (accountIds.length === 0) {
+      return res.json({ totalClients: 0, totalPages: 0, tier1Pages: 0, banksNeedingWork: 0, activeJobs: 0, clientStatuses: {}, websites: [] });
+    }
+    const { pool } = await import("./db");
+    const pagesRes = await pool.query(
+      `SELECT COALESCE(COUNT(*) FILTER (WHERE p.status = 'published'), 0)::int AS total,
+              COALESCE(COUNT(*) FILTER (WHERE p.status = 'published' AND p.tier = 1), 0)::int AS tier1
+       FROM pages p JOIN websites w ON p.website_id = w.id WHERE w.account_id = ANY($1)`,
+      [accountIds]
+    );
+    const banksRes = await pool.query(
+      `SELECT COALESCE(COUNT(*), 0)::int AS count FROM variation_bank_completeness vbc
+       JOIN websites w ON vbc.website_id = w.id WHERE w.account_id = ANY($1) AND COALESCE(vbc.completeness_score, 0) < 70`,
+      [accountIds]
+    );
+    const activeJobsRes = await pool.query(
+      `SELECT COALESCE(COUNT(*), 0)::int AS count FROM generation_jobs gj
+       JOIN websites w ON gj.website_id = w.id WHERE w.account_id = ANY($1) AND gj.status = 'running'`,
+      [accountIds]
+    );
+    const perClientRes = await pool.query(
+      `SELECT w.account_id, w.id AS website_id, w.domain,
+              COALESCE(SUM(CASE WHEN p.status = 'published' THEN 1 ELSE 0 END), 0)::int AS total_pages,
+              COALESCE(SUM(CASE WHEN p.status = 'published' AND p.tier = 1 THEN 1 ELSE 0 END), 0)::int AS tier1_pages,
+              (SELECT COALESCE(COUNT(*),0)::int FROM variation_bank_completeness vbc2
+               WHERE vbc2.website_id = w.id AND COALESCE(vbc2.completeness_score,0) < 70) AS banks_needing_work,
+              (SELECT MAX(gj.created_at) FROM generation_jobs gj WHERE gj.website_id = w.id) AS last_job_date
+       FROM websites w LEFT JOIN pages p ON p.website_id = w.id
+       WHERE w.account_id = ANY($1) GROUP BY w.id, w.account_id, w.domain`,
+      [accountIds]
+    );
+    const now = Date.now();
+    const clientStatuses: Record<string, string> = {};
+    const websites: Array<{ accountId: string; id: string; domain: string }> = [];
+    for (const row of perClientRes.rows) {
+      websites.push({ accountId: row.account_id, id: row.website_id, domain: row.domain });
+      const totalPages = row.total_pages ?? 0;
+      const tier1 = row.tier1_pages ?? 0;
+      const banksNeedingWork = row.banks_needing_work ?? 0;
+      const lastJob = row.last_job_date ? new Date(row.last_job_date).getTime() : null;
+      const daysSinceJob = lastJob ? (now - lastJob) / 86400000 : Infinity;
+      if (totalPages === 0 || daysSinceJob > 60) {
+        clientStatuses[row.account_id] = "stalled";
+      } else if (banksNeedingWork > 0 || tier1 === 0) {
+        clientStatuses[row.account_id] = "needs_attention";
+      } else {
+        clientStatuses[row.account_id] = "healthy";
+      }
+    }
+    return res.json({
+      totalClients: agencyAccounts.length,
+      totalPages: pagesRes.rows[0]?.total ?? 0,
+      tier1Pages: pagesRes.rows[0]?.tier1 ?? 0,
+      banksNeedingWork: banksRes.rows[0]?.count ?? 0,
+      activeJobs: activeJobsRes.rows[0]?.count ?? 0,
+      clientStatuses,
+      websites,
+    });
+  });
+
+  app.get("/api/agencies/:id/jobs", requireAuth, async (req: Request, res: Response) => {
+    const agencyId = req.params.id as string;
+    const agencyAccounts = await storage.getAgencyAccounts(agencyId);
+    const accountIds = agencyAccounts.map((a: any) => a.id);
+    if (accountIds.length === 0) return res.json([]);
+    const { pool } = await import("./db");
+    const result = await pool.query(
+      `SELECT gj.id, gj.status, gj.pages_generated, gj.created_at, gj.completed_at, gj.type,
+              a.name AS client_name, w.domain
+       FROM generation_jobs gj
+       JOIN websites w ON gj.website_id = w.id
+       JOIN accounts a ON w.account_id = a.id
+       WHERE w.account_id = ANY($1)
+       ORDER BY gj.created_at DESC LIMIT 200`,
+      [accountIds]
+    );
+    return res.json(result.rows);
+  });
+
+  app.get("/api/agencies/:id/export-report", requireAuth, async (req: Request, res: Response) => {
+    const agencyId = req.params.id as string;
+    const agencyAccounts = await storage.getAgencyAccounts(agencyId);
+    const accountIds = agencyAccounts.map((a: any) => a.id);
+    if (accountIds.length === 0) {
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="agency-report.csv"`);
+      return res.send("Client Name,Domain,Total Pages,Tier 1,Tier 2,Tier 3,Avg Quality Score,Banks Complete,Banks Needs Work,Last Job Date\n");
+    }
+    const { pool } = await import("./db");
+    const result = await pool.query(
+      `SELECT a.name AS client_name, w.domain,
+              COALESCE(SUM(CASE WHEN p.status='published' THEN 1 ELSE 0 END), 0)::int AS total_pages,
+              COALESCE(SUM(CASE WHEN p.status='published' AND p.tier=1 THEN 1 ELSE 0 END), 0)::int AS tier1,
+              COALESCE(SUM(CASE WHEN p.status='published' AND p.tier=2 THEN 1 ELSE 0 END), 0)::int AS tier2,
+              COALESCE(SUM(CASE WHEN p.status='published' AND p.tier=3 THEN 1 ELSE 0 END), 0)::int AS tier3,
+              ROUND(AVG(p.quality_score) FILTER (WHERE p.quality_score IS NOT NULL))::int AS avg_score,
+              (SELECT COALESCE(COUNT(*),0)::int FROM variation_bank_completeness vbc WHERE vbc.website_id = w.id AND COALESCE(vbc.completeness_score,0) >= 70) AS banks_complete,
+              (SELECT COALESCE(COUNT(*),0)::int FROM variation_bank_completeness vbc WHERE vbc.website_id = w.id AND COALESCE(vbc.completeness_score,0) < 70) AS banks_needing_work,
+              (SELECT MAX(gj.created_at) FROM generation_jobs gj WHERE gj.website_id = w.id) AS last_job_date
+       FROM accounts a
+       JOIN websites w ON w.account_id = a.id
+       LEFT JOIN pages p ON p.website_id = w.id
+       WHERE a.id = ANY($1)
+       GROUP BY a.name, w.domain, w.id
+       ORDER BY a.name`,
+      [accountIds]
+    );
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = "Client Name,Domain,Total Pages,Tier 1,Tier 2,Tier 3,Avg Quality Score,Banks Complete,Banks Needs Work,Last Job Date";
+    const rows = result.rows.map((r: any) =>
+      [esc(r.client_name), esc(r.domain), r.total_pages, r.tier1, r.tier2, r.tier3,
+       r.avg_score ?? "", r.banks_complete, r.banks_needing_work,
+       r.last_job_date ? new Date(r.last_job_date).toISOString().split("T")[0] : ""].join(",")
+    );
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="agency-report.csv"`);
+    return res.send([header, ...rows].join("\n"));
+  });
+
   // ── Accounts ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {

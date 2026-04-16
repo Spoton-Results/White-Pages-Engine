@@ -9,8 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
@@ -32,6 +32,9 @@ export default function AgenciesPage() {
 
   const [viewClient, setViewClient] = useState<any>(null);
   const [scorePromoting, setScorePromoting] = useState(false);
+  const [agencyTab, setAgencyTab] = useState<"clients" | "jobs">("clients");
+  const [bulkScoreProgress, setBulkScoreProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
+  const [bulkSitemapProgress, setBulkSitemapProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
 
   const { data: agencies = [], isLoading, isFetching } = useQuery({
     queryKey: ["/api/agencies"],
@@ -49,6 +52,46 @@ export default function AgenciesPage() {
     queryFn: () => api.get<any>(`/api/accounts/${viewClient.id}/client-summary`),
     enabled: !!viewClient,
   });
+
+  const { data: agencyOverview } = useQuery({
+    queryKey: ["/api/agencies", viewAgency?.id, "overview"],
+    queryFn: () => api.get<any>(`/api/agencies/${viewAgency.id}/overview`),
+    enabled: !!viewAgency,
+  });
+
+  const { data: agencyJobs = [], isLoading: loadingAgencyJobs } = useQuery({
+    queryKey: ["/api/agencies", viewAgency?.id, "jobs"],
+    queryFn: () => api.get<any[]>(`/api/agencies/${viewAgency.id}/jobs`),
+    enabled: !!viewAgency && agencyTab === "jobs",
+  });
+
+  const runBulkScorePromote = async () => {
+    const websites = (agencyOverview as any)?.websites ?? [];
+    if (websites.length === 0) { toast({ title: "No websites found for this agency" }); return; }
+    setBulkScoreProgress({ current: 0, total: websites.length, currentName: "" });
+    for (let i = 0; i < websites.length; i++) {
+      const w = websites[i];
+      const clientName = (viewAccounts as any[]).find((a: any) => a.id === w.accountId)?.name ?? w.domain;
+      setBulkScoreProgress({ current: i + 1, total: websites.length, currentName: clientName });
+      try { await api.post(`/api/websites/${w.id}/score-and-promote`, {}); } catch (_) {}
+    }
+    setBulkScoreProgress(null);
+    toast({ title: "Score & Promote complete", description: `Processed ${websites.length} client(s)` });
+  };
+
+  const runBulkSitemaps = async () => {
+    const websites = (agencyOverview as any)?.websites ?? [];
+    if (websites.length === 0) { toast({ title: "No websites found for this agency" }); return; }
+    setBulkSitemapProgress({ current: 0, total: websites.length, currentName: "" });
+    for (let i = 0; i < websites.length; i++) {
+      const w = websites[i];
+      const clientName = (viewAccounts as any[]).find((a: any) => a.id === w.accountId)?.name ?? w.domain;
+      setBulkSitemapProgress({ current: i + 1, total: websites.length, currentName: clientName });
+      try { await api.post(`/api/websites/${w.id}/sitemaps/generate`, {}); } catch (_) {}
+    }
+    setBulkSitemapProgress(null);
+    toast({ title: "Sitemaps regenerated", description: `Processed ${websites.length} client(s)` });
+  };
 
   const { data: allAccounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
@@ -379,17 +422,52 @@ export default function AgenciesPage() {
       </Dialog>
 
       {/* View Agency Clients Panel */}
-      <Sheet open={!!viewAgency} onOpenChange={open => { if (!open) { setViewAgency(null); setViewClient(null); } }}>
+      <Sheet open={!!viewAgency} onOpenChange={open => { if (!open) { setViewAgency(null); setViewClient(null); setAgencyTab("clients"); setBulkScoreProgress(null); setBulkSitemapProgress(null); } }}>
         <SheetContent className="w-[520px] sm:max-w-[520px] overflow-y-auto" aria-describedby={undefined}>
           <SheetHeader>
             {!viewClient ? (
-              <SheetTitle className="flex items-center gap-2">
-                <Building2 className="size-5 text-primary" />
-                {viewAgency?.name}
-                <Badge variant="outline" className="ml-1 font-normal">
-                  {clientCountMap[viewAgency?.id] ?? 0} clients
-                </Badge>
-              </SheetTitle>
+              <div className="flex items-center justify-between gap-2">
+                <SheetTitle className="flex items-center gap-2">
+                  <Building2 className="size-5 text-primary" />
+                  {viewAgency?.name}
+                  <Badge variant="outline" className="ml-1 font-normal">
+                    {clientCountMap[viewAgency?.id] ?? 0} clients
+                  </Badge>
+                </SheetTitle>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs shrink-0" data-testid="button-bulk-actions">
+                      <ListChecks className="size-3.5" />Bulk Actions
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      disabled={!!bulkScoreProgress}
+                      onClick={runBulkScorePromote}
+                      data-testid="bulk-score-promote"
+                    >
+                      <TrendingUp className="size-4" />Score & Promote All Clients
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      disabled={!!bulkSitemapProgress}
+                      onClick={runBulkSitemaps}
+                      data-testid="bulk-regenerate-sitemaps"
+                    >
+                      <Globe className="size-4" />Regenerate All Sitemaps
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      onClick={() => window.open(`/api/agencies/${viewAgency?.id}/export-report`)}
+                      data-testid="bulk-export-report"
+                    >
+                      <Download className="size-4" />Export Agency Report
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
               <div className="space-y-1">
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -426,40 +504,166 @@ export default function AgenciesPage() {
           </SheetHeader>
 
           {!viewClient ? (
-            /* ── Client list ── */
-            <div className="mt-6 space-y-2">
-              {loadingViewAccounts ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="p-3 rounded-lg border bg-card">
-                    <Skeleton className="h-4 w-40 mb-2" />
-                    <Skeleton className="h-3 w-24" />
-                  </div>
-                ))
-              ) : (viewAccounts as any[]).length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground text-sm">
-                  No client accounts assigned to this agency yet.
+            <>
+              {/* ── Stats bar ── */}
+              {agencyOverview ? (
+                <div className="mt-4 grid grid-cols-5 gap-2">
+                  {[
+                    { label: "Clients", value: (agencyOverview as any).totalClients, cls: "" },
+                    { label: "Total Pages", value: ((agencyOverview as any).totalPages ?? 0).toLocaleString(), cls: "" },
+                    { label: "Tier 1", value: ((agencyOverview as any).tier1Pages ?? 0).toLocaleString(), cls: "text-emerald-600" },
+                    { label: "Banks ⚠", value: (agencyOverview as any).banksNeedingWork, cls: "text-amber-600" },
+                    { label: "Active Jobs", value: (agencyOverview as any).activeJobs, cls: "text-blue-600" },
+                  ].map(stat => (
+                    <div key={stat.label} className="rounded-lg bg-muted/50 p-2 text-center">
+                      <div className="text-[10px] text-muted-foreground leading-tight">{stat.label}</div>
+                      <div className={`text-base font-bold mt-0.5 ${stat.cls}`}>{stat.value}</div>
+                    </div>
+                  ))}
                 </div>
-              ) : (viewAccounts as any[]).map((acc: any) => (
-                <div
-                  key={acc.id}
-                  className="p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors"
-                  data-testid={`agency-client-${acc.id}`}
-                  onClick={() => setViewClient(acc)}
+              ) : (
+                <div className="mt-4 grid grid-cols-5 gap-2">
+                  {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+                </div>
+              )}
+
+              {/* ── Bulk operation progress indicators ── */}
+              {bulkScoreProgress && (
+                <div className="mt-3 rounded-lg border bg-card p-3 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">Scoring & promoting clients…</span>
+                    <span className="text-muted-foreground">{bulkScoreProgress.current}/{bulkScoreProgress.total}</span>
+                  </div>
+                  {bulkScoreProgress.currentName && <div className="text-xs text-muted-foreground truncate">{bulkScoreProgress.currentName}</div>}
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full bg-primary transition-all" style={{ width: `${(bulkScoreProgress.current / bulkScoreProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+              )}
+              {bulkSitemapProgress && (
+                <div className="mt-3 rounded-lg border bg-card p-3 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">Regenerating sitemaps…</span>
+                    <span className="text-muted-foreground">{bulkSitemapProgress.current}/{bulkSitemapProgress.total}</span>
+                  </div>
+                  {bulkSitemapProgress.currentName && <div className="text-xs text-muted-foreground truncate">{bulkSitemapProgress.currentName}</div>}
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full bg-primary transition-all" style={{ width: `${(bulkSitemapProgress.current / bulkSitemapProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Tabs ── */}
+              <div className="flex border-b mt-4">
+                <button
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${agencyTab === "clients" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setAgencyTab("clients")}
+                  data-testid="tab-clients"
                 >
-                  <div>
-                    <div className="font-medium text-sm">{acc.name}</div>
-                    <div className="text-xs text-muted-foreground font-mono mt-0.5">{acc.slug}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">{acc.plan}</Badge>
-                    <Badge variant="outline" className={`text-xs ${acc.status === "active" ? "bg-emerald-500/10 text-emerald-600 border-emerald-200" : "bg-muted text-muted-foreground"}`}>
-                      {acc.status}
-                    </Badge>
-                    <ChevronRight className="size-3 text-muted-foreground" />
-                  </div>
+                  Clients
+                </button>
+                <button
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${agencyTab === "jobs" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setAgencyTab("jobs")}
+                  data-testid="tab-jobs"
+                >
+                  Jobs
+                </button>
+              </div>
+
+              {agencyTab === "clients" ? (
+                /* ── Client list ── */
+                <div className="mt-3 space-y-2">
+                  {loadingViewAccounts ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="p-3 rounded-lg border bg-card">
+                        <Skeleton className="h-4 w-40 mb-2" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                    ))
+                  ) : (viewAccounts as any[]).length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground text-sm">
+                      No client accounts assigned to this agency yet.
+                    </div>
+                  ) : (viewAccounts as any[]).map((acc: any) => {
+                    const statusKey = (agencyOverview as any)?.clientStatuses?.[acc.id];
+                    const statusCfg: Record<string, { label: string; cls: string }> = {
+                      healthy: { label: "Healthy", cls: "bg-emerald-500/10 text-emerald-600 border-emerald-200" },
+                      needs_attention: { label: "Needs Attention", cls: "bg-amber-500/10 text-amber-600 border-amber-200" },
+                      stalled: { label: "Stalled", cls: "bg-red-500/10 text-red-600 border-red-200" },
+                    };
+                    const statusBadge = statusKey ? statusCfg[statusKey] : null;
+                    return (
+                      <div
+                        key={acc.id}
+                        className="p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors"
+                        data-testid={`agency-client-${acc.id}`}
+                        onClick={() => setViewClient(acc)}
+                      >
+                        <div>
+                          <div className="font-medium text-sm">{acc.name}</div>
+                          <div className="text-xs text-muted-foreground font-mono mt-0.5">{acc.slug}</div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {statusBadge && (
+                            <Badge variant="outline" className={`text-xs ${statusBadge.cls}`} data-testid={`status-${acc.id}`}>
+                              {statusBadge.label}
+                            </Badge>
+                          )}
+                          <Badge variant="secondary" className="text-xs">{acc.plan}</Badge>
+                          <ChevronRight className="size-3 text-muted-foreground" />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              ) : (
+                /* ── Jobs tab ── */
+                <div className="mt-3">
+                  {loadingAgencyJobs ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full rounded" />)}
+                    </div>
+                  ) : (agencyJobs as any[]).length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground text-sm">No jobs found for this agency.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-1.5 font-medium text-muted-foreground pr-3">Client</th>
+                            <th className="text-left py-1.5 font-medium text-muted-foreground pr-3">Type</th>
+                            <th className="text-right py-1.5 font-medium text-muted-foreground pr-3">Pages</th>
+                            <th className="text-left py-1.5 font-medium text-muted-foreground pr-3">Status</th>
+                            <th className="text-left py-1.5 font-medium text-muted-foreground">Started</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(agencyJobs as any[]).map((job: any) => (
+                            <tr key={job.id} className="border-b last:border-0 hover:bg-muted/30">
+                              <td className="py-1.5 font-medium max-w-[110px] truncate pr-3">{job.client_name}</td>
+                              <td className="py-1.5 text-muted-foreground pr-3">{job.type ?? "generate"}</td>
+                              <td className="py-1.5 text-right pr-3">{job.pages_generated ?? 0}</td>
+                              <td className="py-1.5 pr-3">
+                                <Badge variant="outline" className={`text-xs ${
+                                  job.status === "completed" ? "bg-emerald-500/10 text-emerald-600 border-emerald-200" :
+                                  job.status === "running" ? "bg-blue-500/10 text-blue-600 border-blue-200" :
+                                  job.status === "failed" ? "bg-red-500/10 text-red-600 border-red-200" :
+                                  "bg-muted text-muted-foreground"
+                                }`}>{job.status}</Badge>
+                              </td>
+                              <td className="py-1.5 text-muted-foreground whitespace-nowrap">
+                                {job.created_at ? new Date(job.created_at).toLocaleDateString() : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             /* ── Client detail view ── */
             <div className="mt-6 space-y-5">
