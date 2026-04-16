@@ -63,6 +63,7 @@ async function streamPagesByTier(
           and(
             eq(pages.websiteId, websiteId),
             eq(pages.status, "published"),
+            eq(pages.noindex, false),
             sql`(pages.tier IS NULL OR pages.tier != 3)`,
           )
         )
@@ -77,6 +78,7 @@ async function streamPagesByTier(
           and(
             eq(pages.websiteId, websiteId),
             eq(pages.status, "published"),
+            eq(pages.noindex, false),
             sql`pages.tier = ${tier}`,
           )
         )

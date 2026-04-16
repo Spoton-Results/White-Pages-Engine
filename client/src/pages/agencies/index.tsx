@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus, Copy } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus, Copy, Pause, Archive, Play } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +33,9 @@ export default function AgenciesPage() {
 
   const [viewClient, setViewClient] = useState<any>(null);
   const [cloneTarget, setCloneTarget] = useState<any>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [statusTarget, setStatusTarget] = useState<{ account: any; newStatus: "active" | "paused" | "archived" } | null>(null);
+  const [settingStatus, setSettingStatus] = useState(false);
   const [scorePromoting, setScorePromoting] = useState(false);
   const [agencyTab, setAgencyTab] = useState<"clients" | "jobs">("clients");
   const [bulkScoreProgress, setBulkScoreProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
@@ -67,9 +70,32 @@ export default function AgenciesPage() {
     enabled: !!viewAgency && agencyTab === "jobs",
   });
 
+  const confirmSetStatus = async () => {
+    if (!statusTarget) return;
+    setSettingStatus(true);
+    try {
+      await api.patch(`/api/accounts/${statusTarget.account.id}/client-status`, { clientStatus: statusTarget.newStatus });
+      qc.invalidateQueries({ queryKey: ["/api/agencies", viewAgency?.id, "accounts"] });
+      qc.invalidateQueries({ queryKey: ["/api/agencies", viewAgency?.id, "overview"] });
+      if (viewClient?.id === statusTarget.account.id) {
+        setViewClient((prev: any) => prev ? { ...prev, clientStatus: statusTarget.newStatus } : prev);
+      }
+      toast({ title: `Status set to ${statusTarget.newStatus}`, description: statusTarget.account.name });
+      setStatusTarget(null);
+    } catch (e: any) {
+      toast({ title: "Failed to update status", description: e.message, variant: "destructive" });
+    } finally {
+      setSettingStatus(false);
+    }
+  };
+
   const runBulkScorePromote = async () => {
-    const websites = (agencyOverview as any)?.websites ?? [];
-    if (websites.length === 0) { toast({ title: "No websites found for this agency" }); return; }
+    const allSitesList = (agencyOverview as any)?.websites ?? [];
+    const websites = allSitesList.filter((w: any) => {
+      const acc = (viewAccounts as any[]).find((a: any) => a.id === w.accountId);
+      return acc?.clientStatus !== "paused" && acc?.clientStatus !== "archived";
+    });
+    if (websites.length === 0) { toast({ title: "No active websites found for this agency" }); return; }
     setBulkScoreProgress({ current: 0, total: websites.length, currentName: "" });
     for (let i = 0; i < websites.length; i++) {
       const w = websites[i];
@@ -78,12 +104,16 @@ export default function AgenciesPage() {
       try { await api.post(`/api/websites/${w.id}/score-and-promote`, {}); } catch (_) {}
     }
     setBulkScoreProgress(null);
-    toast({ title: "Score & Promote complete", description: `Processed ${websites.length} client(s)` });
+    toast({ title: "Score & Promote complete", description: `Processed ${websites.length} active client(s)` });
   };
 
   const runBulkSitemaps = async () => {
-    const websites = (agencyOverview as any)?.websites ?? [];
-    if (websites.length === 0) { toast({ title: "No websites found for this agency" }); return; }
+    const allSitesList = (agencyOverview as any)?.websites ?? [];
+    const websites = allSitesList.filter((w: any) => {
+      const acc = (viewAccounts as any[]).find((a: any) => a.id === w.accountId);
+      return acc?.clientStatus !== "archived";
+    });
+    if (websites.length === 0) { toast({ title: "No non-archived websites found for this agency" }); return; }
     setBulkSitemapProgress({ current: 0, total: websites.length, currentName: "" });
     for (let i = 0; i < websites.length; i++) {
       const w = websites[i];
@@ -508,6 +538,36 @@ export default function AgenciesPage() {
                     <ChevronLeft className="size-4" />
                   </button>
                   <span className="flex-1 min-w-0">{viewClient.name}</span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm" variant="outline" className="gap-1.5 text-xs h-7" data-testid="button-client-status-menu">
+                        {viewClient.clientStatus === "paused" ? (
+                          <><Pause className="size-3 text-amber-600" />Paused</>
+                        ) : viewClient.clientStatus === "archived" ? (
+                          <><Archive className="size-3 text-red-600" />Archived</>
+                        ) : (
+                          <><Play className="size-3 text-emerald-600" />Active</>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      {viewClient.clientStatus !== "active" && (
+                        <DropdownMenuItem onClick={() => setStatusTarget({ account: viewClient, newStatus: "active" })} data-testid="status-option-active">
+                          <Play className="size-4 mr-2 text-emerald-600" />Set Active
+                        </DropdownMenuItem>
+                      )}
+                      {viewClient.clientStatus !== "paused" && (
+                        <DropdownMenuItem onClick={() => setStatusTarget({ account: viewClient, newStatus: "paused" })} data-testid="status-option-paused">
+                          <Pause className="size-4 mr-2 text-amber-600" />Set Paused
+                        </DropdownMenuItem>
+                      )}
+                      {viewClient.clientStatus !== "archived" && (
+                        <DropdownMenuItem onClick={() => setStatusTarget({ account: viewClient, newStatus: "archived" })} className="text-red-600" data-testid="status-option-archived">
+                          <Archive className="size-4 mr-2" />Set Archived
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
                     size="sm"
                     variant="outline"
@@ -573,7 +633,7 @@ export default function AgenciesPage() {
               )}
 
               {/* ── Tabs ── */}
-              <div className="flex border-b mt-4">
+              <div className="flex items-center border-b mt-4">
                 <button
                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${agencyTab === "clients" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                   onClick={() => setAgencyTab("clients")}
@@ -588,6 +648,16 @@ export default function AgenciesPage() {
                 >
                   Jobs
                 </button>
+                {agencyTab === "clients" && (
+                  <button
+                    className={`ml-auto flex items-center gap-1 pb-2 text-xs transition-colors ${showArchived ? "text-red-600" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setShowArchived(v => !v)}
+                    data-testid="toggle-show-archived"
+                  >
+                    <Archive className="size-3" />
+                    {showArchived ? "Hide Archived" : "Show Archived"}
+                  </button>
+                )}
               </div>
 
               {agencyTab === "clients" ? (
@@ -600,22 +670,26 @@ export default function AgenciesPage() {
                         <Skeleton className="h-3 w-24" />
                       </div>
                     ))
-                  ) : (viewAccounts as any[]).length === 0 ? (
-                    <div className="text-center py-12 text-muted-foreground text-sm">
-                      No client accounts assigned to this agency yet.
-                    </div>
-                  ) : (viewAccounts as any[]).map((acc: any) => {
+                  ) : (() => {
+                    const filteredAccounts = (viewAccounts as any[]).filter((a: any) => showArchived || a.clientStatus !== "archived");
+                    return filteredAccounts.length === 0 ? (
+                      <div className="text-center py-12 text-muted-foreground text-sm">
+                        {(viewAccounts as any[]).some((a: any) => a.clientStatus === "archived") && !showArchived
+                          ? <span>All clients are archived. <button className="underline" onClick={() => setShowArchived(true)}>Show archived</button></span>
+                          : "No client accounts assigned to this agency yet."}
+                      </div>
+                    ) : filteredAccounts.map((acc: any) => {
                     const statusKey = (agencyOverview as any)?.clientStatuses?.[acc.id];
                     const statusCfg: Record<string, { label: string; cls: string }> = {
                       healthy: { label: "Healthy", cls: "bg-emerald-500/10 text-emerald-600 border-emerald-200" },
                       needs_attention: { label: "Needs Attention", cls: "bg-amber-500/10 text-amber-600 border-amber-200" },
                       stalled: { label: "Stalled", cls: "bg-red-500/10 text-red-600 border-red-200" },
                     };
-                    const statusBadge = statusKey ? statusCfg[statusKey] : null;
+                    const statusBadge = (acc.clientStatus === "active" || !acc.clientStatus) && statusKey ? statusCfg[statusKey] : null;
                     return (
                       <div
                         key={acc.id}
-                        className="p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors"
+                        className={`p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors ${acc.clientStatus === "archived" ? "opacity-60" : ""}`}
                         data-testid={`agency-client-${acc.id}`}
                         onClick={() => setViewClient(acc)}
                       >
@@ -624,8 +698,18 @@ export default function AgenciesPage() {
                           <div className="text-xs text-muted-foreground font-mono mt-0.5">{acc.slug}</div>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {acc.clientStatus === "paused" && (
+                            <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-200" data-testid={`client-status-${acc.id}`}>
+                              <Pause className="size-2.5 mr-0.5" />Paused
+                            </Badge>
+                          )}
+                          {acc.clientStatus === "archived" && (
+                            <Badge variant="outline" className="text-xs bg-red-500/10 text-red-600 border-red-200" data-testid={`client-status-${acc.id}`}>
+                              <Archive className="size-2.5 mr-0.5" />Archived
+                            </Badge>
+                          )}
                           {statusBadge && (
-                            <Badge variant="outline" className={`text-xs ${statusBadge.cls}`} data-testid={`status-${acc.id}`}>
+                            <Badge variant="outline" className={`text-xs ${statusBadge.cls}`} data-testid={`status-health-${acc.id}`}>
                               {statusBadge.label}
                             </Badge>
                           )}
@@ -634,7 +718,8 @@ export default function AgenciesPage() {
                         </div>
                       </div>
                     );
-                  })}
+                  });
+                  })()}
                 </div>
               ) : (
                 /* ── Jobs tab ── */
@@ -852,6 +937,46 @@ export default function AgenciesPage() {
           sourceAccountName={cloneTarget.name}
           agencyId={viewAgency.id}
         />
+      )}
+
+      {statusTarget && (
+        <Dialog open={!!statusTarget} onOpenChange={o => { if (!o && !settingStatus) setStatusTarget(null); }}>
+          <DialogContent aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle>
+                {statusTarget.newStatus === "paused"
+                  ? "Pause Client?"
+                  : statusTarget.newStatus === "archived"
+                  ? "Archive Client?"
+                  : statusTarget.account.clientStatus === "archived"
+                  ? "Reactivate Client?"
+                  : "Resume Client?"}
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {statusTarget.newStatus === "paused"
+                ? `This will stop all generation jobs for ${statusTarget.account.name}. Their pages stay live. Continue?`
+                : statusTarget.newStatus === "archived"
+                ? `This will set all ${statusTarget.account.name} pages to noindex and remove them from sitemaps. This cannot be undone easily. Continue?`
+                : statusTarget.account.clientStatus === "archived"
+                ? `This will restore noindex=false on all pages and re-add this client to sitemap generation. Continue?`
+                : `Resume ${statusTarget.account.name}? Generation jobs will be re-enabled.`}
+            </p>
+            <DialogFooter className="flex gap-2">
+              <Button variant="outline" onClick={() => setStatusTarget(null)} disabled={settingStatus} data-testid="button-status-cancel">
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmSetStatus}
+                disabled={settingStatus}
+                variant={statusTarget.newStatus === "archived" ? "destructive" : "default"}
+                data-testid="button-status-confirm"
+              >
+                {settingStatus ? "Updating…" : "Confirm"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </DashboardLayout>
   );

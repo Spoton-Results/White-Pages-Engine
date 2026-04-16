@@ -1461,6 +1461,34 @@ Think about what customers search for when they need ${industry} services. Inclu
     return res.json({ message: "Account deleted" });
   });
 
+  app.patch("/api/accounts/:accountId/client-status", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const { clientStatus } = req.body;
+    if (!["active", "paused", "archived"].includes(clientStatus)) {
+      return res.status(400).json({ message: "clientStatus must be active, paused, or archived" });
+    }
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    const { pool } = await import("./db");
+
+    if (clientStatus === "archived") {
+      await pool.query(
+        `UPDATE pages SET noindex = true WHERE website_id IN (SELECT id FROM websites WHERE account_id = $1)`,
+        [accountId]
+      );
+    } else if (account.clientStatus === "archived" && clientStatus === "active") {
+      await pool.query(
+        `UPDATE pages SET noindex = false WHERE website_id IN (SELECT id FROM websites WHERE account_id = $1)`,
+        [accountId]
+      );
+    }
+
+    await pool.query(`UPDATE accounts SET client_status = $1, updated_at = now() WHERE id = $2`, [clientStatus, accountId]);
+    const updated = await storage.getAccount(accountId);
+    return res.json(updated);
+  });
+
   // ── Users ─────────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/users", requireAuth, async (req: Request, res: Response) => {
@@ -4054,6 +4082,17 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found" });
+
+    if (website.accountId) {
+      const acct = await storage.getAccount(website.accountId);
+      if (acct?.clientStatus === "paused") {
+        return res.status(403).json({ error: "This client is paused. Resume to run generation." });
+      }
+      if (acct?.clientStatus === "archived") {
+        return res.status(403).json({ error: "This client is archived. Generation is blocked." });
+      }
+    }
+
     const brand = await storage.getBrandProfile(website.brandProfileId as string);
     const brandName = brand?.name ?? website.domain;
 
@@ -4226,6 +4265,16 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
 
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found" });
+
+    if (website.accountId) {
+      const acct = await storage.getAccount(website.accountId);
+      if (acct?.clientStatus === "paused") {
+        return res.status(403).json({ error: "This client is paused. Resume to run generation." });
+      }
+      if (acct?.clientStatus === "archived") {
+        return res.status(403).json({ error: "This client is archived. Generation is blocked." });
+      }
+    }
 
     const progress = body.services.map(s => ({ service: s, status: "pending" as const, created: 0, updated: 0, skipped: 0, errors: 0 }));
     const jobSettings = { ...body, progress };

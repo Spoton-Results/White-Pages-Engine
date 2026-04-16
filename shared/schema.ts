@@ -43,6 +43,7 @@ export const accounts = pgTable("accounts", {
   slug: text("slug").notNull().unique(),
   plan: accountPlanEnum("plan").notNull().default("starter"),
   status: accountStatusEnum("status").notNull().default("active"),
+  clientStatus: varchar("client_status", { length: 20 }).notNull().default("active"),
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -217,6 +218,7 @@ export const pages = pgTable("pages", {
   lastEvaluatedAt: timestamp("last_evaluated_at"),
   rolloutPhase: text("rollout_phase"),
   promotionStatus: text("promotion_status").notNull().default("default"),
+  noindex: boolean("noindex").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
