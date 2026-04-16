@@ -271,7 +271,27 @@ export default function BulkGeneratorPage() {
   const allCitiesSelected = filteredCities.length > 0 && filteredCities.every((l: any) => selectedCitySlugs.has(l.slug));
 
   const clusterCountForEstimate = selectedClusterIds.size > 0 ? selectedClusterIds.size : (clusters.length > 0 ? clusters.length : 1);
-  const estimatedPages = selectedServices.size * clusterCountForEstimate * targetCount;
+
+  // Detect when the selected blueprint will deduplicate city targets to state-level slugs.
+  // This happens when the slug template uses {state} but NOT {location} or {city}.
+  const activeBlueprintObj = blueprints.find((bp: any) => bp.id === blueprintId);
+  const bpSlug = activeBlueprintObj?.slugTemplate ?? "";
+  const blueprintDedupesCities = blueprintId
+    && mode === "specific_cities"
+    && /\{state/i.test(bpSlug)
+    && !/\{location|\{city/i.test(bpSlug);
+  const uniqueStateCountFromCities = useMemo(() => {
+    if (!blueprintDedupesCities) return 0;
+    const states = new Set<string>();
+    for (const slug of Array.from(selectedCitySlugs)) {
+      const loc = dbCities.find((l: any) => l.slug === slug);
+      if (loc?.stateCode) states.add(loc.stateCode.toUpperCase());
+    }
+    return states.size;
+  }, [blueprintDedupesCities, selectedCitySlugs, dbCities]);
+
+  const effectiveTargetCount = blueprintDedupesCities ? uniqueStateCountFromCities : targetCount;
+  const estimatedPages = selectedServices.size * clusterCountForEstimate * effectiveTargetCount;
 
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -866,8 +886,13 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {targetCount.toLocaleString()} location{targetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
+                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
                 {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
+                {blueprintDedupesCities && (
+                  <span className="block mt-1.5 text-amber-700 font-medium">
+                    ⚠ This blueprint uses a state-level slug (no {"{location}"} placeholder). Your {targetCount.toLocaleString()} selected cities cover {uniqueStateCountFromCities} unique states — the generator will create {uniqueStateCountFromCities} state pages per service/cluster, not city pages. To generate city-level pages, select a blueprint whose slug contains {"{location}"} or {"{city}"}.
+                  </span>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
