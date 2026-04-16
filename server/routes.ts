@@ -4592,7 +4592,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const blueprint = (website.settings as any)?.defaultBlueprintId
         ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
         : null;
-      const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+      const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 75;
 
       while (true) {
         const unscored = await storage.getUnscoredPages(websiteId, BATCH);

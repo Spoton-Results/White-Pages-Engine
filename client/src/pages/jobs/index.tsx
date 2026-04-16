@@ -37,6 +37,7 @@ export default function JobsPage() {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>("all");
+  const [rescoring, setRescoring] = useState(false);
 
   // Guards so auto-select fires once per dialog session and never overrides explicit user edits
   const didAutoSelectServices = useRef(false);
@@ -375,6 +376,28 @@ export default function JobsPage() {
                 onClick={() => { setStatusFilter("all"); setSiteFilter("all"); }}
                 data-testid="button-clear-filters">
                 Clear filters
+              </Button>
+            )}
+            {siteFilter !== "all" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                disabled={rescoring}
+                data-testid="button-rescore-pages"
+                onClick={async () => {
+                  setRescoring(true);
+                  try {
+                    await api.post(`/api/websites/${siteFilter}/score-pages`, {});
+                    toast({ title: "Re-scoring started", description: "Unscored pages are being scored in the background. Refresh in a few minutes." });
+                  } catch {
+                    toast({ title: "Failed to start re-scoring", variant: "destructive" });
+                  } finally {
+                    setRescoring(false);
+                  }
+                }}
+              >
+                {rescoring ? <><RefreshCw className="size-3 animate-spin" /> Scoring...</> : <><Zap className="size-3" /> Re-score unscored pages</>}
               </Button>
             )}
             <span className="text-xs text-muted-foreground ml-auto">

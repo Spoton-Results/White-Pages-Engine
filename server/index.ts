@@ -165,6 +165,27 @@ app.use((req, res, next) => {
     console.error("[startup] Page count sync failed (non-fatal):", err);
   }
 
+  // Re-tier all scored pages with the current Tier 1 threshold (75).
+  // This is idempotent — safe to run on every restart.
+  try {
+    const { getWebsites, bulkUpdatePageTiers } = await import("./storage");
+    const allWebsites = await getWebsites();
+    if (allWebsites.length > 0) {
+      console.log(`[startup] Applying Tier 1 threshold (75) to all scored pages...`);
+      let totalPromoted = 0;
+      await Promise.all(allWebsites.map(async w => {
+        try {
+          const { promoted } = await bulkUpdatePageTiers(w.id, 75);
+          totalPromoted += promoted;
+        } catch { /* non-fatal */ }
+      }));
+      if (totalPromoted > 0) console.log(`[startup] Promoted ${totalPromoted} pages to Tier 1.`);
+      console.log("[startup] Tier assignment complete.");
+    }
+  } catch (err) {
+    console.error("[startup] Tier assignment failed (non-fatal):", err);
+  }
+
   // Resume any background jobs that were interrupted by a server restart
   try {
     const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
