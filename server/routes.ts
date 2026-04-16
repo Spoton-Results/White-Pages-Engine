@@ -4430,7 +4430,15 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     }
 
     const progress = body.services.map(s => ({ service: s, status: "pending" as const, created: 0, updated: 0, skipped: 0, errors: 0 }));
-    const jobSettings = { ...body, progress };
+    // Resolve effective cluster count so the job card can display it accurately
+    let effectiveClusterCount = 1;
+    if (website.accountId) {
+      const allClusters = await storage.getQueryClusters(website.accountId);
+      effectiveClusterCount = (body.queryClusterIds && body.queryClusterIds.length > 0)
+        ? body.queryClusterIds.length
+        : (allClusters.length > 0 ? allClusters.length : 1);
+    }
+    const jobSettings = { ...body, progress, clusterCount: effectiveClusterCount };
 
     const job = await storage.createGenerationJob({
       accountId: website.accountId!,
