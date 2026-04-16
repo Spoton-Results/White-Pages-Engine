@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, Component, ReactNode } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
+import ClientReportPage from "@/pages/report";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: any) {
@@ -211,6 +212,9 @@ function Router() {
       </Route>
       <Route path="/bank-health">
         <AuthGuard><BankHealthPage /></AuthGuard>
+      </Route>
+      <Route path="/report/:token">
+        <ClientReportPage />
       </Route>
       <Route>
         <NotFound />

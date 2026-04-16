@@ -44,6 +44,7 @@ export const accounts = pgTable("accounts", {
   plan: accountPlanEnum("plan").notNull().default("starter"),
   status: accountStatusEnum("status").notNull().default("active"),
   clientStatus: varchar("client_status", { length: 20 }).notNull().default("active"),
+  reportToken: varchar("report_token", { length: 64 }),
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

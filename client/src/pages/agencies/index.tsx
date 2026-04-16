@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus, Copy, Pause, Archive, Play } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus, Copy, Pause, Archive, Play, Share2, RotateCcw } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +37,7 @@ export default function AgenciesPage() {
   const [statusTarget, setStatusTarget] = useState<{ account: any; newStatus: "active" | "paused" | "archived" } | null>(null);
   const [settingStatus, setSettingStatus] = useState(false);
   const [scorePromoting, setScorePromoting] = useState(false);
+  const [resetingToken, setResetingToken] = useState(false);
   const [agencyTab, setAgencyTab] = useState<"clients" | "jobs">("clients");
   const [bulkScoreProgress, setBulkScoreProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
   const [bulkSitemapProgress, setBulkSitemapProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
@@ -917,6 +918,53 @@ export default function AgenciesPage() {
                         >
                           <BarChart3 className="size-4" />{scorePromoting ? "Running…" : "Score & Promote All"}
                         </Button>
+                        {/* Share Report */}
+                        <div className="pt-1 border-t">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full justify-start gap-2 text-sm"
+                            data-testid={`action-share-report-${viewClient.id}`}
+                            onClick={async () => {
+                              const token = clientSummary.account?.reportToken ?? (viewClient as any).reportToken;
+                              if (!token) {
+                                toast({ title: "No report link", description: "Reset the link first to generate one.", variant: "destructive" });
+                                return;
+                              }
+                              const url = `${window.location.origin}/report/${token}`;
+                              try {
+                                await navigator.clipboard.writeText(url);
+                                toast({ title: "Report link copied!", description: url });
+                              } catch {
+                                toast({ title: "Report link", description: url });
+                              }
+                            }}
+                          >
+                            <Share2 className="size-4 text-primary" />Share Client Report
+                          </Button>
+                          <button
+                            className="w-full text-left text-xs text-muted-foreground hover:text-foreground mt-1.5 flex items-center gap-1.5 px-0.5"
+                            data-testid={`action-reset-report-token-${viewClient.id}`}
+                            disabled={resetingToken}
+                            onClick={async () => {
+                              if (!window.confirm("This will invalidate the existing report link and generate a new one. Continue?")) return;
+                              setResetingToken(true);
+                              try {
+                                await api.post(`/api/accounts/${viewClient.id}/report-token/reset`, {});
+                                await qc.invalidateQueries({ queryKey: ["/api/agencies", viewAgency?.id, "accounts"] });
+                                await qc.invalidateQueries({ queryKey: ["/api/accounts", viewClient.id, "client-summary"] });
+                                toast({ title: "Report link reset", description: "A new share link has been generated." });
+                              } catch (e: any) {
+                                toast({ title: "Error", description: e.message, variant: "destructive" });
+                              } finally {
+                                setResetingToken(false);
+                              }
+                            }}
+                          >
+                            <RotateCcw className={`size-3 ${resetingToken ? "animate-spin" : ""}`} />
+                            {resetingToken ? "Resetting…" : "Reset report link"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}

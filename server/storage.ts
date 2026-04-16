@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { randomBytes } from "crypto";
 import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte, isNull, lt, lte } from "drizzle-orm";
 import {
   agencies, accounts, users, brandProfiles, websites, locations, services, industries,
@@ -77,7 +78,11 @@ export async function getAccountBySlug(slug: string): Promise<Account | undefine
 }
 
 export async function createAccount(data: InsertAccount): Promise<Account> {
-  const [row] = await db.insert(accounts).values(data).returning();
+  const values = { ...data };
+  if (!values.reportToken) {
+    values.reportToken = randomBytes(16).toString("hex");
+  }
+  const [row] = await db.insert(accounts).values(values).returning();
   return row;
 }
 

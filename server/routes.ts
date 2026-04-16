@@ -1489,6 +1489,106 @@ Think about what customers search for when they need ${industry} services. Inclu
     return res.json(updated);
   });
 
+  // ── Client Report (public, token-based) ────────────────────────────────────
+
+  app.get("/api/report/:token", async (req: Request, res: Response) => {
+    const token = req.params.token as string;
+    if (!token || token.length < 16) return res.status(400).json({ error: "Invalid token" });
+
+    const { pool } = await import("./db");
+
+    const acctRes = await pool.query(
+      `SELECT id, name FROM accounts WHERE report_token = $1 LIMIT 1`,
+      [token]
+    );
+    if (acctRes.rows.length === 0) return res.status(404).json({ error: "Report not found" });
+    const { id: accountId, name: businessName } = acctRes.rows[0];
+
+    const wsRes = await pool.query(
+      `SELECT id, domain FROM websites WHERE account_id = $1 ORDER BY created_at LIMIT 1`,
+      [accountId]
+    );
+    const website = wsRes.rows[0] ?? null;
+    const websiteId = website?.id as string | undefined;
+    const domain = website?.domain ?? "";
+
+    let totalPages = 0, tier1Pages = 0, tier2Pages = 0;
+    let servicesCovered = 0;
+    let bankTotal = 0, bankFullyWritten = 0;
+    const topPages: Array<{ title: string; url: string; qualityScore: number | null; tier: number }> = [];
+    let sitemapExists = false;
+    let sitemapLastGenerated: string | null = null;
+
+    if (websiteId) {
+      const tierRes = await pool.query(
+        `SELECT tier, COUNT(*)::int AS cnt FROM pages WHERE website_id = $1 AND status = 'published' GROUP BY tier`,
+        [websiteId]
+      );
+      for (const row of tierRes.rows) {
+        totalPages += row.cnt;
+        if (row.tier === 1) tier1Pages = row.cnt;
+        else if (row.tier === 2) tier2Pages = row.cnt;
+      }
+
+      const svcRes = await pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM services WHERE account_id = $1`,
+        [accountId]
+      );
+      servicesCovered = svcRes.rows[0]?.cnt ?? 0;
+
+      const bankRes = await pool.query(
+        `SELECT COUNT(*)::int AS total,
+                COALESCE(SUM(CASE WHEN COALESCE(completeness_score, 0) >= 70 THEN 1 ELSE 0 END), 0)::int AS fully_written
+         FROM variation_bank_completeness WHERE website_id = $1`,
+        [websiteId]
+      );
+      bankTotal = bankRes.rows[0]?.total ?? 0;
+      bankFullyWritten = bankRes.rows[0]?.fully_written ?? 0;
+
+      const pagesRes = await pool.query(
+        `SELECT title, slug, quality_score, tier FROM pages
+         WHERE website_id = $1 AND status = 'published' AND quality_score IS NOT NULL
+         ORDER BY quality_score DESC LIMIT 10`,
+        [websiteId]
+      );
+      for (const row of pagesRes.rows) {
+        topPages.push({
+          title: row.title,
+          url: `https://${domain}/${row.slug}`,
+          qualityScore: row.quality_score,
+          tier: row.tier ?? 2,
+        });
+      }
+
+      const smRes = await pool.query(
+        `SELECT MAX(last_generated) AS last_generated, COUNT(*)::int AS cnt FROM sitemaps WHERE website_id = $1`,
+        [websiteId]
+      );
+      sitemapExists = (smRes.rows[0]?.cnt ?? 0) > 0;
+      sitemapLastGenerated = smRes.rows[0]?.last_generated ?? null;
+    }
+
+    return res.json({
+      businessName,
+      domain,
+      generatedAt: new Date().toISOString(),
+      stats: { totalPages, tier1Pages, tier2Pages, servicesCovered },
+      bankHealth: { totalServices: bankTotal, fullyWritten: bankFullyWritten, needsAttention: bankTotal - bankFullyWritten },
+      topPages,
+      sitemapStatus: { exists: sitemapExists, lastGenerated: sitemapLastGenerated },
+    });
+  });
+
+  app.post("/api/accounts/:accountId/report-token/reset", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+    const { randomBytes } = await import("crypto");
+    const newToken = randomBytes(16).toString("hex");
+    await storage.updateAccount(accountId, { reportToken: newToken } as any);
+    return res.json({ reportToken: newToken });
+  });
+
   // ── Users ─────────────────────────────────────────────────────────────────
 
   app.get("/api/accounts/:accountId/users", requireAuth, async (req: Request, res: Response) => {
