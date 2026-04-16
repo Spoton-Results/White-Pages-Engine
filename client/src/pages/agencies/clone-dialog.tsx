@@ -143,7 +143,7 @@ export function CloneDialog({ open, onClose, sourceAccountId, sourceAccountName,
 
   return (
     <Dialog open={open} onOpenChange={open => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-[500px]" aria-describedby={undefined}>
+      <DialogContent className="sm:max-w-[500px] max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none max-sm:max-h-[90dvh] overflow-y-auto" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Copy className="size-4 text-primary" />

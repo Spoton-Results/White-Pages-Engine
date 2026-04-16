@@ -201,7 +201,7 @@ export default function AgenciesPage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start sm:items-center justify-between gap-2">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Agencies</h1>
             <p className="text-muted-foreground text-sm mt-0.5">Manage agency partners and their client accounts.</p>
@@ -221,7 +221,7 @@ export default function AgenciesPage() {
           </Button>
         </div>
 
-        <div className="bg-card rounded-lg border overflow-hidden">
+        <div className="bg-card rounded-lg border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -315,7 +315,7 @@ export default function AgenciesPage() {
 
       {/* Create Agency Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none max-sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle>Create Agency</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(d => create.mutate(d))} className="space-y-4">
             <div className="space-y-1.5">
@@ -371,7 +371,7 @@ export default function AgenciesPage() {
 
       {/* Edit Agency Dialog */}
       <Dialog open={!!editAgency} onOpenChange={open => { if (!open) { setEditAgency(null); resetEdit(); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none max-sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Agency</DialogTitle></DialogHeader>
           <form onSubmit={handleEdit(d => update.mutate({ id: editAgency.id, data: d }))} className="space-y-4">
             <div className="space-y-1.5">
@@ -430,7 +430,7 @@ export default function AgenciesPage() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />
@@ -463,7 +463,7 @@ export default function AgenciesPage() {
 
       {/* View Agency Clients Panel */}
       <Sheet open={!!viewAgency} onOpenChange={open => { if (!open) { setViewAgency(null); setViewClient(null); setAgencyTab("clients"); setBulkScoreProgress(null); setBulkSitemapProgress(null); } }}>
-        <SheetContent className="w-[520px] sm:max-w-[520px] overflow-y-auto" aria-describedby={undefined}>
+        <SheetContent className="w-full sm:w-[520px] sm:max-w-[520px] overflow-y-auto" aria-describedby={undefined}>
           <SheetHeader>
             {!viewClient ? (
               <div className="flex items-center justify-between gap-2">
@@ -594,7 +594,7 @@ export default function AgenciesPage() {
             <>
               {/* ── Stats bar ── */}
               {agencyOverview ? (
-                <div className="mt-4 grid grid-cols-5 gap-2">
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     { label: "Clients", value: (agencyOverview as any).totalClients, cls: "" },
                     { label: "Total Pages", value: ((agencyOverview as any).totalPages ?? 0).toLocaleString(), cls: "" },
@@ -609,7 +609,7 @@ export default function AgenciesPage() {
                   ))}
                 </div>
               ) : (
-                <div className="mt-4 grid grid-cols-5 gap-2">
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
                 </div>
               )}
@@ -704,15 +704,15 @@ export default function AgenciesPage() {
                     return (
                       <div
                         key={acc.id}
-                        className={`p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors ${acc.clientStatus === "archived" ? "opacity-60" : ""}`}
+                        className={`p-3 rounded-lg border bg-card flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors min-h-[64px] ${acc.clientStatus === "archived" ? "opacity-60" : ""}`}
                         data-testid={`agency-client-${acc.id}`}
                         onClick={() => setViewClient(acc)}
                       >
-                        <div>
-                          <div className="font-medium text-sm">{acc.name}</div>
-                          <div className="text-xs text-muted-foreground font-mono mt-0.5">{acc.slug}</div>
+                        <div className="min-w-0 flex-1 mr-2">
+                          <div className="font-medium text-sm truncate">{acc.name}</div>
+                          <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">{acc.slug}</div>
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
                           {acc.clientStatus === "paused" && (
                             <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-200" data-testid={`client-status-${acc.id}`}>
                               <Pause className="size-2.5 mr-0.5" />Paused
@@ -860,8 +860,8 @@ export default function AgenciesPage() {
                     ) : (
                       <div className="text-xs text-muted-foreground italic">No website configured</div>
                     )}
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-mono">{viewClient.id}</span>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground overflow-hidden">
+                      <span className="font-mono truncate max-w-[140px] sm:max-w-none shrink">{viewClient.id}</span>
                       <Badge variant="secondary" className="text-xs">{viewClient.plan}</Badge>
                       <Badge variant="outline" className={`text-xs ${viewClient.status === "active" ? "bg-emerald-500/10 text-emerald-600 border-emerald-200" : "bg-muted text-muted-foreground"}`}>
                         {viewClient.status}
@@ -1059,7 +1059,7 @@ export default function AgenciesPage() {
 
       {statusTarget && (
         <Dialog open={!!statusTarget} onOpenChange={o => { if (!o && !settingStatus) setStatusTarget(null); }}>
-          <DialogContent aria-describedby={undefined}>
+          <DialogContent className="max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none overflow-y-auto" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>
                 {statusTarget.newStatus === "paused"
