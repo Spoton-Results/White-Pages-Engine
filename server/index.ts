@@ -171,11 +171,11 @@ app.use((req, res, next) => {
     const { getWebsites, bulkUpdatePageTiers } = await import("./storage");
     const allWebsites = await getWebsites();
     if (allWebsites.length > 0) {
-      console.log(`[startup] Applying Tier 1 threshold (75) to all scored pages...`);
+      console.log(`[startup] Applying Tier 1 threshold (80) to all scored pages...`);
       let totalPromoted = 0;
       await Promise.all(allWebsites.map(async w => {
         try {
-          const { promoted } = await bulkUpdatePageTiers(w.id, 75);
+          const { promoted } = await bulkUpdatePageTiers(w.id, 80);
           totalPromoted += promoted;
         } catch { /* non-fatal */ }
       }));

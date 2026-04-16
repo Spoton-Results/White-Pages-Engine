@@ -37,7 +37,7 @@ export interface AutomationSettings {
 export const DEFAULT_AUTOMATION_SETTINGS: AutomationSettings = {
   autoScoreAfterGeneration: true,
   autoAssignTiersAfterScoring: true,
-  tier1Threshold: 75,
+  tier1Threshold: 80,
   tier2Threshold: 55,
   applyTier3: false,
   sitemapRegenDebounceMinutes: 5,

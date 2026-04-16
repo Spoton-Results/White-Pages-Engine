@@ -7,6 +7,9 @@
  *   score >= minScoreForTier1 (default 80) → Tier 1  (Google Priority)
  *   score 55–79                            → Tier 2  (Live, Not Promoted)
  *   score < 55                             → Tier 3  (Hidden from Google)
+ *
+ * Factor 7 (locationPriority) awards full credit for any location target
+ * regardless of city size. Population is NOT a quality signal.
  */
 
 import type { ContentVariationBank } from "@shared/schema";
@@ -151,14 +154,14 @@ export function scorePageContent(
     isServicePriority === false ? 0 :
     Math.round(w.servicePriority * 0.5);
 
-  // 7. Location priority by city size — 10 pts
+  // 7. Location presence — 10 pts
+  // Full credit for any city or state target regardless of population.
+  // A page about "Plumber in Smalltown TX" has the same content quality as
+  // "Plumber in Houston TX" — city size is a business priority, not a quality signal.
+  // Partial credit only when no location data is passed at all.
   const locationPriority =
-    population === undefined    ? Math.round(w.locationPriority * 0.4) :
-    population >= 500_000       ? w.locationPriority :
-    population >= 100_000       ? Math.round(w.locationPriority * 0.8) :
-    population >= 50_000        ? Math.round(w.locationPriority * 0.6) :
-    population >= 10_000        ? Math.round(w.locationPriority * 0.4) :
-                                  Math.round(w.locationPriority * 0.2);
+    population !== undefined ? w.locationPriority :
+                               Math.round(w.locationPriority * 0.4);
 
   // 8. Internal link support — 5 pts
   const internalLinkSupport =
