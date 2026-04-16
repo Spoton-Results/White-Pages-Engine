@@ -38,13 +38,15 @@ export default function BulkGeneratorPage() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
   const [cycleBlueprints, setCycleBlueprints] = useState(true);
+  const [runBothLocations, setRunBothLocations] = useState(false);
   const [showBlueprintList, setShowBlueprintList] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const lastCityIdx = useRef<number | null>(null);
   const lastStateIdx = useRef<number | null>(null);
-  const bpQueueRef = useRef<string[]>([]);
+  type QueueItem = { bpId: string; locPayload: object; label: string };
+  const bpQueueRef = useRef<QueueItem[]>([]);
   const bpQueueIdxRef = useRef(0);
-  const [bpQueueDisplay, setBpQueueDisplay] = useState({ idx: 0, total: 1 });
+  const [bpQueueDisplay, setBpQueueDisplay] = useState({ idx: 0, total: 1, label: "" });
   const accumulatedRef = useRef({ created: 0, skipped: 0, errors: 0 });
   const [serviceProgress, setServiceProgress] = useState<Array<{ service: string; status: "pending" | "running" | "done" | "error" | "no-bank"; created: number; updated: number; skipped: number; errors: number }>>([]);
   const [activeJobId, setActiveJobId] = useState<string>("");
@@ -119,13 +121,14 @@ export default function BulkGeneratorPage() {
       }
       const nextIdx = bpQueueIdxRef.current + 1;
       if (nextIdx < bpQueueRef.current.length) {
-        // Start next blueprint in the queue
+        // Start next item in the queue
         bpQueueIdxRef.current = nextIdx;
-        setBpQueueDisplay({ idx: nextIdx, total: bpQueueRef.current.length });
+        const nextItem = bpQueueRef.current[nextIdx];
+        setBpQueueDisplay({ idx: nextIdx, total: bpQueueRef.current.length, label: nextItem.label });
         const svcNames: string[] = (job.settings?.services as string[]) ?? [];
         setServiceProgress(svcNames.map(s => ({ service: s, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 })));
         setActiveJobId("");
-        submitJobForBlueprint(bpQueueRef.current[nextIdx]);
+        submitJobForBlueprint(nextItem);
       } else {
         // All blueprints done
         setIsRunningAll(false);
@@ -185,29 +188,32 @@ export default function BulkGeneratorPage() {
     if (defaultId) setBlueprintId(defaultId);
   }, [selectedWebsite?.id]);
 
-  function buildLocationPayload() {
-    if (mode === "all_states") {
-      if (dbStates.length > 0) {
-        const uniqueCodes = Array.from(new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)));
-        return { mode: "specific_states", states: uniqueCodes };
-      }
-      return { mode: "all_states" };
-    } else if (mode === "specific_states") {
-      return { mode: "specific_states", states: Array.from(selectedStateCodes) };
-    } else {
-      const cityObjs = Array.from(selectedCitySlugs).map(slug => {
-        const loc = dbCities.find((l: any) => l.slug === slug);
-        return loc ? { name: loc.name, stateAbbr: loc.stateCode } : null;
-      }).filter(Boolean);
-      return { mode: "specific_cities", cities: cityObjs };
-    }
+  function buildCityPayload() {
+    const cityObjs = Array.from(selectedCitySlugs).map(slug => {
+      const loc = dbCities.find((l: any) => l.slug === slug);
+      return loc ? { name: loc.name, stateAbbr: loc.stateCode } : null;
+    }).filter(Boolean);
+    return { mode: "specific_cities", cities: cityObjs };
   }
 
-  async function submitJobForBlueprint(bpId: string) {
+  function buildStatePayload() {
+    const uniqueCodes = Array.from(new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)));
+    return uniqueCodes.length > 0
+      ? { mode: "specific_states", states: uniqueCodes }
+      : { mode: "all_states" };
+  }
+
+  function buildLocationPayload() {
+    if (mode === "all_states") return buildStatePayload();
+    if (mode === "specific_states") return { mode: "specific_states", states: Array.from(selectedStateCodes) };
+    return buildCityPayload();
+  }
+
+  async function submitJobForBlueprint(item: { bpId: string; locPayload: object }) {
     try {
       const svcs = Array.from(selectedServices);
-      const payload: any = { services: svcs, ...buildLocationPayload(), overwrite };
-      if (bpId) payload.blueprintId = bpId;
+      const payload: any = { services: svcs, ...item.locPayload, overwrite };
+      if (item.bpId) payload.blueprintId = item.bpId;
       if (selectedClusterIds.size > 0) payload.queryClusterIds = Array.from(selectedClusterIds);
       const data: any = await apiFetch(`/api/websites/${websiteId}/bulk-generate-job`, {
         method: "POST",
@@ -225,15 +231,28 @@ export default function BulkGeneratorPage() {
     const svcs = Array.from(selectedServices);
     if (svcs.length === 0) return;
 
-    // Build the blueprint queue: all blueprints when cycling, else just the selected one
-    const queue = cycleBlueprints && blueprints.length > 1
+    const bpIds = cycleBlueprints && blueprints.length > 1
       ? blueprints.map((bp: any) => bp.id)
       : [blueprintId];
+
+    const cityPayload = buildCityPayload();
+    const statePayload = buildStatePayload();
+    const currentPayload = buildLocationPayload();
+
+    // Build full queue: if runBothLocations, do states pass then cities pass
+    let queue: Array<{ bpId: string; locPayload: object; label: string }>;
+    if (runBothLocations) {
+      const stateItems = bpIds.map((id, i) => ({ bpId: id, locPayload: statePayload, label: `State pages — Blueprint ${i + 1} of ${bpIds.length}` }));
+      const cityItems  = bpIds.map((id, i) => ({ bpId: id, locPayload: cityPayload,  label: `City pages — Blueprint ${i + 1} of ${bpIds.length}` }));
+      queue = [...stateItems, ...cityItems];
+    } else {
+      queue = bpIds.map((id, i) => ({ bpId: id, locPayload: currentPayload, label: `Blueprint ${i + 1} of ${bpIds.length}` }));
+    }
 
     bpQueueRef.current = queue;
     bpQueueIdxRef.current = 0;
     accumulatedRef.current = { created: 0, skipped: 0, errors: 0 };
-    setBpQueueDisplay({ idx: 0, total: queue.length });
+    setBpQueueDisplay({ idx: 0, total: queue.length, label: queue[0].label });
 
     setLastResult(null);
     setActiveJobId("");
@@ -244,8 +263,10 @@ export default function BulkGeneratorPage() {
 
     if (queue.length > 1) {
       toast({
-        title: `Running ${queue.length} blueprints in sequence`,
-        description: "Each blueprint will start automatically when the previous one finishes.",
+        title: `Running ${queue.length} jobs in sequence`,
+        description: runBothLocations
+          ? `${bpIds.length} blueprints × state pages, then ${bpIds.length} blueprints × city pages — all automatic.`
+          : "Each blueprint will start automatically when the previous one finishes.",
       });
     } else {
       toast({
@@ -861,6 +882,26 @@ export default function BulkGeneratorPage() {
                 </div>
               )}
 
+              {/* Both locations toggle */}
+              <div className="pt-1 border-t">
+                <div className={`rounded-md border px-3 py-2.5 transition-colors ${runBothLocations ? "border-purple-300 bg-purple-50" : "border-slate-200 bg-slate-50"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-run-both-locations">
+                    <Checkbox
+                      checked={runBothLocations}
+                      onCheckedChange={v => setRunBothLocations(!!v)}
+                      data-testid="checkbox-run-both-locations"
+                    />
+                    <Repeat2 className={`size-3.5 ${runBothLocations ? "text-purple-600" : "text-muted-foreground"}`} />
+                    <span className="text-sm font-semibold">Generate both state pages AND city pages</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground mt-1 ml-6">
+                    {runBothLocations
+                      ? `Runs all ${cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1} blueprint(s) × 50 states first, then the same blueprint(s) × all selected cities — fully automatic.`
+                      : "Currently only generating the location type selected above. Enable this to also generate the other location type automatically."}
+                  </p>
+                </div>
+              </div>
+
               {/* Options */}
               <div className="pt-1 border-t">
                 <div className={`rounded-md border px-3 py-2.5 transition-colors ${overwrite ? "border-blue-300 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
@@ -894,13 +935,20 @@ export default function BulkGeneratorPage() {
               <CardDescription>
                 {(() => {
                   const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
-                  const totalEst = estimatedPages * bpCount;
+                  const stateCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                  const statePagesPerBp = selectedServices.size * clusterCountForEstimate * stateCount;
+                  const cityPagesPerBp = estimatedPages;
+                  const totalEst = runBothLocations
+                    ? (statePagesPerBp + cityPagesPerBp) * bpCount
+                    : estimatedPages * bpCount;
                   return (
                     <>
                       Will {overwrite ? "create or update" : "create up to"} <strong>{totalEst.toLocaleString()}</strong> pages
-                      {bpCount > 1
-                        ? <> across <strong>{bpCount} blueprints</strong> ({estimatedPages.toLocaleString()} per blueprint: {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
-                        : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
+                      {runBothLocations
+                        ? <> across <strong>{bpCount * 2} jobs</strong> ({bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {stateCount} states + {bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} cities)</>
+                        : bpCount > 1
+                          ? <> across <strong>{bpCount} blueprints</strong> ({estimatedPages.toLocaleString()} per blueprint: {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
+                          : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
                       } — zero AI calls, instant.
                       {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
                       {blueprintDedupesCities && (
@@ -927,8 +975,14 @@ export default function BulkGeneratorPage() {
                     {(() => {
                       if (isRunningAll) return <><Loader2 className="size-4 animate-spin" /> Running in background...</>;
                       const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
-                      const totalEst = estimatedPages * bpCount;
-                      return <><Play className="size-4" /> Generate {totalEst.toLocaleString()} Pages{bpCount > 1 ? ` (${bpCount} blueprints)` : ""}</>;
+                      const stateCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                      const totalEst = runBothLocations
+                        ? (selectedServices.size * clusterCountForEstimate * stateCount + estimatedPages) * bpCount
+                        : estimatedPages * bpCount;
+                      const suffix = runBothLocations
+                        ? ` (${bpCount * 2} jobs: states + cities)`
+                        : bpCount > 1 ? ` (${bpCount} blueprints)` : "";
+                      return <><Play className="size-4" /> Generate {totalEst.toLocaleString()} Pages{suffix}</>;
                     })()}
                   </Button>
                 </div>
@@ -936,14 +990,14 @@ export default function BulkGeneratorPage() {
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <Loader2 className="size-3 animate-spin" />
                     {bpQueueDisplay.total > 1
-                      ? `Blueprint ${bpQueueDisplay.idx + 1} of ${bpQueueDisplay.total}: ${blueprints[bpQueueDisplay.idx]?.name ?? "…"} — next will start automatically.`
+                      ? `Job ${bpQueueDisplay.idx + 1} of ${bpQueueDisplay.total}: ${bpQueueDisplay.label} — next starts automatically.`
                       : "Running on server — you can close this tab or switch apps and come back later. Progress updates every 2 s."}
                   </p>
                 )}
                 {isRunningAll && bpQueueDisplay.total > 1 && (
                   <div className="flex flex-wrap gap-1.5">
-                    {blueprints.map((bp: any, i: number) => (
-                      <span key={bp.id} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${
+                    {bpQueueRef.current.map((item, i) => (
+                      <span key={`${item.bpId}-${i}`} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${
                         i < bpQueueDisplay.idx ? "bg-green-50 border-green-200 text-green-700" :
                         i === bpQueueDisplay.idx ? "bg-primary/10 border-primary text-primary font-medium" :
                         "bg-muted border-border text-muted-foreground"
@@ -951,7 +1005,7 @@ export default function BulkGeneratorPage() {
                         {i < bpQueueDisplay.idx && <CheckCircle2 className="size-3" />}
                         {i === bpQueueDisplay.idx && <Loader2 className="size-3 animate-spin" />}
                         {i > bpQueueDisplay.idx && <span className="size-3 flex items-center justify-center text-[10px] font-bold">{i + 1}</span>}
-                        {bp.name}
+                        {item.label}
                       </span>
                     ))}
                   </div>
