@@ -1268,6 +1268,153 @@ Think about what customers search for when they need ${industry} services. Inclu
     return res.json({ success: true, steps, accountId, websiteId, brandProfileId });
   });
 
+  // ── Clone Client ───────────────────────────────────────────────────────────
+
+  app.get("/api/accounts/:accountId/clone-summary", requireAuth, async (req: Request, res: Response) => {
+    const sourceAccountId = req.params.accountId as string;
+    const { pool } = await import("./db");
+
+    const [srcServices, srcClusters, srcBlueprints] = await Promise.all([
+      storage.getServices(sourceAccountId),
+      storage.getQueryClusters(sourceAccountId),
+      storage.getBlueprints(sourceAccountId),
+    ]);
+
+    const wsRes = await pool.query(
+      "SELECT id FROM websites WHERE account_id = $1 ORDER BY created_at LIMIT 1",
+      [sourceAccountId]
+    );
+    const srcWebsiteId = wsRes.rows[0]?.id as string | undefined;
+    const bankServices = srcWebsiteId
+      ? await storage.getVariationBankServices(srcWebsiteId)
+      : [];
+
+    return res.json({
+      services: srcServices.length,
+      queryClusters: srcClusters.length,
+      blueprints: srcBlueprints.length,
+      variationBankServices: bankServices.length,
+    });
+  });
+
+  app.post("/api/accounts/:accountId/clone", requireAuth, async (req: Request, res: Response) => {
+    const sourceAccountId = req.params.accountId as string;
+    const {
+      agencyId,
+      businessName,
+      domain,
+      cloneServices: doSvc = true,
+      cloneQueryClusters: doQc = true,
+      cloneBlueprints: doBp = true,
+      cloneVariationBanks: doVb = true,
+    } = req.body;
+
+    if (!businessName || !domain) {
+      return res.status(400).json({ message: "businessName and domain are required" });
+    }
+
+    const { pool } = await import("./db");
+
+    // ── Read source data (never modified) ─────────────────────────────────
+    const [srcServices, srcClusters, srcBlueprints, srcBrandProfiles] = await Promise.all([
+      storage.getServices(sourceAccountId),
+      storage.getQueryClusters(sourceAccountId),
+      storage.getBlueprints(sourceAccountId),
+      storage.getBrandProfiles(sourceAccountId),
+    ]);
+
+    const wsRes = await pool.query(
+      "SELECT id FROM websites WHERE account_id = $1 ORDER BY created_at LIMIT 1",
+      [sourceAccountId]
+    );
+    const srcWebsiteId = wsRes.rows[0]?.id as string | undefined;
+
+    // ── Step 1: Create account ─────────────────────────────────────────────
+    const base = businessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const newAccount = await storage.createAccount({
+      name: businessName,
+      slug: `${base}-${Date.now().toString(36)}`,
+      agencyId,
+      plan: "starter",
+      status: "active",
+    });
+
+    // ── Step 2: Create website ─────────────────────────────────────────────
+    const newWebsite = await storage.createWebsite({
+      accountId: newAccount.id,
+      name: businessName,
+      domain,
+      status: "paused",
+    });
+
+    // ── Step 3: Brand profile (copy structure, new name) ──────────────────
+    const srcBp = srcBrandProfiles[0];
+    const newBrandProfile = await storage.createBrandProfile({
+      accountId: newAccount.id,
+      name: businessName,
+      primaryColor: srcBp?.primaryColor ?? "#2563eb",
+      tagline: srcBp?.tagline ?? "",
+      description: srcBp?.description ?? "",
+      voiceAndTone: srcBp?.voiceAndTone ?? "",
+      logoUrl: srcBp?.logoUrl ?? undefined,
+    });
+    await storage.updateWebsite(newWebsite.id, { brandProfileId: newBrandProfile.id });
+
+    // ── Step 4: Services ──────────────────────────────────────────────────
+    const serviceIdMap: Record<string, string> = {};
+    if (doSvc) {
+      for (const svc of srcServices) {
+        const { id: _id, createdAt: _ca, accountId: _ai, ...rest } = svc as any;
+        const newSvc = await storage.createService({ ...rest, accountId: newAccount.id });
+        serviceIdMap[svc.id] = newSvc.id;
+      }
+    }
+
+    // ── Step 5: Query clusters ────────────────────────────────────────────
+    if (doQc) {
+      for (const qc of srcClusters) {
+        const { id: _id, createdAt: _ca, accountId: _ai, serviceId: _si, ...rest } = qc as any;
+        const remappedServiceId = _si ? (serviceIdMap[_si] ?? null) : null;
+        await storage.createQueryCluster({
+          ...rest,
+          accountId: newAccount.id,
+          serviceId: remappedServiceId,
+        });
+      }
+    }
+
+    // ── Step 6: Blueprints ────────────────────────────────────────────────
+    if (doBp) {
+      for (const bp of srcBlueprints) {
+        const { id: _id, createdAt: _ca, updatedAt: _ua, accountId: _ai, websiteId: _wi, ...rest } = bp as any;
+        await storage.createBlueprint({
+          ...rest,
+          accountId: newAccount.id,
+          websiteId: newWebsite.id,
+        });
+      }
+    }
+
+    // ── Step 7: Variation banks ───────────────────────────────────────────
+    if (doVb && srcWebsiteId) {
+      const bankRows = await pool.query(
+        "SELECT service, section_name, variations FROM content_variation_banks WHERE website_id = $1",
+        [srcWebsiteId]
+      );
+      for (const row of bankRows.rows) {
+        await storage.createVariationBank({
+          accountId: newAccount.id,
+          websiteId: newWebsite.id,
+          service: row.service,
+          sectionName: row.section_name,
+          variations: row.variations,
+        });
+      }
+    }
+
+    return res.json({ success: true, accountId: newAccount.id, websiteId: newWebsite.id });
+  });
+
   // ── Accounts ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {

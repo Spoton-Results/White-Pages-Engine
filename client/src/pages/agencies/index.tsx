@@ -9,13 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus, Copy } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
+import { CloneDialog } from "./clone-dialog";
 
 export default function AgenciesPage() {
   const qc = useQueryClient();
@@ -31,6 +32,7 @@ export default function AgenciesPage() {
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue } = useForm<any>();
 
   const [viewClient, setViewClient] = useState<any>(null);
+  const [cloneTarget, setCloneTarget] = useState<any>(null);
   const [scorePromoting, setScorePromoting] = useState(false);
   const [agencyTab, setAgencyTab] = useState<"clients" | "jobs">("clients");
   const [bulkScoreProgress, setBulkScoreProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
@@ -497,7 +499,7 @@ export default function AgenciesPage() {
                   <ChevronRight className="size-3" />
                   <span className="text-foreground font-medium">{viewClient.name}</span>
                 </div>
-                <SheetTitle className="flex items-center gap-2">
+                <SheetTitle className="flex items-center gap-2 flex-wrap">
                   <button
                     className="p-1 rounded hover:bg-muted transition-colors"
                     onClick={() => setViewClient(null)}
@@ -505,7 +507,16 @@ export default function AgenciesPage() {
                   >
                     <ChevronLeft className="size-4" />
                   </button>
-                  {viewClient.name}
+                  <span className="flex-1 min-w-0">{viewClient.name}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs h-7"
+                    onClick={() => setCloneTarget(viewClient)}
+                    data-testid="button-clone-client"
+                  >
+                    <Copy className="size-3" />Clone Setup
+                  </Button>
                 </SheetTitle>
               </div>
             )}
@@ -832,6 +843,16 @@ export default function AgenciesPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {cloneTarget && viewAgency && (
+        <CloneDialog
+          open={!!cloneTarget}
+          onClose={() => setCloneTarget(null)}
+          sourceAccountId={cloneTarget.id}
+          sourceAccountName={cloneTarget.name}
+          agencyId={viewAgency.id}
+        />
+      )}
     </DashboardLayout>
   );
 }
