@@ -37,7 +37,7 @@ export default function BulkGeneratorPage() {
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[]; warning?: string } | null>(null);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
-  const [cycleBlueprints, setCycleBlueprints] = useState(false);
+  const [cycleBlueprints, setCycleBlueprints] = useState(true);
   const [showBlueprintList, setShowBlueprintList] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const lastCityIdx = useRef<number | null>(null);
@@ -516,18 +516,6 @@ export default function BulkGeneratorPage() {
                         )}
                       </div>
                     )}
-                    {blueprints.length > 1 && (
-                      <label className="flex items-center gap-2.5 cursor-pointer w-fit mt-1" data-testid="label-cycle-blueprints">
-                        <Checkbox
-                          checked={cycleBlueprints}
-                          onCheckedChange={v => setCycleBlueprints(!!v)}
-                          data-testid="checkbox-cycle-blueprints"
-                        />
-                        <Repeat2 className="size-3.5 text-muted-foreground" />
-                        <span className="text-sm">Run all {blueprints.length} blueprints in sequence</span>
-                        <span className="text-xs text-muted-foreground">(auto-advances to next when each job finishes)</span>
-                      </label>
-                    )}
                     {!selectedWebsite?.settings?.defaultBlueprintId && !cycleBlueprints && (
                       <p className="text-xs text-muted-foreground">Tip: Set a default blueprint in Website Settings so it's always pre-selected.</p>
                     )}
@@ -886,16 +874,47 @@ export default function BulkGeneratorPage() {
                 Generate Pages
               </CardTitle>
               <CardDescription>
-                Will {overwrite ? "create or update" : "create up to"} <strong>{estimatedPages.toLocaleString()}</strong> pages ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""}) — zero AI calls, instant.
-                {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
-                {blueprintDedupesCities && (
-                  <span className="block mt-1.5 text-amber-700 font-medium">
-                    ⚠ This blueprint uses a state-level slug (no {"{location}"} placeholder). Your {targetCount.toLocaleString()} selected cities cover {uniqueStateCountFromCities} unique states — the generator will create {uniqueStateCountFromCities} state pages per service/cluster, not city pages. To generate city-level pages, select a blueprint whose slug contains {"{location}"} or {"{city}"}.
-                  </span>
-                )}
+                {(() => {
+                  const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
+                  const totalEst = estimatedPages * bpCount;
+                  return (
+                    <>
+                      Will {overwrite ? "create or update" : "create up to"} <strong>{totalEst.toLocaleString()}</strong> pages
+                      {bpCount > 1
+                        ? <> across <strong>{bpCount} blueprints</strong> ({estimatedPages.toLocaleString()} per blueprint: {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
+                        : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
+                      } — zero AI calls, instant.
+                      {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
+                      {blueprintDedupesCities && (
+                        <span className="block mt-1.5 text-amber-700 font-medium">
+                          ⚠ This blueprint uses a state-level slug (no {"{location}"} placeholder). Your {targetCount.toLocaleString()} selected cities cover {uniqueStateCountFromCities} unique states — the generator will create {uniqueStateCountFromCities} state pages per service/cluster, not city pages. To generate city-level pages, select a blueprint whose slug contains {"{location}"} or {"{city}"}.
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+
+              {blueprints.length > 1 && (
+                <div className={`rounded-md border px-3 py-2.5 transition-colors ${cycleBlueprints ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer w-fit" data-testid="label-cycle-blueprints">
+                    <Checkbox
+                      checked={cycleBlueprints}
+                      onCheckedChange={v => setCycleBlueprints(!!v)}
+                      data-testid="checkbox-cycle-blueprints"
+                    />
+                    <Repeat2 className={`size-3.5 ${cycleBlueprints ? "text-blue-600" : "text-muted-foreground"}`} />
+                    <span className="text-sm font-semibold">Run all {blueprints.length} blueprints in sequence</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground mt-1 ml-6">
+                    {cycleBlueprints
+                      ? `Each blueprint runs one after the other automatically — no manual restarts needed. Each creates its own job you can monitor in Generation Jobs.`
+                      : "Only the selected blueprint above will run. Check this to run all blueprints automatically in sequence."}
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
@@ -906,9 +925,12 @@ export default function BulkGeneratorPage() {
                     data-testid="button-generate"
                     className="gap-2"
                   >
-                    {isRunningAll
-                      ? <><Loader2 className="size-4 animate-spin" /> Running in background...</>
-                      : <><Play className="size-4" /> Generate {estimatedPages.toLocaleString()} Pages</>}
+                    {(() => {
+                      if (isRunningAll) return <><Loader2 className="size-4 animate-spin" /> Running in background...</>;
+                      const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
+                      const totalEst = estimatedPages * bpCount;
+                      return <><Play className="size-4" /> Generate {totalEst.toLocaleString()} Pages{bpCount > 1 ? ` (${bpCount} blueprints)` : ""}</>;
+                    })()}
                   </Button>
                 </div>
                 {isRunningAll && activeJobId && (
