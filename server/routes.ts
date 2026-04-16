@@ -1013,6 +1013,261 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.send([header, ...rows].join("\n"));
   });
 
+  // ── Agency Onboarding Wizard ───────────────────────────────────────────────
+
+  app.post("/api/agencies/:agencyId/wizard/suggest-services", requireAuth, async (req: Request, res: Response) => {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });
+    const { businessName, industry } = req.body;
+    if (!businessName || !industry) return res.status(400).json({ message: "businessName and industry are required" });
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const prompt = `You are an expert local SEO strategist. Generate exactly 15 distinct services for a ${industry} business named "${businessName}".
+
+Think about what customers search for when they need ${industry} services. Include a mix of core services, specialty services, and emergency/seasonal services. Return ONLY a JSON array of exactly 15 objects with no markdown, no code fences:
+[{"name":"Service Name","slug":"service-slug","description":"1-2 sentence customer-facing description.","keywords":["kw1","kw2","kw3","kw4"]}]`;
+      const message = await ai.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 3500,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const raw = message.content[0].type === "text" ? message.content[0].text : "";
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (!match) return res.status(500).json({ message: "Claude did not return valid JSON" });
+      return res.json(JSON.parse(match[0]));
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message || "Service suggestion failed" });
+    }
+  });
+
+  app.post("/api/agencies/:agencyId/wizard/launch", requireAuth, async (req: Request, res: Response) => {
+    const agencyId = req.params.agencyId as string;
+    const {
+      businessName, domain, industry, primaryCity, primaryState,
+      brandColor, tagline,
+      selectedServices = [],
+      selectedStates = [],
+      cityTiers = [1, 2],
+      retryFromStep = 1,
+      previousData = {},
+    } = req.body;
+
+    if (!businessName || !domain) return res.status(400).json({ message: "businessName and domain are required" });
+
+    const STATE_MAP: Record<string, string> = {
+      AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+      CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+      HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+      KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+      MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+      MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+      NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+      OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+      SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+      VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+    };
+
+    const STANDARD_SECTIONS = [
+      { id: "intro", type: "intro", enabled: true },
+      { id: "how_it_works", type: "how_it_works", enabled: true },
+      { id: "benefits", type: "benefits", enabled: true },
+      { id: "faq", type: "faq", enabled: true },
+      { id: "cta", type: "cta", enabled: true },
+    ];
+
+    const steps: any[] = [];
+    let accountId: string | undefined = previousData.accountId;
+    let websiteId: string | undefined = previousData.websiteId;
+    let brandProfileId: string | undefined = previousData.brandProfileId;
+
+    // Step 1: Create account
+    if (retryFromStep <= 1) {
+      try {
+        const base = businessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const account = await storage.createAccount({
+          name: businessName,
+          slug: `${base}-${Date.now().toString(36)}`,
+          agencyId,
+          plan: "starter",
+          status: "active",
+        });
+        accountId = account.id;
+        steps.push({ step: 1, name: "Create account", success: true, data: { accountId } });
+      } catch (err: any) {
+        steps.push({ step: 1, name: "Create account", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 1, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 1, name: "Create account", success: true, skipped: true, data: { accountId } });
+    }
+
+    // Step 2: Create website
+    if (retryFromStep <= 2) {
+      try {
+        const website = await storage.createWebsite({
+          accountId: accountId!,
+          name: businessName,
+          domain,
+          primaryIndustry: industry,
+          status: "paused",
+          settings: { cityTiers, primaryCity, primaryState },
+        });
+        websiteId = website.id;
+        steps.push({ step: 2, name: "Create website", success: true, data: { websiteId } });
+      } catch (err: any) {
+        steps.push({ step: 2, name: "Create website", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 2, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 2, name: "Create website", success: true, skipped: true, data: { websiteId } });
+    }
+
+    // Step 3: Create brand profile and link to website
+    if (retryFromStep <= 3) {
+      try {
+        const bp = await storage.createBrandProfile({
+          accountId: accountId!,
+          name: businessName,
+          primaryColor: brandColor || "#2563eb",
+          tagline: tagline || "",
+          description: `${businessName} — professional ${industry} services.`,
+        });
+        brandProfileId = bp.id;
+        await storage.updateWebsite(websiteId!, { brandProfileId });
+        steps.push({ step: 3, name: "Write brand profile", success: true, data: { brandProfileId } });
+      } catch (err: any) {
+        steps.push({ step: 3, name: "Write brand profile", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 3, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 3, name: "Write brand profile", success: true, skipped: true, data: { brandProfileId } });
+    }
+
+    // Step 4: Insert services
+    if (retryFromStep <= 4) {
+      try {
+        for (const svc of selectedServices) {
+          await storage.createService({
+            accountId: accountId!,
+            name: svc.name,
+            slug: svc.slug || svc.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+            description: svc.description || "",
+            keywords: svc.keywords || [],
+          });
+        }
+        steps.push({ step: 4, name: "Add services", success: true, data: { count: selectedServices.length } });
+      } catch (err: any) {
+        steps.push({ step: 4, name: "Add services", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 4, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 4, name: "Add services", success: true, skipped: true });
+    }
+
+    // Step 5: Insert state-level locations
+    if (retryFromStep <= 5) {
+      try {
+        if (selectedStates.length > 0) {
+          const stateItems = selectedStates.map((code: string) => {
+            const name = STATE_MAP[code] || code;
+            return {
+              type: "state" as const,
+              name,
+              slug: name.toLowerCase().replace(/\s+/g, "-"),
+              stateCode: code,
+              stateName: name,
+            };
+          });
+          await storage.bulkCreateLocations(accountId!, stateItems);
+        }
+        steps.push({ step: 5, name: "Set up locations", success: true, data: { states: selectedStates.length } });
+      } catch (err: any) {
+        steps.push({ step: 5, name: "Set up locations", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 5, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 5, name: "Set up locations", success: true, skipped: true });
+    }
+
+    // Step 6: Insert blueprints
+    if (retryFromStep <= 6) {
+      try {
+        const blueprintDefs = [
+          {
+            name: "Service City Pages",
+            pageType: "service_city" as const,
+            titleTemplate: "{{service}} in {{city}}, {{state}} | {{brandName}}",
+            metaDescTemplate: "Looking for {{service}} in {{city}}, {{state}}? {{brandName}} delivers expert results. Call today.",
+            h1Template: "{{service}} in {{city}}, {{state}}",
+            slugTemplate: "{{service-slug}}/{{city-slug}}-{{state-slug}}",
+          },
+          {
+            name: "State Hub Pages",
+            pageType: "state_hub" as const,
+            titleTemplate: "{{service}} in {{state}} | {{brandName}}",
+            metaDescTemplate: "Expert {{service}} services across {{state}}. {{brandName}} serves communities statewide.",
+            h1Template: "{{service}} Services in {{state}}",
+            slugTemplate: "{{service-slug}}/{{state-slug}}",
+          },
+          {
+            name: "Problem Intent Pages",
+            pageType: "problem_intent" as const,
+            titleTemplate: "Best {{service}} Near Me in {{city}} | {{brandName}}",
+            metaDescTemplate: "Need {{service}} near you in {{city}}, {{state}}? {{brandName}} is ready to help.",
+            h1Template: "Find {{service}} Near Me in {{city}}, {{state}}",
+            slugTemplate: "{{service-slug}}/near-me/{{city-slug}}",
+          },
+        ];
+        for (const def of blueprintDefs) {
+          await storage.createBlueprint({
+            ...def,
+            accountId: accountId!,
+            websiteId: websiteId!,
+            sections: STANDARD_SECTIONS,
+          });
+        }
+        steps.push({ step: 6, name: "Build blueprints", success: true, data: { count: blueprintDefs.length } });
+      } catch (err: any) {
+        steps.push({ step: 6, name: "Build blueprints", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 6, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 6, name: "Build blueprints", success: true, skipped: true });
+    }
+
+    // Step 7: Trigger variation bank writing
+    if (retryFromStep <= 7) {
+      try {
+        const allServices = await storage.getServices(accountId!);
+        if (allServices.length > 0) {
+          const brand = brandProfileId ? await storage.getBrandProfile(brandProfileId) : undefined;
+          const ctx = {
+            brandName: brand?.name,
+            brandDescription: brand?.description ?? undefined,
+            voiceAndTone: brand?.voiceAndTone ?? undefined,
+            industryName: industry,
+            industryDescription: undefined as string | undefined,
+          };
+          const { startBankWriteJob } = await import("./services/bank-write-background");
+          await startBankWriteJob(
+            websiteId!,
+            accountId!,
+            allServices.map((s: any) => ({ id: s.id, name: s.name })),
+            ctx,
+          );
+        }
+        steps.push({ step: 7, name: "Trigger variation banks", success: true });
+      } catch (err: any) {
+        steps.push({ step: 7, name: "Trigger variation banks", success: false, error: err.message });
+        return res.json({ success: false, failedStep: 7, steps, accountId, websiteId, brandProfileId });
+      }
+    } else {
+      steps.push({ step: 7, name: "Trigger variation banks", success: true, skipped: true });
+    }
+
+    return res.json({ success: true, steps, accountId, websiteId, brandProfileId });
+  });
+
   // ── Accounts ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {

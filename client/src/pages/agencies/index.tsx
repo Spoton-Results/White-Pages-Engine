@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Pencil, AlertTriangle, ChevronRight, Building2, RefreshCw, ChevronLeft, Activity, FileText, Globe, BarChart3, Zap, ListChecks, Download, TrendingUp, UserPlus } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -434,6 +434,14 @@ export default function AgenciesPage() {
                     {clientCountMap[viewAgency?.id] ?? 0} clients
                   </Badge>
                 </SheetTitle>
+                <Button
+                  size="sm"
+                  className="gap-1.5 h-8 text-xs shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => { setViewAgency(null); navigate(`/agencies/${viewAgency?.id}/onboard`); }}
+                  data-testid="button-add-new-client"
+                >
+                  <UserPlus className="size-3.5" />Add New Client
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs shrink-0" data-testid="button-bulk-actions">

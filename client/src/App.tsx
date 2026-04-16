@@ -64,6 +64,7 @@ import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
 import AutomationPage from "@/pages/automation";
 import AgenciesPage from "@/pages/agencies";
+import OnboardWizard from "@/pages/agencies/onboard";
 import NexusLandingPage from "@/pages/NexusLandingPage";
 import WelcomePage from "@/pages/WelcomePage";
 
@@ -141,6 +142,9 @@ function Router() {
       </Route>
       <Route path="/agencies">
         <AuthGuard><AgenciesPage /></AuthGuard>
+      </Route>
+      <Route path="/agencies/:agencyId/onboard">
+        <AuthGuard><OnboardWizard /></AuthGuard>
       </Route>
       <Route path="/accounts">
         <AuthGuard><AccountsPage /></AuthGuard>
