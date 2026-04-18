@@ -6376,6 +6376,22 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     }
   });
 
+  app.get("/api/admin/seed-test-onboarding", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const token = (req.query.token as string) || "test-token-live-check-001";
+      const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
+      await db.execute(sql`
+        INSERT INTO onboarding_submissions (id, token, stripe_session_id, plan_type, status, form_data, created_at)
+        VALUES (gen_random_uuid(), ${token}, 'cs_test_manual', 'local_launch', 'pending',
+          '{"customer_email":"test@example.com","customer_name":"Test User"}'::jsonb, now())
+        ON CONFLICT DO NOTHING
+      `);
+      return res.redirect(`https://${landingDomain}/onboard/${token}`);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/admin/duplicates/clear", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       const websiteId = String(req.body?.websiteId || "").trim();
