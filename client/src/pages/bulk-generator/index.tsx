@@ -1048,7 +1048,9 @@ export default function BulkGeneratorPage() {
                         : bpCount > 1 ? ` (${bpCount} blueprints)` : "";
                       return <><Play className="size-4" /> Generate {totalEst.toLocaleString()} Pages{suffix}</>;
                     })()}
-                  </Button>
+                      </Button>
+                    );
+                  })()}
                 </div>
                 {isRunningAll && activeJobId && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
