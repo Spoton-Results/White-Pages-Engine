@@ -5943,6 +5943,111 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     }
   });
 
+  // ── Public Onboarding (token-gated, no auth) ──────────────────────────────────
+
+  app.get("/api/onboard/lookup/:token", async (req: Request, res: Response) => {
+    const token = req.params.token;
+    if (!token || typeof token !== "string" || token.length < 8) {
+      return res.status(400).json({ error: "invalid_token" });
+    }
+    try {
+      const rows = await db
+        .select({
+          status: onboardingSubmissions.status,
+          planType: onboardingSubmissions.planType,
+          formData: onboardingSubmissions.formData,
+          submittedAt: onboardingSubmissions.submittedAt,
+        })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.token, token))
+        .limit(1);
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const r = rows[0];
+      return res.json({
+        status: r.status,
+        plan_type: r.planType,
+        form_data: r.formData,
+        submitted_at: r.submittedAt,
+      });
+    } catch (err: any) {
+      console.error("[onboard-lookup] error:", err?.message);
+      return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  app.post("/api/onboard/submit", async (req: Request, res: Response) => {
+    const body = req.body as {
+      token?: string;
+      business?: any;
+      services?: string[];
+      coverage?: any;
+    };
+    const { token, business, services, coverage } = body || {};
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "missing_token" });
+    }
+    if (!business || typeof business !== "object") {
+      return res.status(400).json({ error: "missing_business" });
+    }
+    if (!Array.isArray(services) || services.length < 3) {
+      return res.status(400).json({ error: "need_at_least_3_services" });
+    }
+    if (!coverage || typeof coverage !== "object") {
+      return res.status(400).json({ error: "missing_coverage" });
+    }
+    // Required business fields
+    const required = ["legal_name", "domain", "phone", "email", "city", "state", "industry"];
+    for (const k of required) {
+      if (!business[k] || typeof business[k] !== "string" || !business[k].trim()) {
+        return res.status(400).json({ error: `missing_business_${k}` });
+      }
+    }
+
+    try {
+      const rows = await db
+        .select({
+          id: onboardingSubmissions.id,
+          status: onboardingSubmissions.status,
+          existingFormData: onboardingSubmissions.formData,
+        })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.token, token))
+        .limit(1);
+      if (rows.length === 0) {
+        return res.status(400).json({ error: "invalid_token" });
+      }
+      const row = rows[0];
+      if (row.status !== "pending") {
+        return res.status(400).json({ error: "already_submitted", status: row.status });
+      }
+
+      // Merge so we keep customer_email/customer_name from the webhook
+      const merged = {
+        ...(row.existingFormData as Record<string, any> | null ?? {}),
+        business,
+        services,
+        coverage,
+      };
+
+      await db
+        .update(onboardingSubmissions)
+        .set({
+          formData: merged,
+          status: "submitted",
+          submittedAt: new Date(),
+        })
+        .where(dEq(onboardingSubmissions.token, token));
+
+      console.log(`[onboard-submit] token=${token.slice(0, 8)}… plan=${business.industry} services=${services.length}`);
+      return res.json({ success: true, message: "Onboarding submitted successfully" });
+    } catch (err: any) {
+      console.error("[onboard-submit] error:", err?.message);
+      return res.status(500).json({ error: "submit_failed" });
+    }
+  });
+
   // ── Stripe Checkout ───────────────────────────────────────────────────────────
 
   app.get("/api/stripe/config", (_req: Request, res: Response) => {
