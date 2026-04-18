@@ -6361,6 +6361,21 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
   // ═══════════════════════════════════════════════════════════════════════
 
   // Clear duplicate flags on selected pages (or all on a website)
+  app.post("/api/admin/create-test-onboarding", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const token = req.body?.token || "test-token-live-check-001";
+      await db.execute(sql`
+        INSERT INTO onboarding_submissions (id, token, stripe_session_id, plan_type, status, form_data, created_at)
+        VALUES (gen_random_uuid(), ${token}, 'cs_test_manual', 'local_launch', 'pending',
+          '{"customer_email":"test@example.com","customer_name":"Test User"}'::jsonb, now())
+        ON CONFLICT DO NOTHING
+      `);
+      return res.json({ ok: true, token, url: `/onboard/${token}` });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/admin/duplicates/clear", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       const websiteId = String(req.body?.websiteId || "").trim();
