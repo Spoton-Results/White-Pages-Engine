@@ -478,6 +478,32 @@ export default function NexusLandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
+  // ── Stripe config (which add-ons are purchasable) ───────────────────────────
+
+  const [addonSiteEnabled, setAddonSiteEnabled] = useState(false);
+  useEffect(() => {
+    fetch("/api/stripe/config")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && d.addonSiteEnabled) setAddonSiteEnabled(true); })
+      .catch(() => {});
+  }, []);
+  const [addonLoading, setAddonLoading] = useState(false);
+  const [addonErrored, setAddonErrored] = useState(false);
+  const handleAddonSiteClick = async () => {
+    if (addonLoading) return;
+    setAddonLoading(true);
+    setAddonErrored(false);
+    try {
+      const { url, error } = await createCheckoutSession("addonSite" as Tier);
+      if (error) { setAddonErrored(true); return; }
+      if (url) window.location.href = url;
+    } catch {
+      setAddonErrored(true);
+    } finally {
+      setAddonLoading(false);
+    }
+  };
+
   // ── Data ────────────────────────────────────────────────────────────────────
 
   const steps = [
@@ -1082,17 +1108,46 @@ export default function NexusLandingPage() {
                 gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                 gap: "12px 32px",
               }}>
-                {addOnItems.map((ao, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{
-                      fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                      fontSize: 13, color: "#a1a1aa",
-                    }}>
-                      {ao.label}{ao.detail ? ` (${ao.detail})` : ""}
-                    </span>
-                    <span className="nx-mono" style={{ fontSize: 13, color: "#3b82f6", whiteSpace: "nowrap" }}>{ao.price}</span>
-                  </div>
-                ))}
+                {addOnItems.map((ao, i) => {
+                  const isAddonSite = i === 0;
+                  return (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                        fontSize: 13, color: "#a1a1aa",
+                      }}>
+                        {ao.label}{ao.detail ? ` (${ao.detail})` : ""}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, whiteSpace: "nowrap" }}>
+                        <span className="nx-mono" style={{ fontSize: 13, color: "#3b82f6" }}>{ao.price}</span>
+                        {isAddonSite && addonSiteEnabled && (
+                          <button
+                            onClick={handleAddonSiteClick}
+                            disabled={addonLoading}
+                            data-testid="btn-stripe-addon-site"
+                            style={{
+                              padding: "4px 12px",
+                              fontSize: 12,
+                              fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                              fontWeight: 600,
+                              background: "transparent",
+                              color: addonErrored ? "#f87171" : "#fafafa",
+                              border: `1px solid ${addonErrored ? "#f87171" : "#3f3f46"}`,
+                              borderRadius: 6,
+                              cursor: addonLoading ? "default" : "pointer",
+                              opacity: addonLoading ? 0.6 : 1,
+                              transition: "border-color 120ms, color 120ms",
+                            }}
+                            onMouseEnter={e => { if (!addonLoading && !addonErrored) e.currentTarget.style.borderColor = "#71717a"; }}
+                            onMouseLeave={e => { if (!addonLoading && !addonErrored) e.currentTarget.style.borderColor = "#3f3f46"; }}
+                          >
+                            {addonLoading ? "Processing…" : addonErrored ? "Try again" : "Add site"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </FadeIn>

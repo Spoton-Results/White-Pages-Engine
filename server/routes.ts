@@ -5835,11 +5835,18 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   // ── Stripe Checkout ───────────────────────────────────────────────────────────
 
+  app.get("/api/stripe/config", (_req: Request, res: Response) => {
+    res.json({
+      addonSiteEnabled: !!process.env.STRIPE_PRICE_ADDON_SITE,
+    });
+  });
+
   app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
     const { tier } = req.body as { tier?: string };
     const priceIdMap: Record<string, string | undefined> = {
       bundle: process.env.STRIPE_PRICE_BUNDLE,
       pilot: process.env.STRIPE_PRICE_PILOT,
+      addonSite: process.env.STRIPE_PRICE_ADDON_SITE,
     };
     const priceId = tier ? priceIdMap[tier] : undefined;
     if (!priceId) {
