@@ -1,0 +1,52 @@
+Read AGENT_RULES.md before doing anything.
+TASK
+Add a monthly/annual billing toggle to the Growth Bundle pricing card on the spotonnexus.com landing page. The annual price already exists in Stripe. Do not touch any other sections or files.
+What to do
+
+Add a toggle switch above the three pricing cards, centered. It should say:
+
+Monthly          Annual (save $6,000/yr)
+The toggle should be a clean pill-shaped switcher. Monthly is the default selected state. When the user switches to Annual, the Growth Bundle card updates to show the annual pricing.
+
+When Monthly is selected (default):
+
+Growth Bundle card shows: $3,000 /mo
+Button says: Get Started — $3,000/mo
+Button uses STRIPE_PRICE_BUNDLE price ID
+
+
+When Annual is selected:
+
+Growth Bundle card shows: $2,500 /mo
+Add a small badge or line under the price that says: Billed monthly at annual rate — save $6,000/year
+Button says: Get Started — $2,500/mo
+Button uses STRIPE_PRICE_BUNDLE_ANNUAL price ID
+Remove the bullet point that currently says "Annual option: $2,500/mo" from the feature list since it is now shown through the toggle
+
+
+The Local Launch card does NOT change when the toggle is switched. It stays at $1,997/mo regardless. If you want, add a small muted line on the Local Launch card that says "Monthly only" so it is clear.
+The Enterprise card does NOT change when the toggle is switched. It stays as "Let's talk" with the booking button.
+Add support for a new environment variable: STRIPE_PRICE_BUNDLE_ANNUAL for the $2,500/mo annual commitment price ID.
+If STRIPE_PRICE_BUNDLE_ANNUAL is not set, do not show the toggle at all. The pricing section should display exactly as it does now with monthly pricing only. The toggle only appears when both price IDs are available.
+
+Toggle styling
+
+Pill-shaped toggle with two options: Monthly | Annual
+Active state: filled background with accent blue
+Inactive state: transparent with muted text
+Smooth transition animation on switch
+Match the dark theme of the page
+The "save $6,000/yr" text next to Annual should be in the emerald accent color to signal savings
+
+WHAT NOT TO DO
+
+Do not change any pricing amounts — $3,000 monthly and $2,500 annual are locked
+Do not add annual pricing to the Local Launch or Enterprise cards
+Do not change any other sections on the page
+Do not change any existing routes or Stripe integration logic
+Do not change any files outside the landing page
+
+
+Then add one environment variable in Replit Secrets:
+STRIPE_PRICE_BUNDLE_ANNUAL = price_xxxxxxxxxxxxxxxx
+Grab that price ID from the $2,500/mo price you already created under the Growth Bundle product in Stripe — it's the second price listed on that product.
