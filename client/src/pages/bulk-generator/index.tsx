@@ -222,14 +222,50 @@ export default function BulkGeneratorPage() {
       });
       setActiveJobId(data.jobId);
     } catch (err: any) {
+      // Stop the entire queue on rejection — don't keep firing rejected jobs
       setIsRunningAll(false);
-      toast({ title: "Failed to start job", description: err.message, variant: "destructive" });
+      bpQueueRef.current = [];
+      bpQueueIdxRef.current = 0;
+      const msg = err?.body?.message || err?.message || "Failed to start job";
+      toast({
+        title: err?.body?.error === "job_too_large" ? "Job too large" : "Failed to start job",
+        description: msg,
+        variant: "destructive",
+      });
     }
   }
+
+  // ── Per-job size cap (must match server MAX_PAGES_PER_JOB) ──────────────
+  const MAX_PAGES_PER_JOB = 25_000;
 
   async function runAllServices() {
     const svcs = Array.from(selectedServices);
     if (svcs.length === 0) return;
+
+    // ── Pre-flight per-job size check ────────────────────────────────────
+    // Each blueprint × location-pass is one job. Block if any single job
+    // would exceed the server-side per-job cap (avoid partial queue failures).
+    const stateCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+    const perJobState = svcs.length * clusterCountForEstimate * stateCount;
+    const perJobCity  = svcs.length * clusterCountForEstimate * effectiveTargetCount;
+    const passes: Array<{ label: string; size: number }> = [];
+    if (runBothLocations) {
+      passes.push({ label: "state pages", size: perJobState });
+      passes.push({ label: "city pages", size: perJobCity });
+    } else if (mode === "all_states" || mode === "specific_states") {
+      passes.push({ label: "state pages", size: svcs.length * clusterCountForEstimate * targetCount });
+    } else {
+      passes.push({ label: "city pages", size: perJobCity });
+    }
+    const oversized = passes.find(p => p.size > MAX_PAGES_PER_JOB);
+    if (oversized) {
+      toast({
+        title: "Per-job limit exceeded",
+        description: `Each blueprint's "${oversized.label}" pass would create ${oversized.size.toLocaleString()} pages, over the ${MAX_PAGES_PER_JOB.toLocaleString()} per-job limit. Reduce services, locations, or pick specific clusters. (Total pages across the website are unlimited — this is a per-job cap.)`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     const bpIds = cycleBlueprints && blueprints.length > 1
       ? blueprints.map((bp: any) => bp.id)
@@ -951,6 +987,21 @@ export default function BulkGeneratorPage() {
                           : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
                       } — zero AI calls, instant.
                       {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
+                      {(() => {
+                        const stCnt = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                        const sizes = runBothLocations
+                          ? [selectedServices.size * clusterCountForEstimate * stCnt, selectedServices.size * clusterCountForEstimate * effectiveTargetCount]
+                          : [selectedServices.size * clusterCountForEstimate * effectiveTargetCount];
+                        const maxJob = Math.max(0, ...sizes);
+                        if (maxJob > 25_000) {
+                          return (
+                            <span className="block mt-1.5 text-red-700 font-medium">
+                              ⚠ The largest single job in this run would be {maxJob.toLocaleString()} pages, over the 25,000 per-job limit. Reduce services, locations, or pick specific clusters. (Total pages across the website are unlimited — split into multiple jobs.)
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                       {blueprintDedupesCities && (
                         <span className="block mt-1.5 text-amber-700 font-medium">
                           ⚠ This blueprint uses a state-level slug (no {"{location}"} placeholder). Your {targetCount.toLocaleString()} selected cities cover {uniqueStateCountFromCities} unique states — the generator will create {uniqueStateCountFromCities} state pages per service/cluster, not city pages. To generate city-level pages, select a blueprint whose slug contains {"{location}"} or {"{city}"}.
@@ -965,13 +1016,26 @@ export default function BulkGeneratorPage() {
 
               <div className="flex flex-col gap-2">
                 <div className="flex gap-3">
-                  <Button
-                    size="lg"
-                    onClick={runAllServices}
-                    disabled={isRunningAll || targetCount === 0}
-                    data-testid="button-generate"
-                    className="gap-2"
-                  >
+                  {(() => {
+                    const stCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                    const perJobSizes: number[] = [];
+                    if (runBothLocations) {
+                      perJobSizes.push(selectedServices.size * clusterCountForEstimate * stCount);
+                      perJobSizes.push(selectedServices.size * clusterCountForEstimate * effectiveTargetCount);
+                    } else {
+                      perJobSizes.push(selectedServices.size * clusterCountForEstimate * effectiveTargetCount);
+                    }
+                    const maxPerJob = Math.max(0, ...perJobSizes);
+                    const overCap = maxPerJob > MAX_PAGES_PER_JOB;
+                    return (
+                      <Button
+                        size="lg"
+                        onClick={runAllServices}
+                        disabled={isRunningAll || targetCount === 0 || overCap}
+                        data-testid="button-generate"
+                        className="gap-2"
+                        title={overCap ? `Largest single job (${maxPerJob.toLocaleString()} pages) exceeds the ${MAX_PAGES_PER_JOB.toLocaleString()} per-job limit. Reduce services, locations, or pick specific clusters.` : undefined}
+                      >
                     {(() => {
                       if (isRunningAll) return <><Loader2 className="size-4 animate-spin" /> Running in background...</>;
                       const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
