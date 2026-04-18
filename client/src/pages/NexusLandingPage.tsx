@@ -396,6 +396,25 @@ export default function NexusLandingPage() {
       .nx-pricing-feature-bullet { color: #3b82f6; flex-shrink: 0; margin-top: 1px; font-size: 12px; }
       .nx-pricing-feature-bullet-green { color: #10b981; }
 
+      .nx-addon-list { display: flex; flex-direction: column; width: 100%; }
+      .nx-addon-row {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 16px; padding: 14px 4px;
+        border-bottom: 1px solid #1f1f23;
+      }
+      .nx-addon-row:last-child { border-bottom: none; }
+      .nx-addon-label {
+        font-family: 'Plus Jakarta Sans', 'DM Sans', sans-serif;
+        font-size: 14px; color: #a1a1aa; line-height: 1.5;
+      }
+      .nx-addon-price {
+        font-size: 14px; color: #3b82f6; white-space: nowrap; flex-shrink: 0;
+      }
+      @media (max-width: 600px) {
+        .nx-addon-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+        .nx-addon-price { font-size: 13px; }
+      }
+
       @media (max-width: 900px) {
         .nx-grid-3 { grid-template-columns: 1fr; }
         .nx-pricing-grid { grid-template-columns: 1fr; }
@@ -480,34 +499,16 @@ export default function NexusLandingPage() {
 
   // ── Stripe config (which add-ons are purchasable) ───────────────────────────
 
-  const [addonSiteEnabled, setAddonSiteEnabled] = useState(false);
   const [bundleAnnualEnabled, setBundleAnnualEnabled] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
   useEffect(() => {
     fetch("/api/stripe/config")
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (d && d.addonSiteEnabled) setAddonSiteEnabled(true);
         if (d && d.bundleAnnualEnabled) setBundleAnnualEnabled(true);
       })
       .catch(() => {});
   }, []);
-  const [addonLoading, setAddonLoading] = useState(false);
-  const [addonErrored, setAddonErrored] = useState(false);
-  const handleAddonSiteClick = async () => {
-    if (addonLoading) return;
-    setAddonLoading(true);
-    setAddonErrored(false);
-    try {
-      const { url, error } = await createCheckoutSession("addonSite" as Tier);
-      if (error) { setAddonErrored(true); return; }
-      if (url) window.location.href = url;
-    } catch {
-      setAddonErrored(true);
-    } finally {
-      setAddonLoading(false);
-    }
-  };
 
   // ── Data ────────────────────────────────────────────────────────────────────
 
@@ -645,12 +646,12 @@ export default function NexusLandingPage() {
   ];
 
   const addOnItems = [
-    { label: "Additional site (matches plan page cap)", detail: "", price: "+$1,000/mo per site" },
-    { label: "Coverage upgrade: Regional → Statewide", detail: "", price: "+$500/mo per site" },
-    { label: "Coverage upgrade: Regional → National", detail: "", price: "+$1,000/mo per site" },
-    { label: "Page cap upgrade: +5,000 pages", detail: "", price: "+$300/mo per site" },
-    { label: "Page cap upgrade: +10,000 pages", detail: "", price: "+$500/mo per site" },
-    { label: "Page cap upgrade: +25,000 pages", detail: "", price: "+$900/mo per site" },
+    { label: "Additional client site (matches base plan page cap)", detail: "", price: "+$1,000/mo" },
+    { label: "Coverage upgrade: Regional → Statewide", detail: "", price: "+$500/mo" },
+    { label: "Coverage upgrade: Regional → National", detail: "", price: "+$1,000/mo" },
+    { label: "Page cap upgrade: +5,000 pages", detail: "", price: "+$300/mo" },
+    { label: "Page cap upgrade: +10,000 pages", detail: "", price: "+$500/mo" },
+    { label: "Page cap upgrade: +25,000 pages", detail: "", price: "+$900/mo" },
   ];
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -1192,53 +1193,44 @@ export default function NexusLandingPage() {
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: 11, fontWeight: 500, letterSpacing: "0.12em",
                 textTransform: "uppercase", color: "#52525b", marginBottom: 20,
+                textAlign: "center",
               }}>Optional upgrades</p>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "12px 32px",
-              }}>
-                {addOnItems.map((ao, i) => {
-                  const isAddonSite = i === 0;
-                  return (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <span style={{
-                        fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                        fontSize: 13, color: "#a1a1aa",
-                      }}>
-                        {ao.label}{ao.detail ? ` (${ao.detail})` : ""}
-                      </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, whiteSpace: "nowrap" }}>
-                        <span className="nx-mono" style={{ fontSize: 13, color: "#3b82f6" }}>{ao.price}</span>
-                        {isAddonSite && addonSiteEnabled && (
-                          <button
-                            onClick={handleAddonSiteClick}
-                            disabled={addonLoading}
-                            data-testid="btn-stripe-addon-site"
-                            style={{
-                              padding: "4px 12px",
-                              fontSize: 12,
-                              fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-                              fontWeight: 600,
-                              background: "transparent",
-                              color: addonErrored ? "#f87171" : "#fafafa",
-                              border: `1px solid ${addonErrored ? "#f87171" : "#3f3f46"}`,
-                              borderRadius: 6,
-                              cursor: addonLoading ? "default" : "pointer",
-                              opacity: addonLoading ? 0.6 : 1,
-                              transition: "border-color 120ms, color 120ms",
-                            }}
-                            onMouseEnter={e => { if (!addonLoading && !addonErrored) e.currentTarget.style.borderColor = "#71717a"; }}
-                            onMouseLeave={e => { if (!addonLoading && !addonErrored) e.currentTarget.style.borderColor = "#3f3f46"; }}
-                          >
-                            {addonLoading ? "Processing…" : addonErrored ? "Try again" : "Add site"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="nx-addon-list">
+                {addOnItems.map((ao, i) => (
+                  <div
+                    key={i}
+                    className="nx-addon-row"
+                    data-testid={`row-addon-${i}`}
+                  >
+                    <span className="nx-addon-label">
+                      {ao.label}{ao.detail ? ` (${ao.detail})` : ""}
+                    </span>
+                    <span className="nx-addon-price nx-mono">{ao.price}</span>
+                  </div>
+                ))}
               </div>
+              <p style={{
+                fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                fontSize: 13, color: "#71717a", marginTop: 24, marginBottom: 0,
+                textAlign: "center",
+              }} data-testid="text-addon-contact">
+                Need an upgrade?{" "}
+                <a
+                  href="tel:+14359995348"
+                  data-testid="link-addon-contact"
+                  style={{
+                    color: "#3b82f6",
+                    textDecoration: "none",
+                    borderBottom: "1px solid rgba(59,130,246,0.4)",
+                    transition: "border-color 120ms",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = "#3b82f6")}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = "rgba(59,130,246,0.4)")}
+                >
+                  Call us
+                </a>{" "}
+                and we'll adjust your plan within 24 hours.
+              </p>
             </div>
           </FadeIn>
 
