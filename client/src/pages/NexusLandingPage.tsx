@@ -1216,7 +1216,7 @@ export default function NexusLandingPage() {
               }} data-testid="text-addon-contact">
                 Need an upgrade?{" "}
                 <a
-                  href="tel:+14359995348"
+                  href="tel:+14354414100"
                   data-testid="link-addon-contact"
                   style={{
                     color: "#3b82f6",
@@ -1312,11 +1312,12 @@ export default function NexusLandingPage() {
           }}>
             Nexus by SpotOn
           </span>
-          <div style={{ display: "flex", gap: 24 }}>
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
             <a href="#how-it-works" className="nx-nav-link" style={{ fontSize: 13 }}>How it works</a>
             <a href="#pricing" className="nx-nav-link" style={{ fontSize: 13 }}>Pricing</a>
             <a href="#faq" className="nx-nav-link" style={{ fontSize: 13 }}>FAQ</a>
             <a href={BOOKING_URL} className="nx-nav-link" style={{ fontSize: 13 }}>Book a call</a>
+            <a href="tel:+14354414100" className="nx-nav-link" style={{ fontSize: 13 }} data-testid="link-footer-contact">Contact us: (435) 441-4100</a>
           </div>
           <span style={{
             fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
