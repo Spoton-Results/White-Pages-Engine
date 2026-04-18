@@ -3259,6 +3259,19 @@ Return ONLY valid JSON (no markdown):
     const page = await storage.getPage((req.params.id as string));
     if (!page) return res.status(404).json({ message: "Page not found" });
 
+    // ─── PHASE 7 — Governor 4 enforcement ───────────────────────────────
+    // Onboarding drafts on warmup websites must use the override endpoint.
+    if (page.isDraft) {
+      const website = await storage.getWebsite(page.websiteId);
+      if (website?.warmupMode) {
+        return res.status(409).json({
+          error: "governor_4_locked",
+          message: "This page is a draft on a website in warmup mode. Use the override endpoint with explicit acknowledgement.",
+          override_endpoint: `/api/websites/${page.websiteId}/pages/${page.id}/publish-override`,
+        });
+      }
+    }
+
     const updated = await storage.updatePage((req.params.id as string), {
       status: "published",
       publishedAt: new Date(),
@@ -3280,7 +3293,21 @@ Return ONLY valid JSON (no markdown):
     const draft = await storage.getPages(websiteId, { status: "draft", limit: 100000 });
     const review = await storage.getPages(websiteId, { status: "review", limit: 100000 });
     const approved = await storage.getPages(websiteId, { status: "approved", limit: 100000 });
-    const toPublish = [...draft, ...review, ...approved];
+
+    // ─── PHASE 7 — Governor 4 enforcement on bulk publish ───────────────
+    // Filter out onboarding drafts (is_draft=true) on warmup websites.
+    // Those must use the explicit override endpoint per page.
+    const website = await storage.getWebsite(websiteId);
+    let toPublish = [...draft, ...review, ...approved];
+    let governorBlocked = 0;
+    if (website?.warmupMode) {
+      const before = toPublish.length;
+      toPublish = toPublish.filter((p: any) => !p.isDraft);
+      governorBlocked = before - toPublish.length;
+      if (governorBlocked > 0) {
+        console.log(`[Governor 4] publish-all skipped ${governorBlocked} draft page(s) on warmup website ${website.domain}.`);
+      }
+    }
 
     const now = new Date();
     let count = 0;
@@ -3289,14 +3316,114 @@ Return ONLY valid JSON (no markdown):
       count++;
     }
 
-    const website = await storage.getWebsite(websiteId);
     if (website && count > 0) {
       await storage.updateWebsite(websiteId, {
         publishedPages: (website.publishedPages || 0) + count,
       } as any);
     }
 
-    return res.json({ published: count });
+    return res.json({
+      published: count,
+      ...(governorBlocked > 0 ? { governor_blocked_drafts: governorBlocked, governor_message: "Some draft pages were skipped because the website is in warmup mode. Use the per-page override flow to publish them individually." } : {}),
+    });
+  });
+
+  // ─── PHASE 7 — Governor 4: Manual Override Lock ────────────────────────
+  // Publish a single draft page with admin override. Requires explicit
+  // override_acknowledged=true and admin_name. Records the action on the
+  // governor_results trail and on the page itself.
+  app.post("/api/websites/:id/pages/:pageId/publish-override", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const pageId = req.params.pageId as string;
+    const { override_acknowledged, admin_name } = (req.body || {}) as { override_acknowledged?: boolean; admin_name?: string };
+
+    if (!override_acknowledged) {
+      return res.status(400).json({ error: "override_required", message: "You must acknowledge the override warning to publish a draft page during warmup." });
+    }
+    const adminName = (admin_name || (req as any).user?.email || (req as any).user?.id || "unknown").toString().slice(0, 100);
+
+    try {
+      const website = await storage.getWebsite(websiteId);
+      if (!website) return res.status(404).json({ error: "website_not_found" });
+
+      const page = await storage.getPage(pageId);
+      if (!page || page.websiteId !== websiteId) {
+        return res.status(404).json({ error: "page_not_found" });
+      }
+      if (!page.isDraft) {
+        return res.status(400).json({ error: "not_a_draft", message: "Only draft pages can be override-published." });
+      }
+      if (!website.warmupMode) {
+        return res.status(400).json({ error: "override_not_required", message: "This website is not in warmup mode — use the regular publish flow." });
+      }
+
+      const now = new Date();
+      await storage.updatePage(pageId, {
+        status: "published",
+        isDraft: false,
+        draftReason: null,
+        publishedAt: now,
+        overridePublishedBy: adminName,
+        overridePublishedAt: now,
+      } as any);
+
+      await storage.updateWebsite(websiteId, {
+        publishedPages: (website.publishedPages || 0) + 1,
+      } as any);
+
+      try {
+        const { recordGovernor4Override } = await import("./services/launch-governors");
+        await recordGovernor4Override(websiteId, adminName, [pageId]);
+      } catch (err: any) {
+        console.error("[Governor 4] Failed to record override (non-fatal):", err?.message);
+      }
+
+      console.log(`[Governor 4] Page ${pageId} published via override by '${adminName}' on ${website.domain}.`);
+      return res.json({ published: true, pageId, admin: adminName });
+    } catch (err: any) {
+      console.error("[Governor 4] Override publish failed:", err?.message);
+      return res.status(500).json({ error: "override_failed", message: err?.message });
+    }
+  });
+
+  // ─── PHASE 7 — Admin: Read governor results for a submission ───────────
+  app.get("/api/admin/onboarding/:submissionId/governor-results", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const submissionId = req.params.submissionId as string;
+    try {
+      const [row] = await db
+        .select({
+          id: onboardingSubmissions.id,
+          status: onboardingSubmissions.status,
+          websiteId: onboardingSubmissions.websiteId,
+          governorResults: onboardingSubmissions.governorResults,
+        })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.id, submissionId))
+        .limit(1);
+      if (!row) return res.status(404).json({ error: "not_found" });
+      return res.json({
+        submission_id: row.id,
+        status: row.status,
+        website_id: row.websiteId,
+        governor_results: row.governorResults || {},
+      });
+    } catch (err: any) {
+      console.error("[admin/governor-results] error:", err?.message);
+      return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  // ─── PHASE 7 — Admin: Manually trigger launch governors for a website ──
+  app.post("/api/admin/websites/:id/run-launch-governors", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    try {
+      const { runLaunchGovernors } = await import("./services/launch-governors");
+      const result = await runLaunchGovernors(websiteId);
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[admin/run-launch-governors] error:", err?.message);
+      return res.status(500).json({ error: "run_failed", message: err?.message });
+    }
   });
 
   // Bulk-prune all draft pages for a website
@@ -5995,6 +6122,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
           readinessResult: onboardingSubmissions.readinessResult,
           websiteId: onboardingSubmissions.websiteId,
           generationStartedAt: onboardingSubmissions.generationStartedAt,
+          governorResults: onboardingSubmissions.governorResults,
         })
         .from(onboardingSubmissions)
         .where(dEq(onboardingSubmissions.token, token))
@@ -6044,6 +6172,52 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         }
       }
 
+      // Phase 7 — wave info from governor results
+      let waveInfo: any = undefined;
+      const gr = (r.governorResults as any) || {};
+      if (r.status === "published_live" || r.status === "generated_draft_only") {
+        const g3 = gr.governor_3_launch_cap;
+        const g1 = gr.governor_1_service_gate;
+        const waveUnlocks = Array.isArray(gr.wave_unlocks) ? gr.wave_unlocks : [];
+        const totalWavesPublished = (g3?.wave1_published ? 1 : 0) + waveUnlocks.length;
+        const lastWavePages = waveUnlocks.length > 0
+          ? waveUnlocks[waveUnlocks.length - 1].pages_published
+          : g3?.wave1_published || 0;
+
+        // Compute next wave date if we have a first publish date
+        let nextWaveAt: string | undefined;
+        if (r.websiteId) {
+          try {
+            const [w] = await db.execute(sql`
+              SELECT first_publish_at FROM websites WHERE id = ${r.websiteId} LIMIT 1
+            `).then((res: any) => (res.rows ? res.rows : res)) as any[];
+            if (w?.first_publish_at) {
+              const fp = new Date(w.first_publish_at);
+              const currentMaxWave = Math.max(1, totalWavesPublished);
+              const next = new Date(fp.getTime() + currentMaxWave * 14 * 24 * 3600 * 1000);
+              nextWaveAt = next.toISOString();
+            }
+          } catch { /* non-fatal */ }
+        }
+
+        waveInfo = {
+          current_wave: Math.max(1, totalWavesPublished),
+          last_wave_pages_published: lastWavePages,
+          ...(nextWaveAt ? { next_wave_estimated_at: nextWaveAt } : {}),
+        };
+
+        // Customer-friendly blocked-services message (no AI/bank/completeness jargon)
+        if (g1 && Array.isArray(g1.blocked_services) && g1.blocked_services.length > 0) {
+          const blocked = g1.blocked_services.map((b: any) => b.name);
+          waveInfo.content_review_pending = {
+            services: blocked,
+            message: blocked.length === 1
+              ? `Pages for "${blocked[0]}" are still being polished by our content team and will go live in an upcoming wave.`
+              : `Pages for ${blocked.length} services (${blocked.slice(0, 3).join(", ")}${blocked.length > 3 ? ", and others" : ""}) are still being polished by our content team and will go live in upcoming waves.`,
+          };
+        }
+      }
+
       return res.json({
         status: r.status,
         readiness_score: r.readinessScore || 0,
@@ -6051,6 +6225,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         strengths: Array.isArray(result.strengths) ? result.strengths : [],
         message: messageMap[r.status || ""] || "Processing your account.",
         ...(pageCounts ? { page_counts: pageCounts } : {}),
+        ...(waveInfo ? { wave_info: waveInfo } : {}),
       });
     } catch (err: any) {
       console.error("[onboard-status] error:", err?.message);

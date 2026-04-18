@@ -1166,6 +1166,17 @@ export async function runOnboardingGeneration(submissionId: string): Promise<{
 
     console.log(`[Onboarding Generation] Pipeline complete for submission ${submissionId}. Status: generated_draft_only. Awaiting Phase 7 launch governors.`);
 
+    // ── STEP 10 — Trigger Phase 7 Launch Governors ───────────────────────
+    // Fire-and-forget: launch governors should never block or fail onboarding.
+    setImmediate(async () => {
+      try {
+        const { runLaunchGovernors } = await import("./launch-governors");
+        await runLaunchGovernors(websiteId);
+      } catch (err: any) {
+        console.error(`[Onboarding Generation] Launch governors failed for ${websiteId} (non-fatal):`, err?.message);
+      }
+    });
+
     return {
       success: true,
       totalDrafted,

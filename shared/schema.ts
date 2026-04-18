@@ -233,6 +233,7 @@ export const pages = pgTable("pages", {
   publishWave: integer("publish_wave").default(0),
   overridePublishedBy: varchar("override_published_by", { length: 100 }),
   overridePublishedAt: timestamp("override_published_at"),
+  gscSubmittedAt: timestamp("gsc_submitted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -253,6 +254,7 @@ export const onboardingSubmissions = pgTable("onboarding_submissions", {
   readinessScore: integer("readiness_score").default(0),
   readinessResult: jsonb("readiness_result"),
   onboardingNotes: text("onboarding_notes"),
+  governorResults: jsonb("governor_results"),
   createdAt: timestamp("created_at").defaultNow(),
   submittedAt: timestamp("submitted_at"),
   generationStartedAt: timestamp("generation_started_at"),

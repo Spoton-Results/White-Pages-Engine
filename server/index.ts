@@ -70,6 +70,10 @@ app.use((req, res, next) => {
     const { sql } = await import("drizzle-orm");
     await db.execute(sql`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`);
     console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
+    // Phase 7 — Launch Governors columns
+    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS gsc_submitted_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS governor_results JSONB`);
+    console.log("[startup] Schema migration: Phase 7 governor columns ensured.");
     // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
     const idxStatements = [
       `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,
@@ -331,6 +335,24 @@ app.use((req, res, next) => {
           }
         }, 7 * 24 * 60 * 60 * 1000); // every 7 days
       }, 5 * 60 * 1000); // 5 minutes after startup
+
+      // Phase 7: Daily wave readiness check — unlocks Wave 2+ on 14-day cadence
+      setTimeout(async () => {
+        try {
+          const { runDailyWaveCheck } = await import("./services/launch-governors");
+          await runDailyWaveCheck();
+        } catch (err) {
+          console.error("[Wave Unlock] Initial wave check failed (non-fatal):", err);
+        }
+        setInterval(async () => {
+          try {
+            const { runDailyWaveCheck } = await import("./services/launch-governors");
+            await runDailyWaveCheck();
+          } catch (err) {
+            console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err);
+          }
+        }, 24 * 60 * 60 * 1000); // every 24 hours
+      }, 10 * 60 * 1000); // 10 minutes after startup
 
       // Auto 8: Weekly summary email — check every hour, send on Monday mornings (UTC)
       setInterval(async () => {
