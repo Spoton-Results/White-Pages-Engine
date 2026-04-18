@@ -1216,7 +1216,7 @@ export default function NexusLandingPage() {
               }} data-testid="text-addon-contact">
                 Need an upgrade?{" "}
                 <a
-                  href="tel:+14354414100"
+                  href="tel:+18447231900"
                   data-testid="link-addon-contact"
                   style={{
                     color: "#3b82f6",
@@ -1317,7 +1317,7 @@ export default function NexusLandingPage() {
             <a href="#pricing" className="nx-nav-link" style={{ fontSize: 13 }}>Pricing</a>
             <a href="#faq" className="nx-nav-link" style={{ fontSize: 13 }}>FAQ</a>
             <a href={BOOKING_URL} className="nx-nav-link" style={{ fontSize: 13 }}>Book a call</a>
-            <a href="tel:+14354414100" className="nx-nav-link" style={{ fontSize: 13 }} data-testid="link-footer-contact">Contact us: (435) 441-4100</a>
+            <a href="tel:+18447231900" className="nx-nav-link" style={{ fontSize: 13 }} data-testid="link-footer-contact">Contact us: (844) 723-1900</a>
           </div>
           <span style={{
             fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
