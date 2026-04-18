@@ -95,6 +95,13 @@ export default function OnboardingTestPage() {
     refetchInterval: 4000,
   });
 
+  const { data: pagesData } = useQuery({
+    queryKey: ["/api/admin/test/submission/pages", selectedId],
+    queryFn: () => api.get<any>(`/api/admin/test/submission/${selectedId}/pages`),
+    enabled: !!selectedId && !!detail?.website,
+    refetchInterval: 8000,
+  });
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/api/admin/test/create-submission", data),
     onSuccess: (res: any) => {
@@ -406,6 +413,58 @@ export default function OnboardingTestPage() {
                           <div className="text-xs text-muted-foreground">{s.label}</div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Tier breakdown + sample pages */}
+                  {pagesData?.stats && pagesData.stats.total > 0 && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          { label: "Tier 1", value: pagesData.stats.tier1, color: "text-violet-600" },
+                          { label: "Tier 2", value: pagesData.stats.tier2, color: "text-blue-600" },
+                          { label: "Tier 3", value: pagesData.stats.tier3, color: "text-slate-500" },
+                          { label: "Avg Score", value: pagesData.stats.averageScore, color: "text-emerald-600" },
+                        ].map(s => (
+                          <div key={s.label} className="border rounded-lg p-2 text-center bg-card">
+                            <div className={`text-lg font-bold ${s.color}`}>{s.value ?? 0}</div>
+                            <div className="text-[11px] text-muted-foreground">{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {pagesData.samplePages?.length > 0 && (
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground mb-1">Sample Pages (first 20)</div>
+                          <div className="border rounded-lg overflow-auto max-h-44">
+                            <table className="w-full text-xs">
+                              <thead className="bg-muted sticky top-0">
+                                <tr>
+                                  <th className="text-left p-2 font-medium">Slug</th>
+                                  <th className="p-2 font-medium text-center">Tier</th>
+                                  <th className="p-2 font-medium text-center">Score</th>
+                                  <th className="p-2 font-medium text-center">Wave</th>
+                                  <th className="p-2 font-medium text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {pagesData.samplePages.map((p: any, i: number) => (
+                                  <tr key={i} className="border-t hover:bg-muted/30">
+                                    <td className="p-2 font-mono truncate max-w-[180px]">{p.slug}</td>
+                                    <td className="p-2 text-center">{p.tier ?? "—"}</td>
+                                    <td className="p-2 text-center">{p.qualityScore ?? "—"}</td>
+                                    <td className="p-2 text-center">{p.publishWave ?? "—"}</td>
+                                    <td className="p-2 text-center">
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isDraft ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                        {p.isDraft ? "draft" : "live"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

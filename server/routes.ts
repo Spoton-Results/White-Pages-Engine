@@ -6450,6 +6450,28 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     }
   });
 
+  app.get("/api/admin/test/submission/:id/pages", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, req.params.id)).limit(1);
+      if (!sub) return res.status(404).json({ error: "not_found" });
+      if (!sub.websiteId) return res.status(404).json({ error: "No website on this submission yet" });
+      const allPages = await db.select({ slug: pages.slug, title: pages.title, isDraft: pages.isDraft, tier: pages.tier, qualityScore: pages.qualityScore, publishWave: pages.publishWave }).from(pages).where(eq(pages.websiteId, sub.websiteId));
+      const stats = {
+        total: allPages.length,
+        draft: allPages.filter(p => p.isDraft).length,
+        published: allPages.filter(p => !p.isDraft).length,
+        tier1: allPages.filter(p => p.tier === 1).length,
+        tier2: allPages.filter(p => p.tier === 2).length,
+        tier3: allPages.filter(p => p.tier === 3).length,
+        averageScore: allPages.length > 0 ? Math.round(allPages.reduce((s, p) => s + (p.qualityScore || 0), 0) / allPages.length) : 0,
+      };
+      const samplePages = allPages.slice(0, 20);
+      return res.json({ stats, samplePages });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/admin/test/submission/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       await db.delete(onboardingSubmissions).where(sql`id=${req.params.id} AND stripe_session_id LIKE 'cs_test_manual%'`);
