@@ -5856,7 +5856,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${origin}/welcome`,
+        success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/#pricing`,
       });
       return res.json({ url: session.url });
