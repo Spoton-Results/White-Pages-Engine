@@ -420,12 +420,20 @@ export async function getPagesForIndexing(websiteId: string, offset: number, lim
   return { rows, total: Number(value) };
 }
 
-export async function getPages(websiteId: string, opts?: { status?: string; limit?: number; offset?: number }): Promise<Page[]> {
-  let query = db.select().from(pages).where(eq(pages.websiteId, websiteId));
-  if (opts?.status) {
-    return db.select().from(pages).where(and(eq(pages.websiteId, websiteId), eq(pages.status, opts.status as any))).orderBy(desc(pages.updatedAt)).limit(opts.limit || 100).offset(opts.offset || 0);
-  }
-  return db.select().from(pages).where(eq(pages.websiteId, websiteId)).orderBy(desc(pages.updatedAt)).limit(opts?.limit || 100).offset(opts?.offset || 0);
+export async function getPages(websiteId: string, opts?: { status?: string; limit?: number; offset?: number; includeDrafts?: boolean }): Promise<Page[]> {
+  // Phase 6 — by default, hide drafts (is_draft=true) from regular listings.
+  // Pass includeDrafts=true (or status='draft') to surface them.
+  const includeDrafts = opts?.includeDrafts === true || opts?.status === "draft";
+  const conds: any[] = [eq(pages.websiteId, websiteId)];
+  if (opts?.status) conds.push(eq(pages.status, opts.status as any));
+  if (!includeDrafts) conds.push(or(eq(pages.isDraft, false), sql`${pages.isDraft} IS NULL`));
+  return db
+    .select()
+    .from(pages)
+    .where(conds.length === 1 ? conds[0] : and(...conds))
+    .orderBy(desc(pages.updatedAt))
+    .limit(opts?.limit || 100)
+    .offset(opts?.offset || 0);
 }
 
 export async function getPage(id: string): Promise<Page | undefined> {

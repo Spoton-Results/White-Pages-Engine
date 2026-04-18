@@ -736,5 +736,456 @@ export async function calculateReadinessScore(submissionId: string): Promise<{
     .set({ onboardingStatus: newWebsiteStatus })
     .where(eq(websitesTable.id, sub.websiteId));
 
+  // Phase 6 — fire-and-forget background generation pipeline.
+  // MUST run AFTER both DB writes commit so the pipeline reads the
+  // 'ready_for_generation' state. setImmediate defers until after this tick.
+  if (newSubStatus === "ready_for_generation") {
+    setImmediate(() => {
+      runOnboardingGeneration(submissionId).catch(async (err: any) => {
+        console.error(`[Onboarding Generation] Pipeline failed for ${submissionId}:`, err?.message);
+        try {
+          await db
+            .update(onboardingSubmissions)
+            .set({
+              status: "needs_info",
+              onboardingNotes: `Generation pipeline failed: ${err?.message || "unknown error"}. Admin review required.`,
+            })
+            .where(eq(onboardingSubmissions.id, submissionId));
+        } catch { /* best-effort */ }
+      });
+    });
+  }
+
   return { success: true, score: totalScore, status: newSubStatus };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 6 — Draft-First Generation Pipeline
+// ═══════════════════════════════════════════════════════════════════════════
+// Triggered after readiness scoring reaches 'ready_for_generation' (>=70) or
+// after admin override. Runs 9 steps in order, each must complete before next.
+// All pages produced are DRAFTS (is_draft=true, status='draft', publish_wave=0).
+// Nothing is published, sitemapped, or submitted to Google in this phase.
+// Phase 7 launch governors will decide which drafts go live.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SCORING_POLL_INTERVAL_MS = 5000;
+const SCORING_POLL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+async function appendOnboardingNote(submissionId: string, line: string): Promise<void> {
+  const [row] = await db
+    .select({ notes: onboardingSubmissions.onboardingNotes })
+    .from(onboardingSubmissions)
+    .where(eq(onboardingSubmissions.id, submissionId))
+    .limit(1);
+  const newNotes = (row?.notes || "") + (row?.notes ? "\n" : "") + line;
+  await db
+    .update(onboardingSubmissions)
+    .set({ onboardingNotes: newNotes })
+    .where(eq(onboardingSubmissions.id, submissionId));
+}
+
+export async function runOnboardingGeneration(submissionId: string): Promise<{
+  success: boolean;
+  totalDrafted?: number;
+  tier1?: number;
+  tier2?: number;
+  tier3?: number;
+  averageScore?: number;
+  error?: string;
+}> {
+  const startedAt = new Date();
+  console.log(`[Onboarding Generation] Starting for submission ${submissionId}`);
+
+  try {
+    // ── Load submission and confirm state ─────────────────────────────────
+    const [sub] = await db
+      .select()
+      .from(onboardingSubmissions)
+      .where(eq(onboardingSubmissions.id, submissionId))
+      .limit(1);
+    if (!sub) throw new Error(`Submission ${submissionId} not found`);
+    if (sub.status === "generating" || sub.status === "generated_draft_only" || sub.status === "published_live") {
+      // Idempotency — pipeline already ran or is running for this submission.
+      console.warn(`[Onboarding Generation] Submission ${submissionId} already at status '${sub.status}'. Skipping duplicate run.`);
+      return { success: true };
+    }
+    if (sub.status !== "ready_for_generation") {
+      throw new Error(`Submission status is '${sub.status}', expected 'ready_for_generation'`);
+    }
+    if (!sub.accountId || !sub.websiteId) {
+      throw new Error(`Submission ${submissionId} missing accountId or websiteId`);
+    }
+    const accountId = sub.accountId;
+    const websiteId = sub.websiteId;
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) throw new Error(`Website ${websiteId} not found`);
+    const account = await storage.getAccount(accountId);
+    if (!account) throw new Error(`Account ${accountId} not found`);
+    const brand = website.brandProfileId ? await storage.getBrandProfile(website.brandProfileId) : null;
+
+    console.log(`[Onboarding Generation] Account ${accountId}, website ${websiteId} (${website.domain})`);
+
+    // ── STEP 1 — Update status to 'generating' ────────────────────────────
+    await db
+      .update(onboardingSubmissions)
+      .set({ status: "generating", generationStartedAt: startedAt })
+      .where(eq(onboardingSubmissions.id, submissionId));
+    await db
+      .update(websitesTable)
+      .set({ onboardingStatus: "generating" })
+      .where(eq(websitesTable.id, websiteId));
+
+    // ── STEP 2 — Variation banks ──────────────────────────────────────────
+    const services = await storage.getServices(accountId);
+    if (services.length === 0) throw new Error("No services found for account");
+
+    const { fillMissingSectionsForService } = await import("./variation-writer");
+    const { computeBankCompleteness } = await import("./scoring");
+
+    const brandCtx = {
+      brandName: brand?.name || website.name || undefined,
+      brandDescription: (brand as any)?.description ?? undefined,
+      voiceAndTone: (brand as any)?.voiceAndTone ?? undefined,
+      industryName: (account as any)?.settings?.industry || undefined,
+      industryDescription: undefined,
+    };
+
+    let banksWritten = 0;
+    let banksSkipped = 0;
+    for (const svc of services) {
+      try {
+        const result = await fillMissingSectionsForService(svc.name, accountId, websiteId, brandCtx);
+        if (result.filled.length > 0) banksWritten++;
+        else banksSkipped++;
+      } catch (err: any) {
+        console.error(`[Onboarding Generation] Bank write failed for "${svc.name}":`, err?.message);
+        // Continue — Phase 7 governors will gate per-service quality
+      }
+    }
+
+    // Bank health summary
+    let avgCompleteness = 0;
+    let serviceCount = 0;
+    for (const svc of services) {
+      try {
+        const banks = await storage.getVariationBanks(websiteId, svc.name);
+        if (banks.length > 0) {
+          const c = computeBankCompleteness(banks);
+          avgCompleteness += c.completenessScore;
+          serviceCount++;
+        }
+      } catch { /* skip */ }
+    }
+    avgCompleteness = serviceCount > 0 ? Math.round(avgCompleteness / serviceCount) : 0;
+    console.log(`[Onboarding Generation] Variation banks created for ${banksWritten + banksSkipped} services. Average completeness: ${avgCompleteness}%.`);
+
+    // ── STEP 3 — Blueprints (5 standard types) ────────────────────────────
+    const { generateBlueprint } = await import("./claude");
+    const businessName = brand?.name || website.name || website.domain;
+    const industry = (account as any)?.settings?.industry || (brand as any)?.description || "Local Service";
+
+    const allBlueprints = await storage.getBlueprints(accountId);
+    const existingBlueprints = allBlueprints.filter((b: any) => !b.websiteId || b.websiteId === websiteId);
+    const existingPageTypes = new Set<string>(existingBlueprints.map((b: any) => String(b.pageType)));
+
+    const blueprintSpecs: Array<{ pageType: any; service?: string }> = [
+      { pageType: "service_city" },
+      { pageType: "state_hub" },
+      { pageType: "city_hub" },
+      { pageType: "industry_city" },
+      { pageType: "problem_intent" },
+    ];
+
+    let blueprintsCreated = 0;
+    for (const spec of blueprintSpecs) {
+      if (existingPageTypes.has(spec.pageType)) continue;
+      try {
+        const gen = await generateBlueprint({ businessName, industry, pageType: spec.pageType as any });
+        await storage.createBlueprint({
+          ...gen,
+          accountId,
+          websiteId,
+          requiredWordCount: gen.requiredWordCount,
+          minPublishScore: gen.minPublishScore as any,
+          faqEnabled: gen.faqEnabled,
+        } as any);
+        blueprintsCreated++;
+      } catch (err: any) {
+        console.error(`[Onboarding Generation] Blueprint ${spec.pageType} failed:`, err?.message);
+      }
+    }
+    console.log(`[Onboarding Generation] ${blueprintsCreated} blueprints created for website ${websiteId}.`);
+
+    // ── STEP 4 — Query clusters ───────────────────────────────────────────
+    const { generateQueryClusters } = await import("./claude");
+    const existingClusters = await storage.getQueryClusters(accountId);
+    const existingKeywords = new Set(existingClusters.map((c: any) => c.primaryKeyword.toLowerCase()));
+    const serviceNameToId = new Map(services.map((s: any) => [s.name.toLowerCase(), s.id]));
+
+    let clustersCreated = 0;
+    try {
+      const generated = await generateQueryClusters({
+        businessName,
+        industry,
+        services: services.map((s: any) => s.name),
+        existingClusters: existingClusters.map((c: any) => c.primaryKeyword),
+      });
+
+      for (const c of generated) {
+        if (existingKeywords.has(c.primaryKeyword.toLowerCase())) continue;
+        // Auto-link to a service if keyword mentions it
+        let serviceId: string | null = null;
+        const kwLower = c.primaryKeyword.toLowerCase();
+        for (const [svcName, svcId] of Array.from(serviceNameToId.entries())) {
+          if (kwLower.includes(svcName)) { serviceId = svcId as string; break; }
+        }
+        try {
+          await storage.createQueryCluster({ ...c, accountId, serviceId } as any);
+          existingKeywords.add(c.primaryKeyword.toLowerCase());
+          clustersCreated++;
+        } catch (err: any) {
+          console.error(`[Onboarding Generation] Cluster insert failed for "${c.primaryKeyword}":`, err?.message);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Onboarding Generation] Cluster generation failed:`, err?.message);
+    }
+    console.log(`[Onboarding Generation] ${clustersCreated} query clusters created for account ${accountId}.`);
+
+    // ── STEP 5 — Hub pages ────────────────────────────────────────────────
+    const locations = await storage.getLocations(accountId);
+    const cityLocs = locations.filter((l: any) => l.type === "city");
+    const stateLocs = locations.filter((l: any) => l.type === "state");
+
+    // Service hubs — one per service
+    let serviceHubsCreated = 0;
+    for (const svc of services) {
+      const slug = `services/${slugify(svc.name)}`;
+      try {
+        await storage.createHubPage({
+          websiteId,
+          accountId,
+          hubType: "service",
+          name: svc.name,
+          slug,
+          parentSlug: null,
+          maxChildLinks: 30,
+          metaDescription: `Browse all ${svc.name} pages and locations served.`,
+          status: "draft",
+          tier: 1,
+        } as any);
+        serviceHubsCreated++;
+      } catch { /* may exist */ }
+    }
+
+    // State hubs — one per state in coverage
+    const stateAbbrSet = new Set<string>();
+    for (const loc of locations) {
+      if (loc.stateCode) stateAbbrSet.add(loc.stateCode.toUpperCase());
+    }
+    let stateHubsCreated = 0;
+    for (const abbr of Array.from(stateAbbrSet)) {
+      const stateName = STATE_ABBR_TO_NAME[abbr] || abbr;
+      const slug = `locations/${slugify(stateName)}`;
+      try {
+        await storage.createHubPage({
+          websiteId,
+          accountId,
+          hubType: "state",
+          name: stateName,
+          slug,
+          parentSlug: null,
+          maxChildLinks: 30,
+          metaDescription: `All locations and services we serve in ${stateName}.`,
+          status: "draft",
+          tier: 1,
+        } as any);
+        stateHubsCreated++;
+      } catch { /* skip */ }
+    }
+
+    // City hubs — apply >1000 cap by tier (1 + 2 only when over cap)
+    let cityHubCandidates = cityLocs;
+    if (cityLocs.length > 1000) {
+      cityHubCandidates = cityLocs.filter((l: any) => {
+        const tier = l.cityTier ?? (l.population && l.population >= 500000 ? 1 : l.population && l.population >= 100000 ? 2 : 3);
+        return tier === 1 || tier === 2;
+      });
+      console.log(`[Onboarding Generation] City hub cap applied: ${cityLocs.length} candidates → ${cityHubCandidates.length} after Tier 1+2 filter.`);
+    }
+    let cityHubsCreated = 0;
+    for (const loc of cityHubCandidates) {
+      const stateName = loc.stateName || (loc.stateCode ? STATE_ABBR_TO_NAME[loc.stateCode.toUpperCase()] : "");
+      const slug = `locations/${slugify(stateName || "us")}/${slugify(loc.name)}`;
+      try {
+        await storage.createHubPage({
+          websiteId,
+          accountId,
+          hubType: "city",
+          name: loc.name,
+          slug,
+          parentSlug: stateName ? `locations/${slugify(stateName)}` : null,
+          maxChildLinks: 30,
+          metaDescription: `Services we offer in ${loc.name}${stateName ? `, ${stateName}` : ""}.`,
+          status: "draft",
+          tier: 1,
+        } as any);
+        cityHubsCreated++;
+      } catch { /* skip */ }
+    }
+    console.log(`[Onboarding Generation] Hub pages created: ${serviceHubsCreated} service hubs, ${stateHubsCreated} state hubs, ${cityHubsCreated} city hubs.`);
+
+    // ── STEP 6 — Bulk generation as DRAFTS ────────────────────────────────
+    const { runBulkBackgroundJob } = await import("./bulk-background");
+
+    // Build job settings — full matrix, no overwrite, isDraft=true
+    const stateAbbrs = Array.from(stateAbbrSet);
+    const cityList = cityLocs.map((l: any) => ({
+      name: l.name,
+      stateAbbr: (l.stateCode || "").toUpperCase(),
+    }));
+
+    // Mode selection: prefer cities if any present, else states
+    let mode: "all_states" | "specific_states" | "specific_cities";
+    let modeSettings: any;
+    if (cityList.length > 0) {
+      mode = "specific_cities";
+      modeSettings = { cities: cityList };
+    } else if (stateAbbrs.length > 0) {
+      mode = "specific_states";
+      modeSettings = { states: stateAbbrs };
+    } else {
+      mode = "all_states";
+      modeSettings = {};
+    }
+
+    const allClusters = await storage.getQueryClusters(accountId);
+
+    const bulkJob = await storage.createGenerationJob({
+      accountId,
+      websiteId,
+      name: `Onboarding Draft Generation: ${website.domain}`,
+      status: "pending",
+      totalPages: 0,
+      processedPages: 0,
+      passedPages: 0,
+      failedPages: 0,
+      settings: {
+        services: services.map((s: any) => s.name),
+        queryClusterIds: allClusters.map((c: any) => c.id),
+        mode,
+        ...modeSettings,
+        overwrite: false,
+        isDraft: true,
+        draftReason: "onboarding_initial",
+        progress: services.map((s: any) => ({
+          service: s.name,
+          status: "pending",
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          errors: 0,
+        })),
+      } as any,
+    });
+
+    console.log(`[Onboarding Generation] Bulk draft generation job ${bulkJob.id} queued. Awaiting completion...`);
+    await runBulkBackgroundJob(bulkJob.id);
+
+    const finishedJob = await storage.getGenerationJob(bulkJob.id);
+    const draftCreated = finishedJob?.passedPages || 0;
+    const draftSkipped = (finishedJob as any)?.settings?.progress?.reduce?.(
+      (acc: number, p: any) => acc + (p.skipped || 0), 0,
+    ) || 0;
+    console.log(`[Onboarding Generation] Bulk generation complete. ${draftCreated} draft pages created, ${draftSkipped} skipped.`);
+
+    // ── STEP 7 + 8 — Wait for auto-scoring/tiering job to complete ────────
+    // runBulkBackgroundJob queues runAutoScoringJob via setImmediate at the end.
+    // Poll for the most recent Auto-Score job for this website to finish.
+    const { generationJobs } = await import("@shared/schema");
+    const { desc, and: dAnd, eq: dEq, like } = await import("drizzle-orm");
+
+    const pollStart = Date.now();
+    let scoringJobComplete = false;
+    let scoringJobRow: any = null;
+    while (Date.now() - pollStart < SCORING_POLL_TIMEOUT_MS) {
+      await new Promise((r) => setTimeout(r, SCORING_POLL_INTERVAL_MS));
+      const [latest] = await db
+        .select()
+        .from(generationJobs)
+        .where(dAnd(dEq(generationJobs.websiteId, websiteId), like(generationJobs.name, "Auto-Score:%")))
+        .orderBy(desc(generationJobs.createdAt))
+        .limit(1);
+      if (latest && (latest.status === "completed" || latest.status === "failed" || latest.status === "cancelled" || (latest.status as any) === "error")) {
+        scoringJobComplete = true;
+        scoringJobRow = latest;
+        break;
+      }
+    }
+    if (!scoringJobComplete) {
+      console.warn(`[Onboarding Generation] Auto-scoring job did not complete within ${SCORING_POLL_TIMEOUT_MS / 1000}s — continuing anyway.`);
+    }
+
+    // ── Score / tier breakdown for final notes ─────────────────────────────
+    const { pages: pagesTable } = await import("@shared/schema");
+    const { sql } = await import("drizzle-orm");
+
+    const [counts] = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE is_draft = true)::int AS total_drafts,
+        COUNT(*) FILTER (WHERE is_draft = true AND tier = 1)::int AS tier1,
+        COUNT(*) FILTER (WHERE is_draft = true AND tier = 2)::int AS tier2,
+        COUNT(*) FILTER (WHERE is_draft = true AND tier = 3)::int AS tier3,
+        COALESCE(AVG(quality_score) FILTER (WHERE is_draft = true AND quality_score IS NOT NULL), 0)::int AS avg_score
+      FROM pages
+      WHERE website_id = ${websiteId}
+    `).then((r: any) => (r.rows ? r.rows : r)) as any;
+
+    const totalDrafted = counts?.total_drafts ?? 0;
+    const tier1 = counts?.tier1 ?? 0;
+    const tier2 = counts?.tier2 ?? 0;
+    const tier3 = counts?.tier3 ?? 0;
+    const avgScore = counts?.avg_score ?? 0;
+
+    console.log(`[Onboarding Generation] Auto-scoring complete. Average score: ${avgScore}. Tier 1: ${tier1}, Tier 2: ${tier2}, Tier 3: ${tier3}.`);
+
+    // ── STEP 9 — Final status update ──────────────────────────────────────
+    await db
+      .update(onboardingSubmissions)
+      .set({ status: "generated_draft_only" })
+      .where(eq(onboardingSubmissions.id, submissionId));
+    await db
+      .update(websitesTable)
+      .set({ onboardingStatus: "generated_draft_only" })
+      .where(eq(websitesTable.id, websiteId));
+
+    const finalNote = `Generation complete at ${new Date().toISOString()}. ${totalDrafted} draft pages created. ${tier1} scored Tier 1. ${tier2} scored Tier 2. ${tier3} scored Tier 3. Average quality score: ${avgScore}. Awaiting launch governor review (Phase 7).`;
+    await appendOnboardingNote(submissionId, finalNote);
+
+    console.log(`[Onboarding Generation] Pipeline complete for submission ${submissionId}. Status: generated_draft_only. Awaiting Phase 7 launch governors.`);
+
+    return {
+      success: true,
+      totalDrafted,
+      tier1,
+      tier2,
+      tier3,
+      averageScore: avgScore,
+    };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error(`[Onboarding Generation] FAILED for ${submissionId}:`, msg);
+    try {
+      await db
+        .update(onboardingSubmissions)
+        .set({
+          status: "needs_info",
+          onboardingNotes: `Generation pipeline failed: ${msg}. Admin review required.`,
+        })
+        .where(eq(onboardingSubmissions.id, submissionId));
+    } catch { /* best-effort */ }
+    return { success: false, error: msg };
+  }
 }

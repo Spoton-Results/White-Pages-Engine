@@ -337,6 +337,7 @@ Nexus Platform — ${new Date().toDateString()}
 export async function runAutoScoringJob(
   jobId: string,
   website: { id: string; domain: string; settings?: any; accountId?: string },
+  opts?: { skipPublishingHooks?: boolean },
 ): Promise<void> {
   const settings = getAutomationSettings(website);
   if (!settings.autoScoreAfterGeneration) {
@@ -398,14 +399,20 @@ export async function runAutoScoringJob(
       }
       console.log(`[auto2] Tiers assigned — promoted:${promoted} demoted:${demoted}`);
 
-      if (settings.googleIndexingEnabled && promotedSlugs.length > 0) {
-        submitTier1UrlsToGoogle(website.id, promotedSlugs, website).catch(() => {});
-      }
-      if (promoted > 0 || demoted > 0) {
-        const pDomain = (website.settings as any)?.parentDomain;
-        const pPath = (website.settings as any)?.proxyPath || "";
-        const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
-        scheduleSitemapRegen(website.id, website.domain, canonBase, settings.sitemapRegenDebounceMinutes * 60 * 1000);
+      // Phase 6 — when scoring runs against a draft generation, suppress Auto 3 (sitemap regen)
+      // and Auto 4 (Google indexing). Tier assignment above still completes normally.
+      if (!opts?.skipPublishingHooks) {
+        if (settings.googleIndexingEnabled && promotedSlugs.length > 0) {
+          submitTier1UrlsToGoogle(website.id, promotedSlugs, website).catch(() => {});
+        }
+        if (promoted > 0 || demoted > 0) {
+          const pDomain = (website.settings as any)?.parentDomain;
+          const pPath = (website.settings as any)?.proxyPath || "";
+          const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+          scheduleSitemapRegen(website.id, website.domain, canonBase, settings.sitemapRegenDebounceMinutes * 60 * 1000);
+        }
+      } else {
+        console.log(`[auto1] Draft mode — Auto 3 (sitemap regen) and Auto 4 (Google indexing) suppressed for ${website.domain}`);
       }
     }
 

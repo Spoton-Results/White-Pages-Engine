@@ -144,6 +144,13 @@ export interface BulkJobSettings {
   states?: string[];
   cities?: Array<{ name: string; stateAbbr: string }>;
   overwrite?: boolean;
+  // Phase 6 — Draft-first generation. Only set by the onboarding pipeline.
+  // When isDraft=true: pages are inserted with status='draft', is_draft=true,
+  // draft_reason='onboarding_initial', publish_wave=0; sitemap regen + Google
+  // indexing + sitemap ping are skipped; auto-scoring/tiering still run.
+  // Manual admin jobs never set this — behavior is byte-identical to before.
+  isDraft?: boolean;
+  draftReason?: string;
   progress: Array<{
     service: string;
     status: "pending" | "running" | "done" | "error" | "no-bank";
@@ -563,6 +570,17 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         } else {
           // Mark slug used immediately so within-batch duplicates are caught
           existingSlugSet.add(finalSlug);
+          // Phase 6 — Draft mode override (only set when onboarding pipeline triggered the job).
+          // For manual admin jobs settings.isDraft is undefined, so draftFields is {} and the
+          // insert below behaves exactly as before.
+          const draftFields = settings.isDraft
+            ? {
+                isDraft: true,
+                draftReason: settings.draftReason || "onboarding_initial",
+                publishWave: 0,
+                status: "draft" as const,
+              }
+            : {};
           pendingPageData.push({
             websiteId: job.websiteId, blueprintId: effectiveBlueprintId || null,
             serviceId: svcId || null, locationId: null, queryClusterId: svcCluster?.id || null,
@@ -574,6 +592,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             scoreBreakdown: pageScore as any,
             indexStatus: "queued",
             lastEvaluatedAt: new Date(),
+            ...draftFields,
           } as any);
           pendingContent.push(result.contentHtml);
 
@@ -652,28 +671,35 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     failedPages: totalFailed,
   });
 
-  try {
-    const { generateSitemapsForWebsite } = await import("./sitemap");
-    const pDomain = (website.settings as any)?.parentDomain;
-    const pPathRaw = ((website.settings as any)?.proxyPath || "") as string;
-    const pPath = pPathRaw.startsWith("/sites/") ? "" : pPathRaw;
-    const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
-    await generateSitemapsForWebsite(job.websiteId, website.domain, canonBase);
-  } catch { /* non-critical */ }
+  // Phase 6 — when isDraft, skip Auto 3 (sitemap regen + ping) and Auto 4 (GSC indexing)
+  if (!settings.isDraft) {
+    try {
+      const { generateSitemapsForWebsite } = await import("./sitemap");
+      const pDomain = (website.settings as any)?.parentDomain;
+      const pPathRaw = ((website.settings as any)?.proxyPath || "") as string;
+      const pPath = pPathRaw.startsWith("/sites/") ? "" : pPathRaw;
+      const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
+      await generateSitemapsForWebsite(job.websiteId, website.domain, canonBase);
+    } catch { /* non-critical */ }
 
-  // Ping Google to re-crawl the sitemap immediately after job completion
-  try {
-    const sitemapUrl = `https://${website.domain}/sitemap.xml`;
-    await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
-    console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
-  } catch { /* non-critical — Google ping is best-effort */ }
+    // Ping Google to re-crawl the sitemap immediately after job completion
+    try {
+      const sitemapUrl = `https://${website.domain}/sitemap.xml`;
+      await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
+      console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
+    } catch { /* non-critical — Google ping is best-effort */ }
 
-  // Submit new page URLs directly to Google Indexing API for rapid indexing
-  try {
-    await submitUrlsToGoogle(newPageUrls);
-  } catch { /* non-critical — GSC indexing is best-effort */ }
+    // Submit new page URLs directly to Google Indexing API for rapid indexing
+    try {
+      await submitUrlsToGoogle(newPageUrls);
+    } catch { /* non-critical — GSC indexing is best-effort */ }
+  } else {
+    console.log(`[bulk-background] Draft mode — skipped sitemap regen, Google ping, GSC indexing for ${website.domain}`);
+  }
 
-  // Auto 1 + 2 + 3 + 4: Create a separate scoring job visible in the Jobs dashboard
+  // Auto 1 + 2 + 3 + 4: Create a separate scoring job visible in the Jobs dashboard.
+  // For draft mode, pass skipPublishingHooks so Auto 2 still tiers but doesn't trigger
+  // sitemap regen or Google indexing as a side-effect of newly-promoted Tier 1 pages.
   try {
     const { runAutoScoringJob } = await import("./automation");
     const scoringJob = await bulkCreateJob({
@@ -687,11 +713,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       failedPages: 0,
       settings: { type: "auto_scoring" },
     });
-    setImmediate(() => runAutoScoringJob(scoringJob.id, website).catch(err => {
+    const scoringOpts = settings.isDraft ? { skipPublishingHooks: true } : undefined;
+    setImmediate(() => runAutoScoringJob(scoringJob.id, website, scoringOpts).catch(err => {
       console.error("[auto1] Scoring background job failed:", err);
       storage.updateGenerationJob(scoringJob.id, { status: "failed", completedAt: new Date() }).catch(() => {});
     }));
-    console.log(`[auto1] Scoring job ${scoringJob.id} queued for ${website.domain}`);
+    console.log(`[auto1] Scoring job ${scoringJob.id} queued for ${website.domain}${settings.isDraft ? " (draft mode — Auto 3/4 suppressed)" : ""}`);
   } catch (err) {
     console.error("[auto1] Failed to create scoring job (non-fatal):", err);
   }

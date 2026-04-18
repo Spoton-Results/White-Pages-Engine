@@ -3228,7 +3228,8 @@ Return ONLY valid JSON (no markdown):
     const status = req.query.status as string | undefined;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
-    const pageList = await storage.getPages((req.params.websiteId as string), { status, limit, offset });
+    const includeDrafts = req.query.includeDrafts === "true" || req.query.includeDrafts === "1";
+    const pageList = await storage.getPages((req.params.websiteId as string), { status, limit, offset, includeDrafts });
     const total = await storage.getPageCount((req.params.websiteId as string), status);
     return res.json({ pages: pageList, total });
   });
@@ -5988,9 +5989,12 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     try {
       const rows = await db
         .select({
+          id: onboardingSubmissions.id,
           status: onboardingSubmissions.status,
           readinessScore: onboardingSubmissions.readinessScore,
           readinessResult: onboardingSubmissions.readinessResult,
+          websiteId: onboardingSubmissions.websiteId,
+          generationStartedAt: onboardingSubmissions.generationStartedAt,
         })
         .from(onboardingSubmissions)
         .where(dEq(onboardingSubmissions.token, token))
@@ -6005,18 +6009,48 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         submitted: "Your information was received. Setting up your account now.",
         creating: "Building your account and checking readiness...",
         ready_for_scoring: "Checking your account readiness.",
-        ready_for_generation: "Your account is ready. Pages will begin generating shortly.",
-        needs_info: "We need a bit more information. See the items below.",
-        generating: "Your pages are being generated. This may take a few hours.",
-        generated_draft_only: "Pages have been generated and are being reviewed for quality.",
-        published_live: "Your pages are live.",
+        ready_for_generation: "Your account is ready. Page generation is starting now — this typically takes 1–3 hours depending on your service area size.",
+        needs_info: "We need a few more details before we can generate your pages. See the items listed below, then reply to your welcome email or call (435) 999-5348 to update your information.",
+        generating: "Our content engine is generating your pages right now. This typically takes 1–3 hours. You'll receive an email when drafts are ready for review.",
+        generated_draft_only: "All pages have been generated as drafts and quality-scored. Our team is now reviewing them before launching to the public. You'll receive an email when the first wave goes live.",
+        published_live: "Your pages are live and being indexed by search engines.",
       };
+
+      // Phase 6 — include page_counts block once pages exist
+      let pageCounts: any = undefined;
+      if ((r.status === "generating" || r.status === "generated_draft_only" || r.status === "published_live") && r.websiteId) {
+        try {
+          const [counts] = (await db.execute(sql`
+            SELECT
+              COUNT(*) FILTER (WHERE is_draft = true OR status = 'draft')::int AS total_drafted,
+              COUNT(*) FILTER (WHERE tier = 1)::int AS tier1_eligible,
+              COUNT(*) FILTER (WHERE tier = 2)::int AS tier2,
+              COUNT(*) FILTER (WHERE tier = 3)::int AS tier3,
+              COALESCE(AVG(quality_score) FILTER (WHERE quality_score IS NOT NULL), 0)::int AS average_score
+            FROM pages
+            WHERE website_id = ${r.websiteId}
+          `).then((res: any) => (res.rows ? res.rows : res))) as any;
+          if (counts && (counts.total_drafted || 0) > 0) {
+            pageCounts = {
+              total_drafted: counts.total_drafted || 0,
+              tier1_eligible: counts.tier1_eligible || 0,
+              tier2: counts.tier2 || 0,
+              tier3: counts.tier3 || 0,
+              average_score: counts.average_score || 0,
+            };
+          }
+        } catch (e: any) {
+          console.error("[onboard-status] page_counts query failed:", e?.message);
+        }
+      }
+
       return res.json({
         status: r.status,
         readiness_score: r.readinessScore || 0,
         gaps: Array.isArray(result.gaps) ? result.gaps : [],
         strengths: Array.isArray(result.strengths) ? result.strengths : [],
         message: messageMap[r.status || ""] || "Processing your account.",
+        ...(pageCounts ? { page_counts: pageCounts } : {}),
       });
     } catch (err: any) {
       console.error("[onboard-status] error:", err?.message);
@@ -6098,6 +6132,17 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
       }
 
       console.log(`[Onboarding] Submission ${submissionId} OVERRIDDEN by admin. Previous score: ${score}/100. Status now: ready_for_generation.`);
+
+      // Phase 6 — fire-and-forget background generation pipeline (admin override path)
+      setImmediate(async () => {
+        try {
+          const { runOnboardingGeneration } = await import("./services/onboarding");
+          await runOnboardingGeneration(submissionId);
+        } catch (err: any) {
+          console.error(`[Onboarding Generation] Admin override pipeline failed for ${submissionId}:`, err?.message);
+        }
+      });
+
       return res.json({ success: true, status: "ready_for_generation", previous_score: score });
     } catch (err: any) {
       console.error("[admin-onboarding-override] error:", err?.message);

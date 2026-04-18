@@ -42,6 +42,7 @@ export default function PublishedPagesPage() {
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<{ tier: number; minScore: number | null; maxScore: number | null; reason: string } | null>(null);
   const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [showDrafts, setShowDrafts] = useState(false);
 
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
@@ -51,8 +52,14 @@ export default function PublishedPagesPage() {
   const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
   const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
-    queryKey: ["/api/pages/published", selectedWebsite],
-    queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=published&limit=200`) : Promise.resolve({ pages: [], total: 0 }),
+    queryKey: ["/api/pages/published", selectedWebsite, showDrafts],
+    queryFn: () => {
+      if (!selectedWebsite) return Promise.resolve({ pages: [], total: 0 });
+      const url = showDrafts
+        ? `/api/websites/${selectedWebsite}/pages?includeDrafts=true&limit=200`
+        : `/api/websites/${selectedWebsite}/pages?status=published&limit=200`;
+      return api.get<any>(url);
+    },
     enabled: !!selectedWebsite,
   });
 
@@ -244,6 +251,15 @@ export default function PublishedPagesPage() {
           <div className="flex items-center gap-2 flex-wrap">
             {selectedWebsite && (
               <>
+                <Button
+                  variant={showDrafts ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setShowDrafts(!showDrafts)}
+                  data-testid="button-toggle-drafts"
+                  title="Show draft pages from onboarding generation alongside published pages"
+                >
+                  {showDrafts ? "Hide drafts" : "Show drafts"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => setShowBulkTier(true)} data-testid="button-bulk-set-tier">
                   <Layers className="size-4 mr-2" />Bulk Set Tier
                 </Button>
@@ -448,9 +464,16 @@ export default function PublishedPagesPage() {
                     </TableCell>
                   </TableRow>
                 ) : pages.map((page: any) => (
-                  <TableRow key={page.id}>
+                  <TableRow key={page.id} data-testid={`row-page-${page.id}`}>
                     <TableCell>
-                      <div className="font-medium text-sm truncate max-w-[280px]">{page.title}</div>
+                      <div className="font-medium text-sm truncate max-w-[280px] flex items-center gap-2">
+                        <span className="truncate">{page.title}</span>
+                        {page.isDraft && (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-amber-50 text-amber-700 border-amber-300 shrink-0" data-testid={`badge-draft-${page.id}`}>
+                            DRAFT
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground font-mono truncate max-w-[260px] flex items-center gap-1.5 mt-0.5">
                         <span className="truncate">/{page.slug}</span>
                         <div className="flex items-center gap-1 shrink-0">
