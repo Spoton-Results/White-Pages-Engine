@@ -82,24 +82,27 @@ export default function OnboardingTestPage() {
     cityTier: "medium_and_major",
   });
 
-  const { data: submissions = [], isLoading } = useQuery({
+  const { data: submissions = [], isLoading, isError: listError, error: listErrorMsg } = useQuery({
     queryKey: ["/api/admin/test/submissions"],
     queryFn: () => api.get<any[]>("/api/admin/test/submissions"),
-    refetchInterval: selectedId ? 4000 : false,
+    refetchInterval: selectedId ? 4000 : 8000,
+    retry: 1,
   });
 
-  const { data: detail, isLoading: detailLoading } = useQuery({
+  const { data: detail, isLoading: detailLoading, isError: detailError, error: detailErrorMsg } = useQuery({
     queryKey: ["/api/admin/test/submission", selectedId],
     queryFn: () => api.get<any>(`/api/admin/test/submission/${selectedId}`),
     enabled: !!selectedId,
     refetchInterval: 4000,
+    retry: 1,
   });
 
   const { data: pagesData } = useQuery({
     queryKey: ["/api/admin/test/submission/pages", selectedId],
     queryFn: () => api.get<any>(`/api/admin/test/submission/${selectedId}/pages`),
-    enabled: !!selectedId && !!detail?.website,
+    enabled: !!selectedId && !!(detail?.website),
     refetchInterval: 8000,
+    retry: 1,
   });
 
   const createMutation = useMutation({
@@ -194,7 +197,13 @@ export default function OnboardingTestPage() {
           <div className="lg:col-span-1 space-y-2">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">Test Submissions</div>
             {isLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground p-3"><Loader2 className="size-4 animate-spin" /> Loading…</div>}
-            {!isLoading && (submissions as any[]).length === 0 && (
+            {listError && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="font-medium">Failed to load submissions</div>
+                <div className="text-xs mt-0.5 font-mono">{(listErrorMsg as any)?.message}</div>
+              </div>
+            )}
+            {!isLoading && !listError && (submissions as any[]).length === 0 && (
               <div className="text-sm text-muted-foreground p-4 border rounded-lg text-center">
                 No test submissions yet.<br />Click "New Test Submission" to start.
               </div>
@@ -343,8 +352,17 @@ export default function OnboardingTestPage() {
             {selectedId && !showForm && (
               detailLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground p-6"><Loader2 className="size-4 animate-spin" /> Loading…</div>
+              ) : detailError ? (
+                <div className="p-6 border border-red-200 bg-red-50 rounded-xl space-y-2">
+                  <div className="text-sm font-semibold text-red-700">Failed to load submission</div>
+                  <div className="text-xs font-mono text-red-600 bg-red-100 rounded p-2 break-all">{(detailErrorMsg as any)?.message || "Unknown error"}</div>
+                  <div className="text-xs text-muted-foreground">Submission ID: <code>{selectedId}</code></div>
+                  <Button size="sm" variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["/api/admin/test/submission", selectedId] })}>
+                    Retry
+                  </Button>
+                </div>
               ) : !detail ? (
-                <div className="text-sm text-muted-foreground p-6">Submission not found.</div>
+                <div className="text-sm text-muted-foreground p-6">No data returned. <button className="underline" onClick={() => qc.invalidateQueries({ queryKey: ["/api/admin/test/submission", selectedId] })}>Retry</button></div>
               ) : (
                 <div className="space-y-4">
                   {/* Header */}

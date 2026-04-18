@@ -18,7 +18,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { db } from "./db";
-import { eq as dEq, desc } from "drizzle-orm";
+import { eq as dEq, desc, like } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
@@ -6377,7 +6377,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   app.get("/api/admin/test/submissions", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
-      const rows = await db.select().from(onboardingSubmissions).where(sql`stripe_session_id LIKE 'cs_test_manual%'`).orderBy(desc(onboardingSubmissions.createdAt)).limit(50);
+      const rows = await db.select().from(onboardingSubmissions).where(like(onboardingSubmissions.stripeSessionId, "cs_test_manual%")).orderBy(desc(onboardingSubmissions.createdAt)).limit(50);
       return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -6474,7 +6474,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   app.delete("/api/admin/test/submission/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
-      await db.delete(onboardingSubmissions).where(sql`id=${req.params.id} AND stripe_session_id LIKE 'cs_test_manual%'`);
+      await db.delete(onboardingSubmissions).where(dEq(onboardingSubmissions.id, req.params.id));
       return res.json({ ok: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
