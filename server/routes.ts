@@ -7,6 +7,7 @@ import { generateBlueprint, suggestServices, generateQueryClusters } from "./ser
 import { buildVariationPage } from "./services/variation-engine";
 import { writeVariationsForService, fillMissingSectionsForService, BrandContext } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt, URLS_PER_SITEMAP } from "./services/sitemap";
+import { processOnboardingSubmission } from "./services/onboarding";
 import { isR2Configured } from "./services/r2";
 import {
   insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
@@ -6041,7 +6042,14 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         .where(dEq(onboardingSubmissions.token, token));
 
       console.log(`[onboard-submit] token=${token.slice(0, 8)}… plan=${business.industry} services=${services.length}`);
-      return res.json({ success: true, message: "Onboarding submitted successfully" });
+      res.json({ success: true, message: "Onboarding submitted successfully" });
+
+      // Fire-and-forget: auto-create account/website/brand/services/locations in background.
+      // Customer does not wait for this. On failure, status is set to 'needs_info'.
+      processOnboardingSubmission(row.id).catch((err: any) => {
+        console.error(`[onboard-submit] background auto-create failed for ${row.id}:`, err?.message || err);
+      });
+      return;
     } catch (err: any) {
       console.error("[onboard-submit] error:", err?.message);
       return res.status(500).json({ error: "submit_failed" });
