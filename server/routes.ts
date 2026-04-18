@@ -12,9 +12,12 @@ import {
   insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
   insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
   insertIndustrySchema, insertQueryClusterSchema, insertBlueprintSchema,
-  insertPageSchema, insertGenerationJobSchema,
+  insertPageSchema, insertGenerationJobSchema, onboardingSubmissions,
 } from "@shared/schema";
 import { z } from "zod";
+import { db } from "./db";
+import { eq as dEq } from "drizzle-orm";
+import { randomBytes } from "crypto";
 
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
 // When a client domain is saved, auto-register it as a CF custom hostname so
@@ -5808,10 +5811,86 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     try {
       if (event.type === "checkout.session.completed") {
         const session = event.data.object as any;
-        const email = session.customer_details?.email || session.customer_email || "unknown";
-        const customerId = session.customer;
-        const subscriptionId = session.subscription;
-        console.log(`[stripe-webhook] New subscription — email=${email} customer=${customerId} subscription=${subscriptionId}`);
+        const sessionId: string = session.id;
+        const customerId: string | null = session.customer ?? null;
+        const subscriptionId: string | null = session.subscription ?? null;
+        const customerEmail: string =
+          session.customer_details?.email || session.customer_email || "unknown";
+        const customerName: string | null = session.customer_details?.name ?? null;
+
+        // Dedup: skip if we already have a row for this checkout session
+        const existing = await db
+          .select({ id: onboardingSubmissions.id, token: onboardingSubmissions.token })
+          .from(onboardingSubmissions)
+          .where(dEq(onboardingSubmissions.stripeSessionId, sessionId))
+          .limit(1);
+
+        if (existing.length > 0) {
+          console.log(`[stripe-webhook] Duplicate event for session ${sessionId}, skipping.`);
+        } else {
+          // Resolve price ID — expand line_items if not present
+          let priceId: string | undefined;
+          if (session.line_items?.data?.[0]?.price?.id) {
+            priceId = session.line_items.data[0].price.id;
+          } else {
+            try {
+              const Stripe = (await import("stripe")).default;
+              const stripe = new Stripe(stripeSecretKey);
+              const fullSession = await stripe.checkout.sessions.retrieve(sessionId, {
+                expand: ["line_items"],
+              });
+              priceId = (fullSession as any).line_items?.data?.[0]?.price?.id;
+            } catch (e: any) {
+              console.error(`[stripe-webhook] Failed to expand line_items: ${e?.message}`);
+            }
+          }
+
+          // Map price ID → plan_type
+          const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
+          const PRICE_BUNDLE = process.env.STRIPE_PRICE_BUNDLE;
+          const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
+          const PRICE_ADDON = process.env.STRIPE_PRICE_ADDON_SITE;
+          let planType = "custom";
+          if (priceId && priceId === PRICE_LOCAL) planType = "local_launch";
+          else if (priceId && priceId === PRICE_BUNDLE) planType = "growth_bundle";
+          else if (priceId && priceId === PRICE_BUNDLE_ANNUAL) planType = "growth_bundle_annual";
+          else if (priceId && priceId === PRICE_ADDON) planType = "addon_site";
+
+          // Generate unique token (collision check, though astronomically unlikely)
+          let token = "";
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const candidate = randomBytes(32).toString("hex");
+            const clash = await db
+              .select({ id: onboardingSubmissions.id })
+              .from(onboardingSubmissions)
+              .where(dEq(onboardingSubmissions.token, candidate))
+              .limit(1);
+            if (clash.length === 0) {
+              token = candidate;
+              break;
+            }
+          }
+          if (!token) {
+            throw new Error("Failed to generate unique onboarding token after 5 attempts");
+          }
+
+          await db.insert(onboardingSubmissions).values({
+            token,
+            stripeSessionId: sessionId,
+            stripeCustomerId: customerId ?? undefined,
+            planType,
+            status: "pending",
+            formData: {
+              customer_email: customerEmail,
+              customer_name: customerName,
+              stripe_subscription_id: subscriptionId,
+            },
+          });
+
+          console.log(
+            `[Stripe Webhook] Checkout completed. Plan: ${planType}, Token: ${token}, Customer: ${customerEmail}`,
+          );
+        }
       }
 
       if (event.type === "invoice.payment_failed") {
@@ -5831,6 +5910,37 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     }
 
     return res.json({ received: true });
+  });
+
+  // ── Onboarding redirect (called by /welcome page) ─────────────────────────────
+
+  app.get("/api/stripe/onboarding-redirect", async (req: Request, res: Response) => {
+    const sessionId = req.query.session_id;
+    if (!sessionId || typeof sessionId !== "string") {
+      return res.status(400).json({ error: "Missing session_id" });
+    }
+    try {
+      const rows = await db
+        .select({
+          token: onboardingSubmissions.token,
+          status: onboardingSubmissions.status,
+          planType: onboardingSubmissions.planType,
+        })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.stripeSessionId, sessionId))
+        .limit(1);
+      if (rows.length === 0) {
+        return res.status(404).json({
+          error: "Session not found",
+          message: "Your onboarding link is being generated. Please refresh in a few seconds.",
+        });
+      }
+      const row = rows[0];
+      return res.json({ token: row.token, status: row.status, plan_type: row.planType });
+    } catch (err: any) {
+      console.error("[onboarding-redirect] error:", err?.message);
+      return res.status(500).json({ error: "lookup_failed" });
+    }
   });
 
   // ── Stripe Checkout ───────────────────────────────────────────────────────────
