@@ -95,7 +95,7 @@ function Accordion({ items }: { items: { q: string; a: string }[] }) {
 
 // ── Stripe checkout helper ────────────────────────────────────────────────────
 
-type Tier = "bundle" | "pilot";
+type Tier = "bundle" | "bundleAnnual" | "pilot";
 
 async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?: string }> {
   const resp = await fetch("/api/stripe/create-checkout-session", {
@@ -481,10 +481,15 @@ export default function NexusLandingPage() {
   // ── Stripe config (which add-ons are purchasable) ───────────────────────────
 
   const [addonSiteEnabled, setAddonSiteEnabled] = useState(false);
+  const [bundleAnnualEnabled, setBundleAnnualEnabled] = useState(false);
+  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
   useEffect(() => {
     fetch("/api/stripe/config")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d && d.addonSiteEnabled) setAddonSiteEnabled(true); })
+      .then(d => {
+        if (d && d.addonSiteEnabled) setAddonSiteEnabled(true);
+        if (d && d.bundleAnnualEnabled) setBundleAnnualEnabled(true);
+      })
       .catch(() => {});
   }, []);
   const [addonLoading, setAddonLoading] = useState(false);
@@ -627,7 +632,6 @@ export default function NexusLandingPage() {
     "Fallback demand monitoring",
     "Weekly performance report",
     "3-month minimum",
-    "Annual option: $2,500/mo",
   ];
 
   const customFeatures = [
@@ -996,6 +1000,70 @@ export default function NexusLandingPage() {
             </p>
           </FadeIn>
 
+          {bundleAnnualEnabled && (
+            <FadeIn delay={60}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 32 }}>
+                <div
+                  role="tablist"
+                  aria-label="Billing period"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    background: "#18181b",
+                    border: "1px solid #27272a",
+                    borderRadius: 999,
+                    padding: 4,
+                    gap: 4,
+                  }}
+                >
+                  {([
+                    { id: "monthly", label: "Monthly", suffix: null },
+                    { id: "annual", label: "Annual", suffix: "save $6,000/yr" },
+                  ] as const).map(opt => {
+                    const active = billingPeriod === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setBillingPeriod(opt.id)}
+                        data-testid={`btn-billing-${opt.id}`}
+                        style={{
+                          padding: "8px 18px",
+                          fontSize: 13,
+                          fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                          fontWeight: 600,
+                          color: active ? "#fafafa" : "#71717a",
+                          background: active ? "#3b82f6" : "transparent",
+                          border: "none",
+                          borderRadius: 999,
+                          cursor: "pointer",
+                          transition: "background 180ms, color 180ms",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {opt.label}
+                        {opt.suffix && (
+                          <span style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: active ? "#d1fae5" : "#10b981",
+                            transition: "color 180ms",
+                          }}>
+                            {opt.suffix}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </FadeIn>
+          )}
+
           <FadeIn delay={80}>
             <div className="nx-pricing-grid">
 
@@ -1016,6 +1084,13 @@ export default function NexusLandingPage() {
                     fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
                     fontSize: 14, color: "#71717a", marginBottom: 0,
                   }}>For agencies testing programmatic SEO with their first client.</p>
+                  {bundleAnnualEnabled && (
+                    <p style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11, color: "#52525b", marginTop: 8, marginBottom: 0,
+                      letterSpacing: "0.02em",
+                    }}>Monthly only</p>
+                  )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
                   {pilotFeatures.map((f, i) => (
@@ -1036,7 +1111,10 @@ export default function NexusLandingPage() {
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 8 }}>
                     <span className="nx-mono" style={{
                       fontSize: "clamp(36px, 5vw, 48px)", fontWeight: 500, color: "#fafafa", lineHeight: 1,
-                    }}>$3,000</span>
+                      transition: "color 180ms",
+                    }} data-testid="text-bundle-price">
+                      {billingPeriod === "annual" && bundleAnnualEnabled ? "$2,500" : "$3,000"}
+                    </span>
                     <span style={{
                       fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
                       fontSize: 14, color: "#71717a",
@@ -1046,6 +1124,15 @@ export default function NexusLandingPage() {
                     fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
                     fontSize: 14, color: "#71717a", marginBottom: 0,
                   }}>3 clients. Full automation. Your highest-margin SEO offer.</p>
+                  {billingPeriod === "annual" && bundleAnnualEnabled && (
+                    <p style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11, color: "#10b981", marginTop: 10, marginBottom: 0,
+                      letterSpacing: "0.02em",
+                    }} data-testid="text-bundle-annual-note">
+                      Billed monthly at annual rate — save $6,000/year
+                    </p>
+                  )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
                   {bundleFeatures.map((f, i) => (
@@ -1055,7 +1142,10 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="bundle" label="Get Started — $3,000/mo" featured />
+                {billingPeriod === "annual" && bundleAnnualEnabled
+                  ? <StripeButton tier="bundleAnnual" label="Get Started — $2,500/mo" featured />
+                  : <StripeButton tier="bundle" label="Get Started — $3,000/mo" featured />
+                }
               </div>
 
               {/* Right — Custom */}

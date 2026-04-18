@@ -5838,6 +5838,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
   app.get("/api/stripe/config", (_req: Request, res: Response) => {
     res.json({
       addonSiteEnabled: !!process.env.STRIPE_PRICE_ADDON_SITE,
+      bundleAnnualEnabled: !!process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
     });
   });
 
@@ -5845,6 +5846,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     const { tier } = req.body as { tier?: string };
     const priceIdMap: Record<string, string | undefined> = {
       bundle: process.env.STRIPE_PRICE_BUNDLE,
+      bundleAnnual: process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
       pilot: process.env.STRIPE_PRICE_PILOT,
       addonSite: process.env.STRIPE_PRICE_ADDON_SITE,
     };
