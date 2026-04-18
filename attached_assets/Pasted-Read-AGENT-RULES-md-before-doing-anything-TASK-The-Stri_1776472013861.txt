@@ -1,0 +1,54 @@
+Read AGENT_RULES.md before doing anything.
+TASK
+The Stripe products are created, the price IDs are in environment variables, and the landing page buttons already exist. The only thing needed is wiring the "Get Started" buttons to actually redirect to Stripe Checkout when clicked. Nothing else changes.
+Step 1 — Check what exists
+Before writing any code, show me:
+
+The current onClick handler on the "Get Started — $1,997/mo" button
+The current onClick handler on the "Get Started — $3,000/mo" button
+Whether an API route at /api/stripe/create-checkout-session already exists
+Whether the stripe npm package is installed
+
+Step 2 — Create the checkout endpoint if it does not exist
+If /api/stripe/create-checkout-session does not exist, create it:
+
+Route: POST /api/stripe/create-checkout-session
+Accepts JSON body with priceId
+Creates a Stripe Checkout Session with mode subscription, the provided priceId, quantity 1
+Success URL: https://spotonnexus.com/welcome?session_id={CHECKOUT_SESSION_ID}
+Cancel URL: https://spotonnexus.com/#pricing
+Returns { url: session.url }
+Uses STRIPE_SECRET_KEY from environment variables
+Does NOT require authentication — this is a public checkout endpoint
+Install stripe npm package if not already installed
+
+Step 3 — Wire the buttons
+"Get Started — $1,997/mo" button:
+
+On click, POST to /api/stripe/create-checkout-session with { "priceId": "<STRIPE_PRICE_LOCAL value>" }
+The price ID value must come from the server side, not hardcoded in frontend code. Pass it as a data attribute during server render or create a small /api/stripe/config GET endpoint that returns the available price IDs to the frontend.
+On success, redirect browser to the returned URL
+While waiting, disable the button and show "Processing..."
+On error, show "Something went wrong — try again" and re-enable
+
+"Get Started — $3,000/mo" button:
+
+Same logic using STRIPE_PRICE_BUNDLE
+
+"Book a Strategy Call" button on Enterprise card:
+
+Confirm it links to the BOOKING_URL environment variable. No Stripe needed.
+
+Step 4 — Verify
+After wiring:
+
+Click "Get Started — $1,997/mo" — confirm it redirects to Stripe Checkout showing $1,997/mo subscription
+Click "Get Started — $3,000/mo" — confirm it redirects to Stripe Checkout showing $3,000/mo subscription
+Complete a test purchase if in test mode using card 4242 4242 4242 4242
+
+WHAT NOT TO DO
+
+Do not change any page content, copy, styling, or layout
+Do not change any other routes or files
+Do not expose the Stripe secret key to the frontend
+Do not add authentication to the checkout endpoint
