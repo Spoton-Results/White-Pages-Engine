@@ -3929,11 +3929,18 @@ Return ONLY valid JSON (no markdown):
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
       const isLandingDomain = host === landingDomain || host === `www.${landingDomain}`;
       const isStaticAsset = req.path.startsWith("/assets/") || !!req.path.match(/\.(js|css|png|ico|svg|woff2?|json|txt|webmanifest)$/);
-      const isLandingRoot = isLandingDomain && (req.path === "/" || req.path === "" || isStaticAsset);
+      const isLandingSpaPath = isLandingDomain && (
+        req.path === "/" ||
+        req.path === "" ||
+        isStaticAsset ||
+        req.path === "/welcome" ||
+        req.path.startsWith("/onboard/") ||
+        req.path.startsWith("/dashboard/")
+      );
       if (!host
         || host === "localhost"
         || host === "0.0.0.0"
-        || isLandingRoot
+        || isLandingSpaPath
         || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
         || req.path.startsWith("/api/")
         || req.path.startsWith("/sites/")
