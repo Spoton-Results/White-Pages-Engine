@@ -137,8 +137,15 @@ export async function triggerPostGenerationScoring(
 
     // Auto 2: Assign tiers based on thresholds
     if (settings.autoAssignTiersAfterScoring) {
-      console.log(`[auto2] Assigning tiers for ${website.domain} (T1≥${settings.tier1Threshold}, T3<${settings.tier2Threshold})`);
-      const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(websiteId, settings.tier1Threshold);
+      // Phase 8 Rail 4 — protection mode tightens tier1 threshold per website
+      let tier1Thresh = settings.tier1Threshold;
+      try {
+        const { getProtectionModeThresholds } = await import("./safety-rails");
+        const prot = await getProtectionModeThresholds(websiteId);
+        if (prot.protection_mode) tier1Thresh = prot.tier1_score_threshold;
+      } catch { /* fall back */ }
+      console.log(`[auto2] Assigning tiers for ${website.domain} (T1≥${tier1Thresh}, T3<${settings.tier2Threshold})`);
+      const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(websiteId, tier1Thresh);
       let demoted = 0;
       if (settings.applyTier3) {
         const r = await storage.bulkSetTier3(websiteId, settings.tier2Threshold);
@@ -205,13 +212,19 @@ export async function runWeeklyAutoDemote(): Promise<void> {
   console.log("[auto6] Running weekly auto-demote check...");
   try {
     const allWebsites = await storage.getWebsites();
+    const { getProtectionModeThresholds } = await import("./safety-rails");
     for (const website of allWebsites) {
       const settings = getAutomationSettings(website);
-      const { autodemoteZeroImpressionDays } = settings;
+      let demotionDays = settings.autodemoteZeroImpressionDays;
       try {
-        const candidates = await storage.getZeroImpressionTier1Pages(website.id, autodemoteZeroImpressionDays);
+        // Phase 8 Rail 4 — protection mode tightens demotion window per website
+        const prot = await getProtectionModeThresholds(website.id);
+        if (prot.protection_mode) demotionDays = prot.auto_demotion_days;
+      } catch { /* fall back to global settings */ }
+      try {
+        const candidates = await storage.getZeroImpressionTier1Pages(website.id, demotionDays);
         if (candidates.length === 0) continue;
-        console.log(`[auto6] ${website.domain}: demoting ${candidates.length} zero-impression T1 page(s)`);
+        console.log(`[auto6] ${website.domain}: demoting ${candidates.length} zero-impression T1 page(s) (window=${demotionDays}d)`);
         for (const page of candidates) {
           await storage.updatePageTier(page.id, 2);
           await storage.createDemotionLog({
@@ -219,14 +232,14 @@ export async function runWeeklyAutoDemote(): Promise<void> {
             pageId: page.id,
             fromTier: 1,
             toTier: 2,
-            reason: `Zero impressions for more than ${autodemoteZeroImpressionDays} days`,
+            reason: `Zero impressions for more than ${demotionDays} days`,
           });
         }
         await storage.createAdminNotification({
           websiteId: website.id,
           type: "auto_demote",
           title: "Auto-demotion completed",
-          message: `${candidates.length} Tier 1 page(s) were demoted to Tier 2 due to zero impressions for more than ${autodemoteZeroImpressionDays} days.`,
+          message: `${candidates.length} Tier 1 page(s) were demoted to Tier 2 due to zero impressions for more than ${demotionDays} days.`,
           metadata: { count: candidates.length, demotedAt: new Date().toISOString() },
         });
 
@@ -390,8 +403,15 @@ export async function runAutoScoringJob(
 
     // Auto 2: Assign tiers after scoring
     if (settings.autoAssignTiersAfterScoring) {
-      console.log(`[auto2] Assigning tiers for ${website.domain}`);
-      const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(website.id, settings.tier1Threshold);
+      // Phase 8 Rail 4 — protection mode tightens tier1 threshold per website
+      let tier1Thresh = settings.tier1Threshold;
+      try {
+        const { getProtectionModeThresholds } = await import("./safety-rails");
+        const prot = await getProtectionModeThresholds(website.id);
+        if (prot.protection_mode) tier1Thresh = prot.tier1_score_threshold;
+      } catch { /* fall back */ }
+      console.log(`[auto2] Assigning tiers for ${website.domain} (T1≥${tier1Thresh})`);
+      const { promoted, promotedSlugs } = await storage.bulkUpdatePageTiers(website.id, tier1Thresh);
       let demoted = 0;
       if (settings.applyTier3) {
         const r = await storage.bulkSetTier3(website.id, settings.tier2Threshold);
@@ -436,11 +456,16 @@ export async function runWeeklyAutoDemoteWithJobs(): Promise<void> {
   console.log("[auto6] Running weekly auto-demote check (with job tracking)...");
   try {
     const allWebsites = await storage.getWebsites();
+    const { getProtectionModeThresholds } = await import("./safety-rails");
     for (const website of allWebsites) {
       const settings = getAutomationSettings(website);
-      const { autodemoteZeroImpressionDays } = settings;
+      let demotionDays = settings.autodemoteZeroImpressionDays;
       try {
-        const candidates = await storage.getZeroImpressionTier1Pages(website.id, autodemoteZeroImpressionDays);
+        const prot = await getProtectionModeThresholds(website.id);
+        if (prot.protection_mode) demotionDays = prot.auto_demotion_days;
+      } catch { /* fall back */ }
+      try {
+        const candidates = await storage.getZeroImpressionTier1Pages(website.id, demotionDays);
         if (candidates.length === 0) continue;
 
         // Create a job record so it's visible in the Jobs dashboard
@@ -453,11 +478,11 @@ export async function runWeeklyAutoDemoteWithJobs(): Promise<void> {
           processedPages: 0,
           passedPages: 0,
           failedPages: 0,
-          settings: { type: "auto_demote", reason: `Zero impressions for ${autodemoteZeroImpressionDays} days` },
+          settings: { type: "auto_demote", reason: `Zero impressions for ${demotionDays} days` },
         });
 
         let processed = 0, failed = 0;
-        console.log(`[auto6] ${website.domain}: demoting ${candidates.length} zero-impression T1 page(s)`);
+        console.log(`[auto6] ${website.domain}: demoting ${candidates.length} zero-impression T1 page(s) (window=${demotionDays}d)`);
         for (const page of candidates) {
           try {
             await storage.updatePageTier(page.id, 2);
@@ -466,7 +491,7 @@ export async function runWeeklyAutoDemoteWithJobs(): Promise<void> {
               pageId: page.id,
               fromTier: 1,
               toTier: 2,
-              reason: `Zero impressions for more than ${autodemoteZeroImpressionDays} days`,
+              reason: `Zero impressions for more than ${demotionDays} days`,
             });
             processed++;
           } catch {
@@ -478,7 +503,7 @@ export async function runWeeklyAutoDemoteWithJobs(): Promise<void> {
           websiteId: website.id,
           type: "auto_demote",
           title: "Auto-demotion completed",
-          message: `${processed} Tier 1 page(s) were demoted to Tier 2 due to zero impressions for more than ${autodemoteZeroImpressionDays} days.`,
+          message: `${processed} Tier 1 page(s) were demoted to Tier 2 due to zero impressions for more than ${demotionDays} days.`,
           metadata: { count: processed, demotedAt: new Date().toISOString() },
         });
 

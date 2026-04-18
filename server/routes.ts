@@ -6018,7 +6018,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
           });
 
           console.log(
-            `[Stripe Webhook] Checkout completed. Plan: ${planType}, Token: ${token}, Customer: ${customerEmail}`,
+            `[Stripe Webhook] Checkout completed. Plan: ${planType}, Token: ${token.slice(0, 6)}…, Customer: ${customerEmail}`,
           );
         }
       }
@@ -6226,10 +6226,239 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         message: messageMap[r.status || ""] || "Processing your account.",
         ...(pageCounts ? { page_counts: pageCounts } : {}),
         ...(waveInfo ? { wave_info: waveInfo } : {}),
+        // Phase 9 — public customer dashboard URL
+        dashboard_url: `/dashboard/${token}`,
       });
     } catch (err: any) {
       console.error("[onboard-status] error:", err?.message);
       return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PHASE 9 — Public customer dashboard data (no auth, token-based)
+  // ═══════════════════════════════════════════════════════════════════════
+  app.get("/api/dashboard/data", async (req: Request, res: Response) => {
+    const token = String(req.query.token || "").trim();
+    if (!token || token.length < 8) {
+      return res.status(400).json({ error: "invalid_token" });
+    }
+    try {
+      const [sub] = await db
+        .select()
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.token, token))
+        .limit(1);
+      if (!sub) return res.status(404).json({ error: "not_found" });
+
+      const websiteId = sub.websiteId!;
+      const accountId = sub.accountId!;
+      const website = websiteId ? await storage.getWebsite(websiteId) : null;
+      const profiles = accountId ? await storage.getBrandProfiles(accountId) : [];
+      const brand = profiles[0];
+
+      // Page stats
+      let pageStats: any = null;
+      if (websiteId) {
+        const [stats] = (await db.execute(sql`
+          SELECT
+            COUNT(*)::int AS total_pages,
+            COUNT(*) FILTER (WHERE is_draft = false)::int AS live_pages,
+            COUNT(*) FILTER (WHERE is_draft = true)::int AS draft_pages,
+            COUNT(*) FILTER (WHERE tier = 1 AND is_draft = false)::int AS tier1_live,
+            COUNT(*) FILTER (WHERE tier = 2 AND is_draft = false)::int AS tier2_live,
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int AS new_this_week,
+            COUNT(*) FILTER (WHERE updated_at >= NOW() - INTERVAL '7 days' AND is_draft = false AND publish_wave > 0)::int AS promoted_this_week,
+            COALESCE(AVG(quality_score), 0)::int AS avg_quality
+          FROM pages WHERE website_id = ${websiteId}
+        `).then((r: any) => (r.rows ? r.rows : r))) as any;
+        pageStats = stats;
+      }
+
+      // Health, warmup, protection, gap report
+      let health: any = null;
+      let warm: any = null;
+      let prot: any = null;
+      try {
+        if (websiteId) {
+          const { getLatestHealthScore } = await import("./services/launch-health");
+          health = await getLatestHealthScore(websiteId);
+          const { getWarmupPageLimit, getProtectionModeThresholds } = await import("./services/safety-rails");
+          warm = await getWarmupPageLimit(websiteId);
+          prot = await getProtectionModeThresholds(websiteId);
+        }
+      } catch (e: any) { console.error("[dashboard/data] sub-fetch failed:", e?.message); }
+
+      // Recent live pages
+      let recentPages: any[] = [];
+      if (websiteId) {
+        recentPages = (await db.execute(sql`
+          SELECT slug, title, tier, published_at, quality_score
+          FROM pages WHERE website_id = ${websiteId} AND is_draft = false
+          ORDER BY published_at DESC NULLS LAST LIMIT 10
+        `).then((r: any) => (r.rows ? r.rows : r))) as any[];
+      }
+
+      // Sanitize warmup limit for client display
+      const warmupLimitDisplay = warm && warm.current_limit === Number.MAX_SAFE_INTEGER ? null : warm?.current_limit ?? null;
+
+      return res.json({
+        brand_name: brand?.name || website?.name || "Your Account",
+        domain: website?.domain || "",
+        status: sub.status,
+        readiness_score: sub.readinessScore || 0,
+        page_stats: pageStats,
+        recent_pages: recentPages.map((p) => ({
+          slug: p.slug,
+          title: p.title,
+          tier: p.tier,
+          published_at: p.published_at,
+          quality_score: p.quality_score,
+        })),
+        launch_health: health ? {
+          score: health.score,
+          // Customer-safe summary only; internal breakdown (which references "completeness")
+          // is intentionally not exposed to customers.
+          message: (health.breakdown as any)?.message
+            || (health.score >= 70 ? "Your account is performing well."
+                : health.score >= 50 ? "Your account is on track. A few items below could give it a boost."
+                : "Your account needs attention — see action items below."),
+        } : null,
+        warmup: warm ? {
+          active: warm.warmup_active,
+          day: warm.warmup_day,
+          page_limit: warmupLimitDisplay,
+          next_increase_day: warm.next_tier_day,
+          next_increase_limit: warm.next_tier_limit,
+          expires_at: warm.expires_at,
+        } : null,
+        protection: prot ? {
+          active: prot.protection_mode,
+          expires_in_days: prot.protection_expires_in_days ?? null,
+        } : null,
+        gap_report: sub.gapReport || null,
+        wave_info: ((sub.governorResults as any)?.governor_3_launch_cap) ? {
+          waves_published: 1 + (Array.isArray((sub.governorResults as any)?.wave_unlocks) ? (sub.governorResults as any).wave_unlocks.length : 0),
+        } : null,
+        booking_url: process.env.VITE_BOOKING_URL || null,
+      });
+    } catch (err: any) {
+      console.error("[dashboard/data] error:", err?.message);
+      return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PHASE 8/9 — Admin-only endpoints
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Clear duplicate flags on selected pages (or all on a website)
+  app.post("/api/admin/duplicates/clear", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const websiteId = String(req.body?.websiteId || "").trim();
+      const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds : [];
+      if (!websiteId) return res.status(400).json({ error: "websiteId_required" });
+      let cleared = 0;
+      if (pageIds.length > 0) {
+        const r = await db.execute(sql`
+          UPDATE pages SET duplicate_flag = false, duplicate_of_slug = NULL, duplicate_similarity = NULL,
+            draft_reason = CASE WHEN draft_reason = 'duplicate_intent' THEN NULL ELSE draft_reason END
+          WHERE website_id = ${websiteId} AND id = ANY(${pageIds})
+        `).then((x: any) => x);
+        cleared = (r as any)?.rowCount || pageIds.length;
+      } else {
+        const r = await db.execute(sql`
+          UPDATE pages SET duplicate_flag = false, duplicate_of_slug = NULL, duplicate_similarity = NULL,
+            draft_reason = CASE WHEN draft_reason = 'duplicate_intent' THEN NULL ELSE draft_reason END
+          WHERE website_id = ${websiteId} AND duplicate_flag = true
+        `).then((x: any) => x);
+        cleared = (r as any)?.rowCount || 0;
+      }
+      return res.json({ cleared });
+    } catch (err: any) {
+      console.error("[admin/duplicates/clear] error:", err?.message);
+      return res.status(500).json({ error: "clear_failed" });
+    }
+  });
+
+  // List duplicate-flagged pages
+  app.get("/api/admin/websites/:id/duplicates", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, slug, title, duplicate_of_slug, duplicate_similarity, quality_score, tier, is_draft
+        FROM pages WHERE website_id = ${req.params.id} AND duplicate_flag = true
+        ORDER BY duplicate_similarity DESC NULLS LAST LIMIT 500
+      `).then((r: any) => (r.rows ? r.rows : r))) as any[];
+      return res.json({ duplicates: rows });
+    } catch (err: any) {
+      return res.status(500).json({ error: "fetch_failed" });
+    }
+  });
+
+  // Disable warmup mode on a website
+  app.post("/api/admin/websites/:id/disable-warmup", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      await db.execute(sql`UPDATE websites SET warmup_mode = false, warmup_expires_at = NULL WHERE id = ${req.params.id}`);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: "disable_failed" });
+    }
+  });
+
+  // Disable protection mode on a website
+  app.post("/api/admin/websites/:id/disable-protection", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      await db.execute(sql`UPDATE websites SET protection_mode = false, protection_expires_at = NULL WHERE id = ${req.params.id}`);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: "disable_failed" });
+    }
+  });
+
+  // Run launch health calculation on demand
+  app.post("/api/admin/websites/:id/run-launch-health", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const { calculateLaunchHealthScore } = await import("./services/launch-health");
+      const breakdown = await calculateLaunchHealthScore(req.params.id);
+      return res.json({ breakdown });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "calc_failed" });
+    }
+  });
+
+  // Generate (and try to send) a client digest on demand
+  app.post("/api/admin/websites/:id/send-digest", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const { generateClientWeeklyDigest } = await import("./services/client-digest");
+      const result = await generateClientWeeklyDigest(req.params.id);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "send_failed" });
+    }
+  });
+
+  // Re-send an existing digest by id
+  app.post("/api/admin/digests/:id/resend", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const { sendDigestById } = await import("./services/client-digest");
+      const sent = await sendDigestById(req.params.id);
+      return res.json({ sent });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "send_failed" });
+    }
+  });
+
+  // List digests
+  app.get("/api/admin/digests", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const websiteId = String(req.query.websiteId || "").trim();
+      const rows = (await db.execute(websiteId
+        ? sql`SELECT id, website_id, recipient_email, subject, status, sent_at, created_at FROM client_weekly_digests WHERE website_id = ${websiteId} ORDER BY created_at DESC LIMIT 100`
+        : sql`SELECT id, website_id, recipient_email, subject, status, sent_at, created_at FROM client_weekly_digests ORDER BY created_at DESC LIMIT 100`
+      ).then((r: any) => (r.rows ? r.rows : r))) as any[];
+      return res.json({ digests: rows });
+    } catch (err: any) {
+      return res.status(500).json({ error: "list_failed" });
     }
   });
 

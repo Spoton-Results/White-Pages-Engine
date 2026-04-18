@@ -157,27 +157,43 @@ export default function WelcomePage() {
         )}
 
         {state.kind === "ready" && (
-          <a
-            href={`/onboard/${state.token}`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "16px 36px",
-              background: "#3b82f6",
-              color: "#fff",
-              borderRadius: 8,
-              textDecoration: "none",
-              fontSize: 15,
-              fontWeight: 600,
-              fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-              transition: "background 0.2s, box-shadow 0.2s",
-              boxShadow: "0 4px 20px rgba(59,130,246,0.35)",
-            }}
-            data-testid="link-welcome-onboard"
-          >
-            Complete Your Onboarding Form
-          </a>
+          <>
+            <a
+              href={`/onboard/${state.token}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "16px 36px",
+                background: "#3b82f6",
+                color: "#fff",
+                borderRadius: 8,
+                textDecoration: "none",
+                fontSize: 15,
+                fontWeight: 600,
+                fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+                transition: "background 0.2s, box-shadow 0.2s",
+                boxShadow: "0 4px 20px rgba(59,130,246,0.35)",
+              }}
+              data-testid="link-welcome-onboard"
+            >
+              Complete Your Onboarding Form
+            </a>
+            <div style={{ marginTop: 18 }}>
+              <a
+                href={`/dashboard/${state.token}`}
+                style={{
+                  fontSize: 14,
+                  color: "#a1a1aa",
+                  textDecoration: "underline",
+                  textUnderlineOffset: 4,
+                }}
+                data-testid="link-welcome-dashboard"
+              >
+                View your account dashboard →
+              </a>
+            </div>
+          </>
         )}
 
         {state.kind === "idle" && (

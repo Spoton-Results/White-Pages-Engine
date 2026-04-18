@@ -103,6 +103,10 @@ export const websites = pgTable("websites", {
   firstPublishAt: timestamp("first_publish_at"),
   coveragePlan: varchar("coverage_plan", { length: 20 }).default("regional"),
   tier1WeeklySubmitCap: integer("tier1_weekly_submit_cap").default(50),
+  protectionMode: boolean("protection_mode").default(false),
+  protectionExpiresAt: timestamp("protection_expires_at"),
+  warmupDay: integer("warmup_day").default(0),
+  warmupPageCapOverride: integer("warmup_page_cap_override"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -234,6 +238,9 @@ export const pages = pgTable("pages", {
   overridePublishedBy: varchar("override_published_by", { length: 100 }),
   overridePublishedAt: timestamp("override_published_at"),
   gscSubmittedAt: timestamp("gsc_submitted_at"),
+  duplicateFlag: boolean("duplicate_flag").default(false),
+  duplicateOfSlug: varchar("duplicate_of_slug", { length: 500 }),
+  duplicateSimilarity: decimal("duplicate_similarity", { precision: 5, scale: 4 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -255,6 +262,9 @@ export const onboardingSubmissions = pgTable("onboarding_submissions", {
   readinessResult: jsonb("readiness_result"),
   onboardingNotes: text("onboarding_notes"),
   governorResults: jsonb("governor_results"),
+  brandInputScore: integer("brand_input_score"),
+  brandInputResult: jsonb("brand_input_result"),
+  gapReport: jsonb("gap_report"),
   createdAt: timestamp("created_at").defaultNow(),
   submittedAt: timestamp("submitted_at"),
   generationStartedAt: timestamp("generation_started_at"),
@@ -542,3 +552,31 @@ export const demotionLogs = pgTable("demotion_logs", {
 export const insertDemotionLogSchema = createInsertSchema(demotionLogs).omit({ id: true, createdAt: true });
 export type InsertDemotionLog = z.infer<typeof insertDemotionLogSchema>;
 export type DemotionLog = typeof demotionLogs.$inferSelect;
+
+// ─── Phase 9: Launch Health Scores (historical) ──────────────────────────────
+
+export const launchHealthScores = pgTable("launch_health_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  score: integer("score").default(0),
+  maxScore: integer("max_score").default(100),
+  breakdown: jsonb("breakdown"),
+  calculatedAt: timestamp("calculated_at").defaultNow(),
+});
+export type LaunchHealthScore = typeof launchHealthScores.$inferSelect;
+
+// ─── Phase 9: Client Weekly Digests ──────────────────────────────────────────
+
+export const clientWeeklyDigests = pgTable("client_weekly_digests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull(),
+  recipientEmail: varchar("recipient_email", { length: 255 }).notNull(),
+  subject: varchar("subject", { length: 500 }),
+  bodyHtml: text("body_html"),
+  bodyText: text("body_text"),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  status: varchar("status", { length: 20 }).default("pending"),
+});
+export type ClientWeeklyDigest = typeof clientWeeklyDigests.$inferSelect;

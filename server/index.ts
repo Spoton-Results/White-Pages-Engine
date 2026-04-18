@@ -74,6 +74,46 @@ app.use((req, res, next) => {
     await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS gsc_submitted_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS governor_results JSONB`);
     console.log("[startup] Schema migration: Phase 7 governor columns ensured.");
+    // Phase 8 — Safety Rails columns
+    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_flag BOOLEAN DEFAULT false`);
+    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_of_slug VARCHAR(500)`);
+    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_similarity DECIMAL(5,4)`);
+    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_mode BOOLEAN DEFAULT false`);
+    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_expires_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS warmup_day INTEGER DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS warmup_page_cap_override INTEGER`);
+    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS brand_input_score INTEGER`);
+    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS brand_input_result JSONB`);
+    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS gap_report JSONB`);
+    console.log("[startup] Schema migration: Phase 8 safety-rails columns ensured.");
+    // Phase 9 — Health Score + Client Digest tables
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS launch_health_scores (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      score integer DEFAULT 0,
+      max_score integer DEFAULT 100,
+      breakdown jsonb,
+      calculated_at timestamp DEFAULT NOW()
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS client_weekly_digests (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      account_id varchar NOT NULL,
+      recipient_email varchar(255) NOT NULL,
+      subject varchar(500),
+      body_html text,
+      body_text text,
+      sent_at timestamp,
+      created_at timestamp DEFAULT NOW(),
+      status varchar(20) DEFAULT 'pending'
+    )`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag ON pages(website_id, duplicate_flag)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_launch_health_website ON launch_health_scores(website_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_launch_health_date ON launch_health_scores(calculated_at)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_website ON client_weekly_digests(website_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_status ON client_weekly_digests(status)`);
+    console.log("[startup] Schema migration: Phase 9 health/digest tables ensured.");
     // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
     const idxStatements = [
       `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,
@@ -366,6 +406,32 @@ app.use((req, res, next) => {
           }
         }
       }, 60 * 60 * 1000); // check every hour
+
+      // Phase 9: Weekly Launch Health calculation — Monday 06:00 UTC
+      setInterval(async () => {
+        const now = new Date();
+        if (now.getUTCDay() === 1 && now.getUTCHours() === 6 && now.getUTCMinutes() < 60) {
+          try {
+            const { runWeeklyLaunchHealth } = await import("./services/launch-health");
+            await runWeeklyLaunchHealth();
+          } catch (err) {
+            console.error("[Launch Health] Weekly run failed (non-fatal):", err);
+          }
+        }
+      }, 60 * 60 * 1000);
+
+      // Phase 9: Weekly Client Digest — Monday 09:00 UTC
+      setInterval(async () => {
+        const now = new Date();
+        if (now.getUTCDay() === 1 && now.getUTCHours() === 9 && now.getUTCMinutes() < 60) {
+          try {
+            const { runWeeklyClientDigests } = await import("./services/client-digest");
+            await runWeeklyClientDigests();
+          } catch (err) {
+            console.error("[Client Digest] Weekly run failed (non-fatal):", err);
+          }
+        }
+      }, 60 * 60 * 1000);
     },
   );
 })();

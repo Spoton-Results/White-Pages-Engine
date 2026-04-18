@@ -231,18 +231,32 @@ async function governor3LaunchCap(
   indexing_submitted: number;
   indexing_queued: number;
 }> {
-  const launchCap = website.launchCap ?? 100;
-  const weeklyCap = website.tier1WeeklySubmitCap ?? 50;
+  // Phase 8 — Rail 4 (protection thresholds) and Rail 3 (warmup cap)
+  const { getProtectionModeThresholds, getWarmupPageLimit, countLivePages } = await import("./safety-rails");
+  const protection = await getProtectionModeThresholds(websiteId);
+  const warm = await getWarmupPageLimit(websiteId);
+  const tier1Threshold = protection.tier1_score_threshold;
+  const liveCount = await countLivePages(websiteId);
+  const warmupHeadroom = Math.max(0, warm.current_limit - liveCount);
 
-  // Eligible Tier 1 drafts (NOT blocked by Governor 1), ordered by quality_score DESC, capped
-  const candidates = (await db.execute(sql`
+  const baseLaunchCap = website.launchCap ?? 100;
+  const launchCap = Math.min(baseLaunchCap, warmupHeadroom);
+  const weeklyCap = protection.indexing_weekly_cap ?? website.tier1WeeklySubmitCap ?? 50;
+
+  if (warmupHeadroom <= 0) {
+    console.log(`[Governor 3] Warmup page limit (${warm.current_limit}) reached on ${website.domain}. Holding remaining drafts.`);
+  }
+
+  // Eligible Tier 1 drafts (NOT blocked by Governor 1, NOT duplicates), ordered by quality_score DESC, capped
+  const candidates = launchCap === 0 ? [] : (await db.execute(sql`
     SELECT id, slug, quality_score
     FROM pages
     WHERE website_id = ${websiteId}
       AND is_draft = true
       AND draft_reason = 'onboarding_initial'
       AND tier = 1
-      AND COALESCE(quality_score, 0) >= ${TIER1_SCORE_THRESHOLD}
+      AND (duplicate_flag IS NOT TRUE)
+      AND COALESCE(quality_score, 0) >= ${tier1Threshold}
     ORDER BY quality_score DESC, id
     LIMIT ${launchCap}
   `).then((r: any) => (r.rows ? r.rows : r))) as any[];
@@ -254,7 +268,8 @@ async function governor3LaunchCap(
       AND is_draft = true
       AND draft_reason = 'onboarding_initial'
       AND tier = 1
-      AND COALESCE(quality_score, 0) >= ${TIER1_SCORE_THRESHOLD}
+      AND (duplicate_flag IS NOT TRUE)
+      AND COALESCE(quality_score, 0) >= ${tier1Threshold}
   `).then((r: any) => (r.rows ? r.rows : r))) as any;
   const tier1Eligible = eligTotalRow?.cnt || 0;
 
@@ -414,6 +429,15 @@ export async function runLaunchGovernors(websiteId: string): Promise<{
 
     const results = await loadGovernorResults(submissionId);
 
+    // ── Phase 8 Rail 1 — Duplicate Intent Detector (run BEFORE Governor 1) ──
+    try {
+      const { detectDuplicateIntent, recordRail1Result } = await import("./safety-rails");
+      const r1 = await detectDuplicateIntent(websiteId);
+      await recordRail1Result(submissionId, r1);
+    } catch (err: any) {
+      console.error(`[Rail 1] Duplicate detection failed for ${websiteId} (non-fatal):`, err?.message);
+    }
+
     // ── Governor 1 ──
     const g1 = await governor1ServiceGate(websiteId, accountId);
     results.governor_1_service_gate = {
@@ -474,8 +498,24 @@ export async function runLaunchGovernors(websiteId: string): Promise<{
         .set({ status: "published_live", completedAt: new Date() })
         .where(eq(onboardingSubmissions.id, submissionId));
       console.log(`[Launch Governors] Submission ${submissionId} → status: published_live.`);
+
+      // Phase 8 Rail 4 — Activate 30-day protection mode after first wave goes live
+      try {
+        const { activateProtectionMode } = await import("./safety-rails");
+        await activateProtectionMode(websiteId);
+      } catch (err: any) {
+        console.error(`[Rail 4] activateProtectionMode failed for ${websiteId} (non-fatal):`, err?.message);
+      }
     } else {
       console.warn(`[Launch Governors] Governor 3 published 0 pages — leaving submission in 'generated_draft_only'.`);
+    }
+
+    // Phase 9 — Refresh customer-friendly gap report after Phase 7
+    try {
+      const { generateGapReport } = await import("./gap-report");
+      await generateGapReport(submissionId);
+    } catch (err: any) {
+      console.error("[Gap Report] Phase 7 generation failed (non-fatal):", err?.message);
     }
 
     return { success: true, governor_results: results };

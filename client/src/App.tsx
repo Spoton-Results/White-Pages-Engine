@@ -69,6 +69,7 @@ import OnboardWizard from "@/pages/agencies/onboard";
 import NexusLandingPage from "@/pages/NexusLandingPage";
 import WelcomePage from "@/pages/WelcomePage";
 import OnboardForm from "@/pages/OnboardForm";
+import CustomerDashboard from "@/pages/CustomerDashboard";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -130,6 +131,7 @@ function Router() {
       <Switch>
         <Route path="/welcome"><WelcomePage /></Route>
         <Route path="/onboard/:token"><OnboardForm /></Route>
+        <Route path="/dashboard/:token"><CustomerDashboard /></Route>
         <Route><NexusLandingPage /></Route>
       </Switch>
     );

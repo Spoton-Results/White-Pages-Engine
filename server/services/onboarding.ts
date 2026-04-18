@@ -721,13 +721,29 @@ export async function calculateReadinessScore(submissionId: string): Promise<{
     console.log(`[Onboarding] Submission ${submissionId} scored ${totalScore}/100. LOW SCORE — admin review needed. Gaps: ${gaps.map(g => g.field).join(", ")}.`);
   }
 
+  // Phase 8 Rail 2 — Brand-Input Completeness Gate
+  let brandGateNote = "";
+  try {
+    const { checkBrandInputQuality } = await import("./brand-input-gate");
+    const brandResult = await checkBrandInputQuality(submissionId);
+    if (brandResult.decision === "block") {
+      newSubStatus = "needs_info";
+      newWebsiteStatus = "needs_info";
+      brandGateNote = `\n\nBrand profile is incomplete (${brandResult.score}/30). The following must be added before pages can be prepared: ${brandResult.zero_items.join(", ")}.`;
+    } else if (brandResult.decision === "warn") {
+      brandGateNote = `\n\nBrand profile could be stronger (${brandResult.score}/30). Adding more detail will improve every page on your site.`;
+    }
+  } catch (err: any) {
+    console.error("[Brand Input Gate] Failed (non-fatal):", err?.message);
+  }
+
   await db
     .update(onboardingSubmissions)
     .set({
       readinessScore: totalScore,
       readinessResult: result as any,
       status: newSubStatus,
-      onboardingNotes: notes,
+      onboardingNotes: notes + brandGateNote,
     })
     .where(eq(onboardingSubmissions.id, submissionId));
 
@@ -735,6 +751,14 @@ export async function calculateReadinessScore(submissionId: string): Promise<{
     .update(websitesTable)
     .set({ onboardingStatus: newWebsiteStatus })
     .where(eq(websitesTable.id, sub.websiteId));
+
+  // Phase 9 — Generate customer-friendly gap report after Phase 5
+  try {
+    const { generateGapReport } = await import("./gap-report");
+    await generateGapReport(submissionId);
+  } catch (err: any) {
+    console.error("[Gap Report] Phase 5 generation failed (non-fatal):", err?.message);
+  }
 
   // Phase 6 — fire-and-forget background generation pipeline.
   // MUST run AFTER both DB writes commit so the pipeline reads the
@@ -1165,6 +1189,14 @@ export async function runOnboardingGeneration(submissionId: string): Promise<{
     await appendOnboardingNote(submissionId, finalNote);
 
     console.log(`[Onboarding Generation] Pipeline complete for submission ${submissionId}. Status: generated_draft_only. Awaiting Phase 7 launch governors.`);
+
+    // Phase 9 — Refresh customer-friendly gap report after Phase 6 completes
+    try {
+      const { generateGapReport } = await import("./gap-report");
+      await generateGapReport(submissionId);
+    } catch (err: any) {
+      console.error("[Gap Report] Phase 6 generation failed (non-fatal):", err?.message);
+    }
 
     // ── STEP 10 — Trigger Phase 7 Launch Governors ───────────────────────
     // Fire-and-forget: launch governors should never block or fail onboarding.

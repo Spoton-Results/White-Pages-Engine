@@ -105,6 +105,20 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
   // Track which sitemap slugs we generate so we can clean up stale ones
   const generatedSlugs = new Set<string>();
 
+  // Phase 8 Rail 4 — Skip Tier 2 sitemap chunks while site is in 30-day protection mode.
+  // Manual sites have protection_mode=false, so they are unaffected.
+  let allowTier2Sitemap = true;
+  try {
+    const { getProtectionModeThresholds } = await import("./safety-rails");
+    const prot = await getProtectionModeThresholds(websiteId);
+    allowTier2Sitemap = prot.sitemap_tier2_allowed;
+    if (!allowTier2Sitemap) {
+      console.log(`[Sitemap] Tier 2 sitemap chunks suppressed for ${domain} (protection mode active).`);
+    }
+  } catch (err: any) {
+    console.error(`[Sitemap] Protection-mode lookup failed for ${websiteId} (defaulting to allow Tier 2):`, err?.message);
+  }
+
   // ── Tier 1 pages → primary sitemaps (sitemap-1, sitemap-2...) ──────────────
   let t1ChunkIndex = 0;
   let t1Total = 0;
@@ -156,7 +170,7 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
 
   // ── Tier 2 pages → secondary sitemaps (sitemap-t2-1, sitemap-t2-2...) ──────
   let t2ChunkIndex = 0;
-  await streamPagesByTier(websiteId, 2, URLS_PER_SITEMAP, async (chunk) => {
+  if (allowTier2Sitemap) await streamPagesByTier(websiteId, 2, URLS_PER_SITEMAP, async (chunk) => {
     const slug = `sitemap-t2-${t2ChunkIndex + 1}`;
     generatedSlugs.add(slug);
     const urls = chunk.map((p) => ({
