@@ -6360,6 +6360,105 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
   // PHASE 8/9 — Admin-only endpoints
   // ═══════════════════════════════════════════════════════════════════════
 
+  // ── Admin Test Tool — Onboarding Pipeline Simulator ──────────────────────
+
+  app.post("/api/admin/test/create-submission", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const { planType, business, services, coverage } = req.body;
+      const { randomBytes } = await import("crypto");
+      const token = randomBytes(32).toString("hex");
+      const formData = { customer_email: business?.email || "test@example.com", customer_name: business?.legal_name || "Test User", business: business || {}, services: Array.isArray(services) ? services : [], coverage: coverage || {} };
+      const [row] = await db.insert(onboardingSubmissions).values({ token, stripeSessionId: "cs_test_manual_" + token.slice(0, 8), planType: planType || "local_launch", status: "pending", formData } as any).returning();
+      return res.json({ ok: true, submission: row });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/test/submissions", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const rows = await db.select().from(onboardingSubmissions).where(sql`stripe_session_id LIKE 'cs_test_manual%'`).orderBy(desc(onboardingSubmissions.createdAt)).limit(50);
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/test/submission/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const [sub] = await db.select().from(onboardingSubmissions).where(eq(onboardingSubmissions.id, req.params.id)).limit(1);
+      if (!sub) return res.status(404).json({ error: "not_found" });
+      let account = null, website = null, pageStats = null;
+      if (sub.accountId) account = await storage.getAccount(sub.accountId);
+      if (sub.websiteId) {
+        website = await storage.getWebsite(sub.websiteId);
+        const [stats] = await db.execute(sql`SELECT COUNT(*) FILTER (WHERE is_draft=false) AS published, COUNT(*) FILTER (WHERE is_draft=true) AS draft, COUNT(*) AS total FROM pages WHERE website_id=${sub.websiteId}`);
+        pageStats = stats;
+      }
+      return res.json({ submission: sub, account, website, pageStats });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/test/run-phase/:phase", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const phase = Number(req.params.phase);
+    const { submissionId } = req.body;
+    if (!submissionId) return res.status(400).json({ error: "submissionId required" });
+    try {
+      if (phase === 4) {
+        // Advance pending → submitted then run auto-create
+        await db.update(onboardingSubmissions).set({ status: "submitted", submittedAt: new Date() } as any).where(sql`id=${submissionId} AND status='pending'`);
+        const { processOnboardingSubmission } = await import("./services/onboarding");
+        const result = await processOnboardingSubmission(submissionId);
+        return res.json(result);
+      }
+      if (phase === 5) {
+        const { calculateReadinessScore } = await import("./services/onboarding");
+        const result = await calculateReadinessScore(submissionId);
+        return res.json(result);
+      }
+      if (phase === 6) {
+        const { runOnboardingGeneration } = await import("./services/onboarding");
+        const result = await runOnboardingGeneration(submissionId);
+        return res.json(result);
+      }
+      if (phase === 7) {
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
+        const { runLaunchGovernors } = await import("./services/launch-governors");
+        const result = await runLaunchGovernors(sub.websiteId);
+        return res.json(result);
+      }
+      if (phase === 8) {
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
+        const { detectDuplicateIntent, getWarmupPageLimit } = await import("./services/safety-rails");
+        const [dupeResult, warmup] = await Promise.all([detectDuplicateIntent(sub.websiteId), getWarmupPageLimit(sub.websiteId)]);
+        return res.json({ duplicates: dupeResult, warmup });
+      }
+      if (phase === 9) {
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
+        const { calculateLaunchHealthScore } = await import("./services/launch-health");
+        const result = await calculateLaunchHealthScore(sub.websiteId);
+        return res.json(result);
+      }
+      return res.status(400).json({ error: "Unknown phase: " + phase });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/test/submission/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      await db.delete(onboardingSubmissions).where(sql`id=${req.params.id} AND stripe_session_id LIKE 'cs_test_manual%'`);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Clear duplicate flags on selected pages (or all on a website)
   app.post("/api/admin/create-test-onboarding", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {

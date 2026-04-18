@@ -70,6 +70,7 @@ import NexusLandingPage from "@/pages/NexusLandingPage";
 import WelcomePage from "@/pages/WelcomePage";
 import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
+import OnboardingTestPage from "@/pages/onboarding-test";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -216,6 +217,9 @@ function Router() {
       </Route>
       <Route path="/bank-health">
         <AuthGuard><BankHealthPage /></AuthGuard>
+      </Route>
+      <Route path="/onboarding-test">
+        <AuthGuard><OnboardingTestPage /></AuthGuard>
       </Route>
       <Route path="/report/:token">
         <ClientReportPage />

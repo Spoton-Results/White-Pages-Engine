@@ -5,7 +5,7 @@ import {
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
   Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
-  ChevronDown, Handshake
+  ChevronDown, Handshake, FlaskConical
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,10 @@ const navigation = [
   { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
   { name: "Blueprints", href: "/blueprints", icon: Layers },
   { name: "Hub Pages", href: "/hub-pages", icon: Network },
+];
+
+const testingNav = [
+  { name: "Onboarding Test", href: "/onboarding-test", icon: FlaskConical },
 ];
 
 const contentNav = [
@@ -115,6 +119,12 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
           Content
         </div>
         {contentNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+
+        <Separator className="my-3" />
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+          Testing
+        </div>
+        {testingNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
       </div>
 
       <div className="p-3 mt-auto border-t shrink-0">
