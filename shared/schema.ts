@@ -95,6 +95,14 @@ export const websites = pgTable("websites", {
   r2Prefix: text("r2_prefix"),
   publishedPages: integer("published_pages").notNull().default(0),
   settings: jsonb("settings").default({}),
+  onboardingStatus: varchar("onboarding_status", { length: 30 }).default("manual"),
+  onboardingSubmissionId: varchar("onboarding_submission_id").references(() => onboardingSubmissions.id),
+  launchCap: integer("launch_cap").default(100),
+  warmupMode: boolean("warmup_mode").default(true),
+  warmupExpiresAt: timestamp("warmup_expires_at"),
+  firstPublishAt: timestamp("first_publish_at"),
+  coveragePlan: varchar("coverage_plan", { length: 20 }).default("regional"),
+  tier1WeeklySubmitCap: integer("tier1_weekly_submit_cap").default(50),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -220,9 +228,43 @@ export const pages = pgTable("pages", {
   rolloutPhase: text("rollout_phase"),
   promotionStatus: text("promotion_status").notNull().default("default"),
   noindex: boolean("noindex").notNull().default(false),
+  isDraft: boolean("is_draft").default(false),
+  draftReason: varchar("draft_reason", { length: 50 }),
+  publishWave: integer("publish_wave").default(0),
+  overridePublishedBy: varchar("override_published_by", { length: 100 }),
+  overridePublishedAt: timestamp("override_published_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ─── Onboarding Submissions ──────────────────────────────────────────────────
+
+export const onboardingSubmissions = pgTable("onboarding_submissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  stripeSessionId: varchar("stripe_session_id", { length: 255 }),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
+  planType: varchar("plan_type", { length: 50 }),
+  agencyId: varchar("agency_id").references(() => accounts.id),
+  accountId: varchar("account_id"),
+  websiteId: varchar("website_id"),
+  status: varchar("status", { length: 30 }).default("pending"),
+  formData: jsonb("form_data"),
+  readinessScore: integer("readiness_score").default(0),
+  readinessResult: jsonb("readiness_result"),
+  onboardingNotes: text("onboarding_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  submittedAt: timestamp("submitted_at"),
+  generationStartedAt: timestamp("generation_started_at"),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertOnboardingSubmissionSchema = createInsertSchema(onboardingSubmissions).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertOnboardingSubmission = z.infer<typeof insertOnboardingSubmissionSchema>;
+export type OnboardingSubmission = typeof onboardingSubmissions.$inferSelect;
 
 export const pageVersions = pgTable("page_versions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
