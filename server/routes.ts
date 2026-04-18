@@ -4571,6 +4571,31 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         ? body.queryClusterIds.length
         : (allClusters.length > 0 ? allClusters.length : 1);
     }
+
+    // ── Per-job size cap ──────────────────────────────────────────────────
+    // A single bulk job is capped to keep individual runs manageable. Total
+    // pages across the website are unbounded — split larger work into multiple
+    // jobs (fewer services, fewer states, or pick specific clusters).
+    const MAX_PAGES_PER_JOB = 25_000;
+    const targetCount =
+      body.mode === "all_states" ? 50 :
+      body.mode === "specific_states" ? (body.states?.length || 0) :
+      body.mode === "specific_cities" ? (body.cities?.length || 0) : 0;
+    const projectedTotal = body.services.length * effectiveClusterCount * Math.max(1, targetCount);
+    if (projectedTotal > MAX_PAGES_PER_JOB) {
+      return res.status(400).json({
+        error: "job_too_large",
+        projected_pages: projectedTotal,
+        limit: MAX_PAGES_PER_JOB,
+        breakdown: {
+          services: body.services.length,
+          clusters: effectiveClusterCount,
+          locations: targetCount,
+        },
+        message: `This configuration would create ${projectedTotal.toLocaleString()} pages in a single job, which exceeds the per-job limit of ${MAX_PAGES_PER_JOB.toLocaleString()}. Split it into smaller jobs by selecting fewer services, fewer states/cities, or specific query clusters. You can run as many jobs as you need to grow your total page count.`,
+      });
+    }
+
     const jobSettings = { ...body, progress, clusterCount: effectiveClusterCount };
 
     const job = await storage.createGenerationJob({
