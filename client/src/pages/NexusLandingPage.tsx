@@ -667,13 +667,13 @@ export default function NexusLandingPage() {
           <a href="#pricing" className="nx-mobile-link" onClick={closeMobileMenu}>Pricing</a>
           <a href="#faq" className="nx-mobile-link" onClick={closeMobileMenu}>FAQ</a>
           <a
-            href={BOOKING_URL}
+            href="tel:+18447231900"
             onClick={closeMobileMenu}
             className="nx-btn-primary"
             style={{ marginTop: 16, padding: "16px 40px", fontSize: 16 }}
             data-testid="link-mobile-cta"
           >
-            Book a call
+            Call us
           </a>
         </div>
       )}
@@ -701,12 +701,12 @@ export default function NexusLandingPage() {
             <a href="#pricing" className="nx-nav-link" style={{ padding: "0 12px" }}>Pricing</a>
             <a href="#faq" className="nx-nav-link" style={{ padding: "0 12px" }}>FAQ</a>
             <a
-              href={BOOKING_URL}
+              href="tel:+18447231900"
               className="nx-btn-primary"
               style={{ padding: "10px 20px", fontSize: 13, minHeight: 38, marginLeft: 8 }}
               data-testid="link-nav-cta"
             >
-              Book a call
+              Call us
             </a>
           </div>
 
@@ -754,8 +754,8 @@ export default function NexusLandingPage() {
           </FadeIn>
           <FadeIn delay={240}>
             <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 36 }}>
-              <a href={BOOKING_URL} className="nx-btn-primary" data-testid="link-hero-primary">
-                Book a Strategy Call
+              <a href="tel:+18447231900" className="nx-btn-primary" data-testid="link-hero-primary">
+                Call us
               </a>
               <a href="#pricing" className="nx-btn-ghost" data-testid="link-hero-pricing">
                 See Pricing
@@ -1172,12 +1172,12 @@ export default function NexusLandingPage() {
                   ))}
                 </div>
                 <a
-                  href={BOOKING_URL}
+                  href="tel:+18447231900"
                   className="nx-btn-ghost"
                   style={{ width: "100%", justifyContent: "center" }}
                   data-testid="link-pricing-custom-cta"
                 >
-                  Book a Strategy Call
+                  Call us
                 </a>
               </div>
 
@@ -1281,12 +1281,12 @@ export default function NexusLandingPage() {
               and a more defensible offer — starting at $1 per page.
             </p>
             <a
-              href={BOOKING_URL}
+              href="tel:+18447231900"
               className="nx-btn-primary"
               style={{ fontSize: 16, padding: "18px 40px" }}
               data-testid="link-final-cta"
             >
-              Book a Strategy Call
+              Call us
             </a>
             <p style={{
               marginTop: 20,
@@ -1316,7 +1316,7 @@ export default function NexusLandingPage() {
             <a href="#how-it-works" className="nx-nav-link" style={{ fontSize: 13 }}>How it works</a>
             <a href="#pricing" className="nx-nav-link" style={{ fontSize: 13 }}>Pricing</a>
             <a href="#faq" className="nx-nav-link" style={{ fontSize: 13 }}>FAQ</a>
-            <a href={BOOKING_URL} className="nx-nav-link" style={{ fontSize: 13 }}>Book a call</a>
+            <a href="tel:+18447231900" className="nx-nav-link" style={{ fontSize: 13 }}>Call us</a>
             <a href="tel:+18447231900" className="nx-nav-link" style={{ fontSize: 13 }} data-testid="link-footer-contact">Contact us: (844) 723-1900</a>
           </div>
           <span style={{
