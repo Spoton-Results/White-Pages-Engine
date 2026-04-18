@@ -381,7 +381,7 @@ function Wizard({ token, planType }: { token: string; planType: string }) {
           submitError={submitError}
         />
       )}
-      {step === 5 && <Step5Confirm email={business.email} />}
+      {step === 5 && <Step5Confirm email={business.email} token={token} />}
     </div>
   );
 }
@@ -1005,38 +1005,154 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
-// ─── STEP 5 — Confirmation ───────────────────────────────────────────────────
-function Step5Confirm({ email }: { email: string }) {
+// ─── STEP 5 — Confirmation (polls /api/onboard/status) ──────────────────────
+function Step5Confirm({ email, token }: { email: string; token: string }) {
+  const [statusData, setStatusData] = useState<{
+    status: string;
+    readiness_score?: number;
+    gaps?: Array<{ field: string; message: string; priority?: string }>;
+    message?: string;
+  }>({ status: "submitted", message: "Setting up your account..." });
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/onboard/status?token=${encodeURIComponent(token)}`);
+        if (cancelled) return;
+        if (r.ok) {
+          const data = await r.json();
+          setStatusData(data);
+          // Stop polling once we reach a terminal state
+          if (data.status === "ready_for_generation" || data.status === "needs_info" ||
+              data.status === "published_live") {
+            return;
+          }
+        }
+      } catch {/* ignore — keep polling */}
+      if (!cancelled) setTimeout(poll, 5000);
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const s = statusData.status;
+  const isReady = s === "ready_for_generation" || s === "published_live";
+  const isNeedsInfo = s === "needs_info";
+  const isWorking = !isReady && !isNeedsInfo;
+
+  let headline: string;
+  let body: React.ReactNode;
+  let iconColor = COLORS.success;
+  let iconBg = "rgba(16,185,129,0.1)";
+  let iconBorder = "rgba(16,185,129,0.4)";
+  let iconChar: React.ReactNode = "✓";
+
+  if (s === "submitted") {
+    headline = "Setting up your account...";
+    body = "We received your information and are preparing your account.";
+    iconColor = COLORS.accent; iconBg = "rgba(59,130,246,0.1)"; iconBorder = "rgba(59,130,246,0.4)";
+    iconChar = (
+      <span style={{
+        display: "inline-block", width: 28, height: 28,
+        border: "3px solid rgba(255,255,255,0.15)", borderTopColor: COLORS.accent,
+        borderRadius: "50%", animation: "nx-spin 0.9s linear infinite",
+      }} />
+    );
+  } else if (s === "creating" || s === "ready_for_scoring") {
+    headline = "Building your account...";
+    body = "We're creating your account and checking readiness. This takes about 30 seconds.";
+    iconColor = COLORS.accent; iconBg = "rgba(59,130,246,0.1)"; iconBorder = "rgba(59,130,246,0.4)";
+    iconChar = (
+      <span style={{
+        display: "inline-block", width: 28, height: 28,
+        border: "3px solid rgba(255,255,255,0.15)", borderTopColor: COLORS.accent,
+        borderRadius: "50%", animation: "nx-spin 0.9s linear infinite",
+      }} />
+    );
+  } else if (isReady) {
+    headline = "Your account is ready";
+    body = (
+      <>
+        Pages will begin generating shortly. We will notify you at{" "}
+        <strong style={{ color: COLORS.text }}>{email}</strong> when your first pages are ready.
+      </>
+    );
+  } else if (isNeedsInfo) {
+    headline = "We need a bit more information";
+    body = "Please review the items below, then call or reply to your confirmation email so we can finish setup.";
+    iconColor = "#f59e0b"; iconBg = "rgba(245,158,11,0.1)"; iconBorder = "rgba(245,158,11,0.4)";
+    iconChar = "!";
+  } else {
+    headline = "Processing your account";
+    body = statusData.message || "Working on it...";
+  }
+
   return (
     <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <style>{`@keyframes nx-spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{
         width: 72, height: 72, borderRadius: "50%",
-        background: "rgba(16,185,129,0.1)", border: `2px solid rgba(16,185,129,0.4)`,
+        background: iconBg, border: `2px solid ${iconBorder}`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        margin: "0 auto 28px", fontSize: 32, color: COLORS.success,
-      }}>✓</div>
-      <h1 style={h1Style} data-testid="text-confirm-headline">You're all set</h1>
-      <p style={{ ...pStyle, maxWidth: 480, margin: "0 auto 32px" }}>
-        Your onboarding is submitted and your Nexus account is being built.
-        We will notify you at <strong style={{ color: COLORS.text }}>{email}</strong> when your first pages are ready.
+        margin: "0 auto 28px", fontSize: 32, color: iconColor,
+      }} data-testid="status-icon-confirm">{iconChar}</div>
+      <h1 style={h1Style} data-testid="text-confirm-headline">{headline}</h1>
+      <p style={{ ...pStyle, maxWidth: 480, margin: "0 auto 24px" }} data-testid="text-confirm-body">
+        {body}
       </p>
-      <div style={{
-        textAlign: "left", maxWidth: 380, margin: "0 auto 32px",
-        background: COLORS.card, border: `1px solid ${COLORS.border}`,
-        borderRadius: 12, padding: 20,
-      }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.muted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
-          Estimated timeline
+
+      {isReady && typeof statusData.readiness_score === "number" && statusData.readiness_score > 0 && (
+        <p style={{ fontSize: 13, color: COLORS.muted, marginBottom: 24 }} data-testid="text-readiness-score">
+          Readiness score: <strong style={{ color: COLORS.text }}>{statusData.readiness_score}/100</strong>
+        </p>
+      )}
+
+      {isNeedsInfo && statusData.gaps && statusData.gaps.length > 0 && (
+        <div style={{
+          textAlign: "left", maxWidth: 480, margin: "0 auto 28px",
+          background: COLORS.card, border: `1px solid ${COLORS.border}`,
+          borderRadius: 12, padding: 20,
+        }} data-testid="list-gaps">
+          <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.muted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
+            Items to address
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 14, color: COLORS.text, lineHeight: 1.6 }}>
+            {statusData.gaps.map((g, i) => (
+              <li key={i} style={{ marginBottom: 8, paddingLeft: 16, position: "relative" }} data-testid={`text-gap-${i}`}>
+                <span style={{ position: "absolute", left: 0, color: "#f59e0b" }}>•</span>
+                {g.message}
+              </li>
+            ))}
+          </ul>
+          <p style={{ fontSize: 13, color: COLORS.muted, marginTop: 14, marginBottom: 0 }}>
+            Please call <a href="tel:+14359995348" style={linkStyle}>(435) 999-5348</a> or reply to your confirmation email.
+          </p>
         </div>
-        <ul style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 14, color: COLORS.text, lineHeight: 1.9 }}>
-          <li>• Account setup: within 1 hour</li>
-          <li>• Page generation: within 24 hours</li>
-          <li>• First pages live: within 48 hours</li>
-        </ul>
-      </div>
-      <p style={{ fontSize: 14, color: COLORS.muted }}>
-        Questions? Call <a href={`tel:${PHONE_TEL}`} style={linkStyle}>{PHONE_DISPLAY}</a>
-      </p>
+      )}
+
+      {isWorking && (
+        <div style={{
+          textAlign: "left", maxWidth: 380, margin: "0 auto 32px",
+          background: COLORS.card, border: `1px solid ${COLORS.border}`,
+          borderRadius: 12, padding: 20,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.muted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
+            Estimated timeline
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 14, color: COLORS.text, lineHeight: 1.9 }}>
+            <li>• Account setup: within 1 hour</li>
+            <li>• Page generation: within 24 hours</li>
+            <li>• First pages live: within 48 hours</li>
+          </ul>
+        </div>
+      )}
+
+      {!isNeedsInfo && (
+        <p style={{ fontSize: 14, color: COLORS.muted }}>
+          Questions? Call <a href={`tel:${PHONE_TEL}`} style={linkStyle}>{PHONE_DISPLAY}</a>
+        </p>
+      )}
     </div>
   );
 }

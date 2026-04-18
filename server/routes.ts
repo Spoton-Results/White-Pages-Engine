@@ -7,17 +7,18 @@ import { generateBlueprint, suggestServices, generateQueryClusters } from "./ser
 import { buildVariationPage } from "./services/variation-engine";
 import { writeVariationsForService, fillMissingSectionsForService, BrandContext } from "./services/variation-writer";
 import { generateSitemapsForWebsite, generateRobotsTxt, URLS_PER_SITEMAP } from "./services/sitemap";
-import { processOnboardingSubmission } from "./services/onboarding";
+import { processOnboardingSubmission, calculateReadinessScore } from "./services/onboarding";
 import { isR2Configured } from "./services/r2";
 import {
   insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
   insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
   insertIndustrySchema, insertQueryClusterSchema, insertBlueprintSchema,
   insertPageSchema, insertGenerationJobSchema, onboardingSubmissions,
+  websites,
 } from "@shared/schema";
 import { z } from "zod";
 import { db } from "./db";
-import { eq as dEq } from "drizzle-orm";
+import { eq as dEq, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
@@ -5975,6 +5976,132 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     } catch (err: any) {
       console.error("[onboard-lookup] error:", err?.message);
       return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  // ─── PHASE 5: Public status endpoint (polled by confirmation page) ──────
+  app.get("/api/onboard/status", async (req: Request, res: Response) => {
+    const token = String(req.query.token || "").trim();
+    if (!token || token.length < 8) {
+      return res.status(400).json({ error: "invalid_token" });
+    }
+    try {
+      const rows = await db
+        .select({
+          status: onboardingSubmissions.status,
+          readinessScore: onboardingSubmissions.readinessScore,
+          readinessResult: onboardingSubmissions.readinessResult,
+        })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.token, token))
+        .limit(1);
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const r = rows[0];
+      const result: any = r.readinessResult || {};
+      const messageMap: Record<string, string> = {
+        pending: "Waiting for onboarding form to be completed.",
+        submitted: "Your information was received. Setting up your account now.",
+        creating: "Building your account and checking readiness...",
+        ready_for_scoring: "Checking your account readiness.",
+        ready_for_generation: "Your account is ready. Pages will begin generating shortly.",
+        needs_info: "We need a bit more information. See the items below.",
+        generating: "Your pages are being generated. This may take a few hours.",
+        generated_draft_only: "Pages have been generated and are being reviewed for quality.",
+        published_live: "Your pages are live.",
+      };
+      return res.json({
+        status: r.status,
+        readiness_score: r.readinessScore || 0,
+        gaps: Array.isArray(result.gaps) ? result.gaps : [],
+        strengths: Array.isArray(result.strengths) ? result.strengths : [],
+        message: messageMap[r.status || ""] || "Processing your account.",
+      });
+    } catch (err: any) {
+      console.error("[onboard-status] error:", err?.message);
+      return res.status(500).json({ error: "lookup_failed" });
+    }
+  });
+
+  // ─── PHASE 5: Admin — list onboarding submissions ───────────────────────
+  app.get("/api/admin/onboarding/list", requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+    try {
+      const rows = await db
+        .select({
+          id: onboardingSubmissions.id,
+          token: onboardingSubmissions.token,
+          planType: onboardingSubmissions.planType,
+          status: onboardingSubmissions.status,
+          readinessScore: onboardingSubmissions.readinessScore,
+          readinessResult: onboardingSubmissions.readinessResult,
+          accountId: onboardingSubmissions.accountId,
+          websiteId: onboardingSubmissions.websiteId,
+          formData: onboardingSubmissions.formData,
+          onboardingNotes: onboardingSubmissions.onboardingNotes,
+          createdAt: onboardingSubmissions.createdAt,
+          submittedAt: onboardingSubmissions.submittedAt,
+        })
+        .from(onboardingSubmissions)
+        .orderBy(desc(onboardingSubmissions.createdAt))
+        .limit(200);
+      return res.json({ submissions: rows });
+    } catch (err: any) {
+      console.error("[admin-onboarding-list] error:", err?.message);
+      return res.status(500).json({ error: "list_failed" });
+    }
+  });
+
+  // ─── PHASE 5: Admin — manual override needs_info → ready_for_generation ──
+  // Two-step flow: GET (no override flag) returns current state + gaps so the
+  // admin can review the warning. POST with { submissionId, confirm: true }
+  // applies the override.
+  app.post("/api/admin/onboarding/override", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const submissionId = String(req.body?.submissionId || "").trim();
+    const confirm = req.body?.confirm === true;
+    if (!submissionId) return res.status(400).json({ error: "missing_submission_id" });
+
+    try {
+      const [sub] = await db
+        .select()
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.id, submissionId))
+        .limit(1);
+      if (!sub) return res.status(404).json({ error: "not_found" });
+      if (sub.status !== "needs_info") {
+        return res.status(409).json({ error: "invalid_status", message: `Submission status is '${sub.status}', expected 'needs_info'.` });
+      }
+
+      const result: any = sub.readinessResult || {};
+      const gaps: any[] = Array.isArray(result.gaps) ? result.gaps : [];
+      const score = sub.readinessScore || 0;
+      const warning = `This submission scored ${score}/100. The following gaps were identified:\n${gaps.length ? gaps.map((g: any) => `• ${g.message}`).join("\n") : "(none recorded)"}\nOverriding will allow page generation to proceed despite these gaps.`;
+
+      if (!confirm) {
+        return res.json({ requires_confirmation: true, score, gaps, warning });
+      }
+
+      const overrideTs = new Date().toISOString();
+      const overrideNote = `\n\nMANUAL OVERRIDE by admin at ${overrideTs}. Previous score: ${score}.`;
+      const newNotes = (sub.onboardingNotes || "") + overrideNote;
+
+      await db
+        .update(onboardingSubmissions)
+        .set({ status: "ready_for_generation", onboardingNotes: newNotes })
+        .where(dEq(onboardingSubmissions.id, submissionId));
+
+      if (sub.websiteId) {
+        await db
+          .update(websites)
+          .set({ onboardingStatus: "ready_for_generation" })
+          .where(dEq(websites.id, sub.websiteId));
+      }
+
+      console.log(`[Onboarding] Submission ${submissionId} OVERRIDDEN by admin. Previous score: ${score}/100. Status now: ready_for_generation.`);
+      return res.json({ success: true, status: "ready_for_generation", previous_score: score });
+    } catch (err: any) {
+      console.error("[admin-onboarding-override] error:", err?.message);
+      return res.status(500).json({ error: "override_failed", message: err?.message });
     }
   });
 
