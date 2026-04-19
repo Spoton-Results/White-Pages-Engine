@@ -339,7 +339,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   const clusterCount = eligibleClusters.length > 0 ? eligibleClusters.length : 1;
   let totalPages = services.length * clusterCount * targets.length;
-  await bulkUpdateJob(jobId, { totalPages });
 
   if (completedServiceSet.size > 0) {
     console.log(`[bulk-background] Resuming job ${jobId} — ${completedServiceSet.size}/${services.length} services already done, skipping them`);
@@ -367,12 +366,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         seenStates.add(t.stateAbbr.toUpperCase());
         return true;
       });
-      const dedupedTotal = services.length * clusterCount * targets.length;
-      totalPages = dedupedTotal;
-      await bulkUpdateJob(jobId, { totalPages: dedupedTotal });
-      console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets (${dedupedTotal} total pages)`);
+      totalPages = services.length * clusterCount * targets.length;
+      console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets (${totalPages} total pages)`);
     }
   }
+
+  // Write the accurate post-dedup total once (avoids an inflated flash in the UI)
+  await bulkUpdateJob(jobId, { totalPages });
 
   // ── Load slug set ONCE for the entire job (not once per service) ─────────────
   const existingSlugSet = await bulkGetPageSlugSet(job.websiteId);
