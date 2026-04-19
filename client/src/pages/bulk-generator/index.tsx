@@ -953,7 +953,7 @@ export default function BulkGeneratorPage() {
                     <>
                       Will {overwrite ? "create or update" : "create up to"} <strong>{totalEst.toLocaleString()}</strong> pages
                       {runBothLocations
-                        ? <> across <strong>{bpCount * 2} jobs</strong> ({bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {stateCount} states + {bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} cities)</>
+                        ? <> across <strong>{bpCount * 2} jobs</strong> ({bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {stateCount} states + {bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} cities)</>
                         : bpCount > 1
                           ? <> across <strong>{bpCount} blueprints</strong> ({estimatedPages.toLocaleString()} per blueprint: {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
                           : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
