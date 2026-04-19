@@ -809,7 +809,7 @@ async function appendOnboardingNote(submissionId: string, line: string): Promise
     .where(eq(onboardingSubmissions.id, submissionId));
 }
 
-export async function runOnboardingGeneration(submissionId: string): Promise<{
+export async function runOnboardingGeneration(submissionId: string, opts?: { overwrite?: boolean }): Promise<{
   success: boolean;
   totalDrafted?: number;
   tier1?: number;
@@ -818,8 +818,9 @@ export async function runOnboardingGeneration(submissionId: string): Promise<{
   averageScore?: number;
   error?: string;
 }> {
+  const overwrite = opts?.overwrite ?? false;
   const startedAt = new Date();
-  console.log(`[Onboarding Generation] Starting for submission ${submissionId}`);
+  console.log(`[Onboarding Generation] Starting for submission ${submissionId}${overwrite ? " (overwrite=true)" : ""}`);
 
   try {
     // ── Load submission and confirm state ─────────────────────────────────
@@ -829,8 +830,9 @@ export async function runOnboardingGeneration(submissionId: string): Promise<{
       .where(eq(onboardingSubmissions.id, submissionId))
       .limit(1);
     if (!sub) throw new Error(`Submission ${submissionId} not found`);
-    if (sub.status === "generating" || sub.status === "generated_draft_only" || sub.status === "published_live") {
+    if (!overwrite && (sub.status === "generating" || sub.status === "generated_draft_only" || sub.status === "published_live")) {
       // Idempotency — pipeline already ran or is running for this submission.
+      // Skipped only when overwrite=false; with overwrite=true we fall through.
       console.warn(`[Onboarding Generation] Submission ${submissionId} already at status '${sub.status}'. Skipping duplicate run.`);
       return { success: true };
     }
@@ -1101,7 +1103,7 @@ export async function runOnboardingGeneration(submissionId: string): Promise<{
         queryClusterIds: allClusters.map((c: any) => c.id),
         mode,
         ...modeSettings,
-        overwrite: false,
+        overwrite,
         isDraft: true,
         draftReason: "onboarding_initial",
         progress: services.map((s: any) => ({

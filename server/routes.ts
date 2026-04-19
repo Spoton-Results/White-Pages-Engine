@@ -6419,8 +6419,15 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         return res.json(result);
       }
       if (phase === 6) {
+        const { overwrite } = req.body;
+        if (overwrite) {
+          // Reset status so the idempotency guard doesn't block a re-run
+          await db.update(onboardingSubmissions)
+            .set({ status: "ready_for_generation" } as any)
+            .where(dEq(onboardingSubmissions.id, submissionId));
+        }
         const { runOnboardingGeneration } = await import("./services/onboarding");
-        const result = await runOnboardingGeneration(submissionId);
+        const result = await runOnboardingGeneration(submissionId, { overwrite: !!overwrite });
         return res.json(result);
       }
       if (phase === 7) {

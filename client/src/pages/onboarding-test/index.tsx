@@ -65,6 +65,7 @@ export default function OnboardingTestPage() {
   const [showForm, setShowForm] = useState(false);
   const [runningPhase, setRunningPhase] = useState<number | null>(null);
   const [phaseResults, setPhaseResults] = useState<Record<number, any>>({});
+  const [overwritePhase6, setOverwritePhase6] = useState(false);
 
   const [form, setForm] = useState({
     planType: "local_launch",
@@ -118,8 +119,8 @@ export default function OnboardingTestPage() {
   });
 
   const runPhaseMutation = useMutation({
-    mutationFn: ({ phase, submissionId }: { phase: number; submissionId: string }) =>
-      api.post(`/api/admin/test/run-phase/${phase}`, { submissionId }),
+    mutationFn: ({ phase, submissionId, overwrite }: { phase: number; submissionId: string; overwrite?: boolean }) =>
+      api.post(`/api/admin/test/run-phase/${phase}`, { submissionId, ...(overwrite ? { overwrite: true } : {}) }),
     onSuccess: (res: any, vars) => {
       setPhaseResults(prev => ({ ...prev, [vars.phase]: res }));
       setRunningPhase(null);
@@ -167,7 +168,7 @@ export default function OnboardingTestPage() {
   function runPhase(phase: number) {
     if (!selectedId) return;
     setRunningPhase(phase);
-    runPhaseMutation.mutate({ phase, submissionId: selectedId });
+    runPhaseMutation.mutate({ phase, submissionId: selectedId, overwrite: phase === 6 ? overwritePhase6 : undefined });
   }
 
   const sub = detail?.submission;
@@ -508,6 +509,19 @@ export default function OnboardingTestPage() {
                                 <div className="text-sm font-medium">Phase {ph.num}: {ph.label}</div>
                                 <div className="text-xs text-muted-foreground">{ph.desc}</div>
                               </div>
+                              {ph.num === 6 && (
+                                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer shrink-0" data-testid="label-overwrite-phase6">
+                                  <input
+                                    type="checkbox"
+                                    checked={overwritePhase6}
+                                    onChange={e => setOverwritePhase6(e.target.checked)}
+                                    disabled={isRunning || runningPhase !== null}
+                                    data-testid="checkbox-overwrite-phase6"
+                                    className="accent-primary"
+                                  />
+                                  Overwrite
+                                </label>
+                              )}
                               <Button
                                 size="sm"
                                 variant={done ? "outline" : isNext ? "default" : "outline"}
