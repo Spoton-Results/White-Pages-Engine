@@ -14,7 +14,7 @@ import {
   insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
   insertIndustrySchema, insertQueryClusterSchema, insertBlueprintSchema,
   insertPageSchema, insertGenerationJobSchema, onboardingSubmissions,
-  websites,
+  websites, pages,
 } from "@shared/schema";
 import { z } from "zod";
 import { db } from "./db";
@@ -6386,7 +6386,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   app.get("/api/admin/test/submission/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
-      const [sub] = await db.select().from(onboardingSubmissions).where(eq(onboardingSubmissions.id, req.params.id)).limit(1);
+      const [sub] = await db.select().from(onboardingSubmissions).where(dEq(onboardingSubmissions.id, req.params.id)).limit(1);
       if (!sub) return res.status(404).json({ error: "not_found" });
       let account = null, website = null, pageStats = null;
       if (sub.accountId) account = await storage.getAccount(sub.accountId);
@@ -6424,21 +6424,21 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
         return res.json(result);
       }
       if (phase === 7) {
-        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(dEq(onboardingSubmissions.id, submissionId)).limit(1);
         if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
         const { runLaunchGovernors } = await import("./services/launch-governors");
         const result = await runLaunchGovernors(sub.websiteId);
         return res.json(result);
       }
       if (phase === 8) {
-        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(dEq(onboardingSubmissions.id, submissionId)).limit(1);
         if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
         const { detectDuplicateIntent, getWarmupPageLimit } = await import("./services/safety-rails");
         const [dupeResult, warmup] = await Promise.all([detectDuplicateIntent(sub.websiteId), getWarmupPageLimit(sub.websiteId)]);
         return res.json({ duplicates: dupeResult, warmup });
       }
       if (phase === 9) {
-        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, submissionId)).limit(1);
+        const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(dEq(onboardingSubmissions.id, submissionId)).limit(1);
         if (!sub?.websiteId) return res.status(400).json({ error: "No websiteId on submission" });
         const { calculateLaunchHealthScore } = await import("./services/launch-health");
         const result = await calculateLaunchHealthScore(sub.websiteId);
@@ -6452,10 +6452,10 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   app.get("/api/admin/test/submission/:id/pages", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
-      const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(eq(onboardingSubmissions.id, req.params.id)).limit(1);
+      const [sub] = await db.select({ websiteId: onboardingSubmissions.websiteId }).from(onboardingSubmissions).where(dEq(onboardingSubmissions.id, req.params.id)).limit(1);
       if (!sub) return res.status(404).json({ error: "not_found" });
       if (!sub.websiteId) return res.status(404).json({ error: "No website on this submission yet" });
-      const allPages = await db.select({ slug: pages.slug, title: pages.title, isDraft: pages.isDraft, tier: pages.tier, qualityScore: pages.qualityScore, publishWave: pages.publishWave }).from(pages).where(eq(pages.websiteId, sub.websiteId));
+      const allPages = await db.select({ slug: pages.slug, title: pages.title, isDraft: pages.isDraft, tier: pages.tier, qualityScore: pages.qualityScore, publishWave: pages.publishWave }).from(pages).where(dEq(pages.websiteId, sub.websiteId));
       const stats = {
         total: allPages.length,
         draft: allPages.filter(p => p.isDraft).length,
