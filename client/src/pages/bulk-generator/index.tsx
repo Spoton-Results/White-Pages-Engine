@@ -189,10 +189,12 @@ export default function BulkGeneratorPage() {
   }, [selectedWebsite?.id]);
 
   function buildCityPayload() {
-    const cityObjs = Array.from(selectedCitySlugs).map(slug => {
-      const loc = dbCities.find((l: any) => l.slug === slug);
-      return loc ? { name: loc.name, stateAbbr: loc.stateCode } : null;
-    }).filter(Boolean);
+    // When "Generate both" is active in all_states mode, use ALL imported city locations,
+    // not just the explicitly selected ones (selectedCitySlugs is empty in all_states mode).
+    const citySource: any[] = (runBothLocations && mode === "all_states")
+      ? dbCities
+      : Array.from(selectedCitySlugs).map(slug => dbCities.find((l: any) => l.slug === slug)).filter(Boolean);
+    const cityObjs = citySource.map((loc: any) => ({ name: loc.name, stateAbbr: loc.stateCode }));
     return { mode: "specific_cities", cities: cityObjs };
   }
 
@@ -944,8 +946,10 @@ export default function BulkGeneratorPage() {
                 {(() => {
                   const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
                   const stateCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                  // For the city pass, use actual imported city locations (not stateCount as a proxy)
+                  const actualCityCount = (runBothLocations && mode === "all_states") ? dbCities.length : effectiveTargetCount;
                   const statePagesPerBp = selectedServices.size * clusterCountForEstimate * stateCount;
-                  const cityPagesPerBp = estimatedPages;
+                  const cityPagesPerBp  = selectedServices.size * clusterCountForEstimate * actualCityCount;
                   const totalEst = runBothLocations
                     ? (statePagesPerBp + cityPagesPerBp) * bpCount
                     : estimatedPages * bpCount;
@@ -953,12 +957,17 @@ export default function BulkGeneratorPage() {
                     <>
                       Will {overwrite ? "create or update" : "create up to"} <strong>{totalEst.toLocaleString()}</strong> pages
                       {runBothLocations
-                        ? <> across <strong>{bpCount * 2} jobs</strong> ({bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {stateCount} states + {bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} cities)</>
+                        ? <> across <strong>{bpCount * 2} jobs</strong> ({bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {stateCount} states + {bpCount} blueprint{bpCount !== 1 ? "s" : ""} × {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {actualCityCount.toLocaleString()} cities)</>
                         : bpCount > 1
                           ? <> across <strong>{bpCount} blueprints</strong> ({estimatedPages.toLocaleString()} per blueprint: {selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
                           : <> ({selectedServices.size} service{selectedServices.size !== 1 ? "s" : ""} × {clusterCountForEstimate} cluster{clusterCountForEstimate !== 1 ? "s" : ""} × {effectiveTargetCount.toLocaleString()} location{effectiveTargetCount !== 1 ? "s" : ""})</>
                       } — zero AI calls, instant.
                       {overwrite && <span className="text-blue-600 font-medium"> Overwrite mode on — existing pages will be regenerated.</span>}
+                      {runBothLocations && mode === "all_states" && dbCities.length === 0 && (
+                        <span className="block mt-1.5 text-amber-700 font-medium">
+                          ⚠ No city locations are imported for this website — the city pass will generate 0 pages. Import city locations first to generate city pages.
+                        </span>
+                      )}
                       {blueprintDedupesCities && (
                         <span className="block mt-1.5 text-amber-700 font-medium">
                           ⚠ This blueprint uses a state-level slug (no {"{location}"} placeholder). Your {targetCount.toLocaleString()} selected cities cover {uniqueStateCountFromCities} unique states — the generator will create {uniqueStateCountFromCities} state pages per service/cluster, not city pages. To generate city-level pages, select a blueprint whose slug contains {"{location}"} or {"{city}"}.
@@ -984,8 +993,9 @@ export default function BulkGeneratorPage() {
                       if (isRunningAll) return <><Loader2 className="size-4 animate-spin" /> Running in background...</>;
                       const bpCount = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
                       const stateCount = new Set(dbStates.map((l: any) => l.stateCode).filter(Boolean)).size || 50;
+                      const cityCount = (runBothLocations && mode === "all_states") ? dbCities.length : effectiveTargetCount;
                       const totalEst = runBothLocations
-                        ? (selectedServices.size * clusterCountForEstimate * stateCount + estimatedPages) * bpCount
+                        ? (selectedServices.size * clusterCountForEstimate * (stateCount + cityCount)) * bpCount
                         : estimatedPages * bpCount;
                       const suffix = runBothLocations
                         ? ` (${bpCount * 2} jobs: states + cities)`
