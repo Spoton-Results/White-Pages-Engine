@@ -422,9 +422,11 @@ export async function bulkDeleteBlueprints(accountId: string): Promise<number> {
   const ids = await db.select({ id: blueprints.id }).from(blueprints).where(eq(blueprints.accountId, accountId));
   if (ids.length === 0) return 0;
   const idList = ids.map(r => r.id);
-  await db.update(pages).set({ blueprintId: null }).where(inArray(pages.blueprintId, idList));
-  await db.update(generationJobs).set({ blueprintId: null }).where(inArray(generationJobs.blueprintId, idList));
-  await db.delete(blueprints).where(eq(blueprints.accountId, accountId));
+  await db.transaction(async (tx) => {
+    await tx.update(pages).set({ blueprintId: null }).where(inArray(pages.blueprintId, idList));
+    await tx.update(generationJobs).set({ blueprintId: null }).where(inArray(generationJobs.blueprintId, idList));
+    await tx.delete(blueprints).where(eq(blueprints.accountId, accountId));
+  });
   return idList.length;
 }
 
