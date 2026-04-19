@@ -187,7 +187,7 @@ export default function BlueprintsPage() {
   const [showDeleteAll, setShowDeleteAll] = useState(false);
 
   const deleteAll = useMutation({
-    mutationFn: () => api.delete(`/api/accounts/${selectedAccount}/blueprints`),
+    mutationFn: (accountId: string) => api.delete(`/api/accounts/${accountId}/blueprints`),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/blueprints"] });
       setShowDeleteAll(false);
@@ -645,7 +645,7 @@ export default function BlueprintsPage() {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => deleteAll.mutate()}
+              onClick={() => deleteAll.mutate(selectedAccount)}
               disabled={deleteAll.isPending}
               data-testid="button-confirm-delete-all-blueprints"
             >
