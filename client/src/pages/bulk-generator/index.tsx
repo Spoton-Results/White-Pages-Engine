@@ -985,7 +985,7 @@ export default function BulkGeneratorPage() {
                   <Button
                     size="lg"
                     onClick={runAllServices}
-                    disabled={isRunningAll || targetCount === 0}
+                    disabled={isRunningAll || targetCount === 0 || selectedServices.size === 0}
                     data-testid="button-generate"
                     className="gap-2"
                   >
