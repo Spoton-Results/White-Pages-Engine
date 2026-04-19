@@ -3165,6 +3165,11 @@ Return ONLY valid JSON (no markdown):
     return res.json({ message: "Deleted" });
   });
 
+  app.delete("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+    const count = await storage.bulkDeleteBlueprints(req.params.accountId as string);
+    return res.json({ message: `Deleted ${count} blueprint(s)`, count });
+  });
+
   // Fix 2 — Bulk blueprint generation background job
   app.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (req: Request, res: Response) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(400).json({ message: "ANTHROPIC_API_KEY not configured" });

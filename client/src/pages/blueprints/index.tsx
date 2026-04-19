@@ -184,6 +184,18 @@ export default function BlueprintsPage() {
     },
   });
 
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+
+  const deleteAll = useMutation({
+    mutationFn: () => api.delete(`/api/accounts/${selectedAccount}/blueprints`),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/blueprints"] });
+      setShowDeleteAll(false);
+      toast({ title: `Deleted ${data.count} blueprint(s)` });
+    },
+    onError: (err: any) => toast({ title: "Delete failed", description: err.message, variant: "destructive" }),
+  });
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
@@ -194,6 +206,17 @@ export default function BlueprintsPage() {
           </div>
           {selectedAccount && (
             <div className="flex gap-2">
+              {(blueprints as any[]).length > 0 && (
+                <Button
+                  className="gap-2"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowDeleteAll(true)}
+                  data-testid="button-delete-all-blueprints"
+                >
+                  <Trash2 className="size-4 text-destructive" />Delete All
+                </Button>
+              )}
               <Button
                 className="gap-2"
                 size="sm"
@@ -603,6 +626,31 @@ export default function BlueprintsPage() {
             ) : (
               <Button variant="outline" disabled>Running…</Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete All confirmation dialog */}
+      <Dialog open={showDeleteAll} onOpenChange={setShowDeleteAll}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete all blueprints?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will permanently delete all <strong>{(blueprints as any[]).length}</strong> blueprint{(blueprints as any[]).length !== 1 ? "s" : ""} for this account. This cannot be undone.
+          </p>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setShowDeleteAll(false)} disabled={deleteAll.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteAll.mutate()}
+              disabled={deleteAll.isPending}
+              data-testid="button-confirm-delete-all-blueprints"
+            >
+              {deleteAll.isPending ? "Deleting…" : "Delete All"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
