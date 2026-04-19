@@ -1818,11 +1818,22 @@ Return ONLY valid JSON (no markdown) with these exact keys:
 
   // ── Locations ─────────────────────────────────────────────────────────────
 
+  app.get("/api/accounts/:accountId/locations/count", requireAuth, async (req: Request, res: Response) => {
+    const type = req.query.type as string | undefined;
+    const search = req.query.search as string | undefined;
+    const cityTier = req.query.cityTier ? parseInt(req.query.cityTier as string, 10) : undefined;
+    const total = await storage.countLocations(req.params.accountId as string, type, search, cityTier);
+    return res.json({ total });
+  });
+
   app.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
     const type = req.query.type as string | undefined;
     const orderBy = req.query.orderBy as string | undefined;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    return res.json(await storage.getLocations((req.params.accountId as string), type, orderBy, limit));
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+    const search = req.query.search as string | undefined;
+    const cityTier = req.query.cityTier ? parseInt(req.query.cityTier as string, 10) : undefined;
+    return res.json(await storage.getLocations((req.params.accountId as string), type, orderBy, limit, offset, search, cityTier));
   });
 
   app.post("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {

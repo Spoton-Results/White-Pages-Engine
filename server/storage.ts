@@ -239,17 +239,31 @@ export async function deleteWebsite(id: string): Promise<void> {
 
 // ─── Locations ────────────────────────────────────────────────────────────────
 
-export async function getLocations(accountId: string, type?: string, orderBy?: string, limit?: number): Promise<Location[]> {
-  const where = type
-    ? and(eq(locations.accountId, accountId), eq(locations.type, type as any))
-    : eq(locations.accountId, accountId);
+export async function getLocations(accountId: string, type?: string, orderBy?: string, limit?: number, offset?: number, search?: string, cityTier?: number): Promise<Location[]> {
+  const conditions = [eq(locations.accountId, accountId)];
+  if (type) conditions.push(eq(locations.type, type as any));
+  if (search) conditions.push(ilike(locations.name, `%${search}%`));
+  if (cityTier) conditions.push(eq(locations.cityTier, cityTier));
+  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
   const order = orderBy === "population"
     ? [desc(locations.population)]
     : type
       ? [asc(locations.name)]
       : [asc(locations.type), asc(locations.name)];
-  const q = db.select().from(locations).where(where).orderBy(...order);
-  return limit ? q.limit(limit) : q;
+  let q: any = db.select().from(locations).where(where).orderBy(...order);
+  if (limit) q = q.limit(limit);
+  if (offset) q = q.offset(offset);
+  return q;
+}
+
+export async function countLocations(accountId: string, type?: string, search?: string, cityTier?: number): Promise<number> {
+  const conditions = [eq(locations.accountId, accountId)];
+  if (type) conditions.push(eq(locations.type, type as any));
+  if (search) conditions.push(ilike(locations.name, `%${search}%`));
+  if (cityTier) conditions.push(eq(locations.cityTier, cityTier));
+  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(locations).where(where);
+  return row?.count ?? 0;
 }
 
 export async function getLocation(id: string): Promise<Location | undefined> {

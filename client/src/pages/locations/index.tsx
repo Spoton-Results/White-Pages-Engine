@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, MapPin, Trash2, Search, Download, Sparkles, Loader2, CheckSquare, Square } from "lucide-react";
+import { Plus, MapPin, Trash2, Search, Download, Sparkles, Loader2, CheckSquare, Square, ChevronLeft, ChevronRight } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -45,10 +45,32 @@ export default function LocationsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [showAiSuggest, setShowAiSuggest] = useState(false);
-  const [searchText, setSearchText] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [displayTopN, setDisplayTopN] = useState<number | "all" | null>(null);
   const [displayTierFilter, setDisplayTierFilter] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = 200;
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { register, handleSubmit, reset, setValue } = useForm<any>();
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setCurrentPage(0);
+    }, 350);
+  };
+
+  useEffect(() => { setCurrentPage(0); }, [displayTopN, displayTierFilter]);
+
+  const isTopNMode = displayTopN !== null;
+  const apiType = (isTopNMode || displayTierFilter !== null) ? "city" : undefined;
+  const apiOrderBy = isTopNMode ? "population" : undefined;
+  const apiLimit = isTopNMode && displayTopN !== "all" ? (displayTopN as number) : PAGE_SIZE;
+  const apiOffset = isTopNMode ? 0 : currentPage * PAGE_SIZE;
+  const apiCityTier = displayTierFilter ?? undefined;
 
   const [aiBusinessType, setAiBusinessType] = useState("");
   const [aiStateInput, setAiStateInput] = useState("");
@@ -98,16 +120,51 @@ export default function LocationsPage() {
 
   const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
 
-  const { data: locations = [], isLoading } = useQuery({
-    queryKey: ["/api/locations", selectedAccount],
-    queryFn: () => api.get<any[]>(`/api/accounts/${selectedAccount}/locations`),
-    enabled: !!selectedAccount,
+  // Reset page when account changes
+  const prevAccountRef = useRef(selectedAccount);
+  useEffect(() => {
+    if (prevAccountRef.current !== selectedAccount) {
+      prevAccountRef.current = selectedAccount;
+      setCurrentPage(0);
+      setSearchInput("");
+      setDebouncedSearch("");
+    }
   });
+
+  const locParams = new URLSearchParams();
+  locParams.set("limit", String(apiLimit));
+  if (apiOffset) locParams.set("offset", String(apiOffset));
+  if (debouncedSearch) locParams.set("search", debouncedSearch);
+  if (apiType) locParams.set("type", apiType);
+  if (apiOrderBy) locParams.set("orderBy", apiOrderBy);
+  if (apiCityTier) locParams.set("cityTier", String(apiCityTier));
+
+  const countParams = new URLSearchParams();
+  if (debouncedSearch) countParams.set("search", debouncedSearch);
+  if (apiType) countParams.set("type", apiType);
+  if (apiCityTier) countParams.set("cityTier", String(apiCityTier));
+
+  const { data: locations = [], isLoading } = useQuery({
+    queryKey: ["/api/locations", selectedAccount, locParams.toString()],
+    queryFn: () => api.get<any[]>(`/api/accounts/${selectedAccount}/locations?${locParams}`),
+    enabled: !!selectedAccount,
+    staleTime: 60_000,
+    placeholderData: (prev: any) => prev,
+  });
+
+  const { data: countData } = useQuery({
+    queryKey: ["/api/locations-count", selectedAccount, countParams.toString()],
+    queryFn: () => api.get<{ total: number }>(`/api/accounts/${selectedAccount}/locations/count?${countParams}`),
+    enabled: !!selectedAccount,
+    staleTime: 60_000,
+  });
+  const totalCount = countData?.total ?? 0;
 
   const create = useMutation({
     mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/locations`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/locations"] });
+      qc.invalidateQueries({ queryKey: ["/api/locations-count"] });
       setShowCreate(false);
       reset();
       toast({ title: "Location added" });
@@ -120,6 +177,7 @@ export default function LocationsPage() {
       api.post<{ inserted: number; skipped: number }>(`/api/accounts/${selectedAccount}/locations/bulk`, { locations: items }),
     onSuccess: (result: { inserted: number; skipped: number }) => {
       qc.invalidateQueries({ queryKey: ["/api/locations"] });
+      qc.invalidateQueries({ queryKey: ["/api/locations-count"] });
       setShowBulk(false);
       toast({ title: `${result.inserted} location${result.inserted !== 1 ? "s" : ""} imported${result.skipped > 0 ? ` (${result.skipped} already existed)` : ""}` });
     },
@@ -130,6 +188,7 @@ export default function LocationsPage() {
     mutationFn: (id: string) => api.delete(`/api/locations/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/locations"] });
+      qc.invalidateQueries({ queryKey: ["/api/locations-count"] });
       toast({ title: "Location removed" });
     },
   });
@@ -138,24 +197,14 @@ export default function LocationsPage() {
     mutationFn: () => api.post<{ inserted: number; skipped: number }>(`/api/accounts/${selectedAccount}/locations/load-standard`, {}),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["/api/locations"] });
+      qc.invalidateQueries({ queryKey: ["/api/locations-count"] });
       toast({ title: `${result.inserted} cities added, ${result.skipped} already existed` });
     },
     onError: (err: any) => toast({ title: "Load failed", description: err.message, variant: "destructive" }),
   });
 
-  const filtered = useMemo(() => {
-    let result = (locations as any[]).filter((l: any) =>
-      !searchText || l.name.toLowerCase().includes(searchText.toLowerCase()) ||
-      l.stateCode?.toLowerCase().includes(searchText.toLowerCase())
-    );
-    if (displayTopN !== null || displayTierFilter !== null) {
-      result = result.filter((l: any) => l.type === "city");
-      if (displayTierFilter !== null) result = result.filter((l: any) => l.cityTier === displayTierFilter);
-      result = [...result].sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
-      if (displayTopN !== null && displayTopN !== "all") result = result.slice(0, displayTopN as number);
-    }
-    return result;
-  }, [locations, searchText, displayTopN, displayTierFilter]);
+  const totalPages = isTopNMode ? 1 : Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const hasActiveFilter = debouncedSearch || displayTopN !== null || displayTierFilter !== null;
 
   return (
     <DashboardLayout>
@@ -205,10 +254,10 @@ export default function LocationsPage() {
           {selectedAccount && (
             <div className="relative flex-1 max-w-xs">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-locations" />
+              <Input placeholder="Search..." className="pl-9 h-9" value={searchInput} onChange={e => handleSearchChange(e.target.value)} data-testid="input-search-locations" />
             </div>
           )}
-          {selectedAccount && <span className="text-sm text-muted-foreground" data-testid="text-location-count">{locations.length} locations</span>}
+          {selectedAccount && <span className="text-sm text-muted-foreground" data-testid="text-location-count">{totalCount.toLocaleString()} locations</span>}
           {selectedAccount && (
             <>
               <Select
@@ -282,13 +331,13 @@ export default function LocationsPage() {
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>{Array.from({ length: 7 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
                   ))
-                ) : filtered.length === 0 ? (
+                ) : locations.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                      {searchText || displayTopN !== null || displayTierFilter !== null ? "No locations match." : "No locations added yet. Use Bulk Import to add all US states and cities at once."}
+                      {hasActiveFilter ? "No locations match." : "No locations added yet. Use Bulk Import to add all US states and cities at once."}
                     </TableCell>
                   </TableRow>
-                ) : filtered.map((loc: any) => (
+                ) : (locations as any[]).map((loc: any) => (
                   <TableRow key={loc.id} data-testid={`row-location-${loc.id}`}>
                     <TableCell className="font-medium">{loc.name}</TableCell>
                     <TableCell>
@@ -317,6 +366,34 @@ export default function LocationsPage() {
                 ))}
               </TableBody>
             </Table>
+            {!isTopNMode && totalCount > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t text-sm text-muted-foreground">
+                <span>
+                  {isLoading ? "Loading…" : `Showing ${(currentPage * PAGE_SIZE + 1).toLocaleString()}–${Math.min((currentPage + 1) * PAGE_SIZE, totalCount).toLocaleString()} of ${totalCount.toLocaleString()}`}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                    disabled={currentPage === 0 || isLoading}
+                    data-testid="button-locations-prev-page"
+                    className="h-7 px-2 rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    <ChevronLeft className="size-3.5" />Prev
+                  </button>
+                  <span className="px-2">Page {currentPage + 1} / {totalPages}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={currentPage >= totalPages - 1 || isLoading}
+                    data-testid="button-locations-next-page"
+                    className="h-7 px-2 rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    Next<ChevronRight className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
