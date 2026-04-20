@@ -6001,13 +6001,14 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
           // Map price ID → plan_type
           const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
+          const PRICE_GROWTH_BUNDLE = process.env.STRIPE_PRICE_GROWTH_BUNDLE;
           const PRICE_BUNDLE = process.env.STRIPE_PRICE_BUNDLE;
           const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
           const PRICE_ADDON = process.env.STRIPE_PRICE_ADDON_SITE;
           const PRICE_FOUNDING = process.env.STRIPE_PRICE_FOUNDING_AGENCY;
           let planType = "custom";
           if (priceId && priceId === PRICE_LOCAL) planType = "local_launch";
-          else if (priceId && priceId === PRICE_BUNDLE) planType = "growth_bundle";
+          else if (priceId && (priceId === PRICE_GROWTH_BUNDLE || priceId === PRICE_BUNDLE)) planType = "growth_bundle";
           else if (priceId && priceId === PRICE_BUNDLE_ANNUAL) planType = "growth_bundle_annual";
           else if (priceId && priceId === PRICE_ADDON) planType = "addon_site";
           else if (priceId && priceId === PRICE_FOUNDING) planType = "founding_agency";
@@ -6856,7 +6857,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
     const priceIdMap: Record<string, string | undefined> = {
       localLaunch: process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_PILOT,
-      bundle: process.env.STRIPE_PRICE_BUNDLE,
+      bundle: process.env.STRIPE_PRICE_GROWTH_BUNDLE || process.env.STRIPE_PRICE_BUNDLE,
       bundleAnnual: process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
       pilot: process.env.STRIPE_PRICE_PILOT,
       addonSite: process.env.STRIPE_PRICE_ADDON_SITE,
