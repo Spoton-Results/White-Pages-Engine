@@ -965,7 +965,7 @@ export default function NexusLandingPage() {
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>Enterprise</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: "clamp(26px, 3vw, 36px)", fontWeight: 800, color: "#111827", lineHeight: 1.1, letterSpacing: "-0.03em" }}>Custom</span>
+                  <span style={{ fontSize: "clamp(22px, 2.5vw, 30px)", fontWeight: 800, color: "#111827", lineHeight: 1.1, letterSpacing: "-0.03em" }}>Starting at $5,000</span>
                 </div>
                 <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
                 <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Agencies scaling aggressively</p>
