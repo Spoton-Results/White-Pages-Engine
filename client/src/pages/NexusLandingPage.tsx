@@ -956,20 +956,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <a href={BOOKING_URL} target="_blank" rel="noopener noreferrer"
-                  data-testid="link-pricing-bundle-cta"
-                  style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    width: "100%", padding: "14px 24px",
-                    background: "#3b82f6", color: "#fff",
-                    border: "none", borderRadius: 8, cursor: "pointer",
-                    fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                    fontSize: 15, fontWeight: 700, textDecoration: "none",
-                    minHeight: 50, boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
-                    transition: "background 0.2s, box-shadow 0.2s",
-                  }}>
-                  Book a Call
-                </a>
+                <StripeButton tier="bundle" label="Get Started →" featured />
               </div>
 
               {/* Enterprise */}
