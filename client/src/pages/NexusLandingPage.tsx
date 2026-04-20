@@ -403,8 +403,15 @@ export default function NexusLandingPage() {
       document.head.appendChild(i);
     }
 
+    const chatbot = document.createElement("script");
+    chatbot.src = "https://beta.leadconnectorhq.com/loader.js";
+    chatbot.setAttribute("data-resources-url", "https://beta.leadconnectorhq.com/chat-widget/loader.js");
+    chatbot.setAttribute("data-widget-id", "69e64f9129e846cab81ed1f6");
+    document.body.appendChild(chatbot);
+
     return () => {
       try { document.head.removeChild(gfonts); document.head.removeChild(style); } catch {}
+      try { document.body.removeChild(chatbot); } catch {}
     };
   }, []);
 
