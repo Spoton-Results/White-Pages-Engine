@@ -75,7 +75,7 @@ function Accordion({ items }: { items: { q: string; a: string }[] }) {
   );
 }
 
-type Tier = "bundle" | "bundleAnnual" | "pilot";
+type Tier = "bundle" | "bundleAnnual" | "pilot" | "foundingAgency";
 
 async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?: string }> {
   const resp = await fetch("/api/stripe/create-checkout-session", {
@@ -98,6 +98,7 @@ function StripeButton({ tier, label, featured = false }: { tier: Tier; label: st
     try {
       const { url, error } = await createCheckoutSession(tier);
       if (error === "coming_soon") { setComingSoon(true); return; }
+      if (error === "slots_full") { setComingSoon(true); return; }
       if (error) { setErrored(true); return; }
       if (url) window.location.href = url;
     } catch {
@@ -107,7 +108,7 @@ function StripeButton({ tier, label, featured = false }: { tier: Tier; label: st
     }
   };
 
-  const text = comingSoon ? "Coming Soon" : errored ? "Try Again" : loading ? "Loading…" : label;
+  const text = comingSoon ? "All Slots Claimed" : errored ? "Try Again" : loading ? "Loading…" : label;
 
   return (
     <div style={{ width: "100%" }}>
@@ -298,7 +299,7 @@ const STYLES = `
   .lp-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
   .lp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
   .lp-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-  .lp-pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start; }
+  .lp-pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; align-items: start; }
 
   .lp-sticky-cta {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
@@ -339,11 +340,17 @@ const STYLES = `
   }
   .lp-mobile-close:hover { color: #1f2937; }
 
+  @media (max-width: 1200px) {
+    .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); }
+  }
   @media (max-width: 900px) {
     .lp-grid-3 { grid-template-columns: 1fr; }
     .lp-grid-4 { grid-template-columns: repeat(2, 1fr); }
-    .lp-pricing-grid { grid-template-columns: 1fr; }
+    .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); }
     .lp-pricing-card.featured { transform: none !important; }
+  }
+  @media (max-width: 640px) {
+    .lp-pricing-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 640px) {
     .lp-section { padding: 64px 20px; }
@@ -364,6 +371,8 @@ export default function NexusLandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bundleAnnualEnabled, setBundleAnnualEnabled] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
+  const [foundingAgencyEnabled, setFoundingAgencyEnabled] = useState(false);
+  const [foundingAgencySlotsRemaining, setFoundingAgencySlotsRemaining] = useState(9);
   const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
   useEffect(() => {
@@ -418,7 +427,11 @@ export default function NexusLandingPage() {
   useEffect(() => {
     fetch("/api/stripe/config")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.bundleAnnualEnabled) setBundleAnnualEnabled(true); })
+      .then(d => {
+        if (d?.bundleAnnualEnabled) setBundleAnnualEnabled(true);
+        if (d?.foundingAgencyEnabled) setFoundingAgencyEnabled(true);
+        if (typeof d?.foundingAgencySlotsRemaining === "number") setFoundingAgencySlotsRemaining(d.foundingAgencySlotsRemaining);
+      })
       .catch(() => {});
   }, []);
 
@@ -850,6 +863,67 @@ export default function NexusLandingPage() {
                 <StripeButton tier="pilot" label="Get Started — $1,997/mo" />
               </div>
 
+              {/* Founding Agency */}
+              {foundingAgencyEnabled && (
+                <div className="lp-pricing-card" data-testid="card-pricing-founding" style={{
+                  display: "flex", flexDirection: "column",
+                  border: "2px solid #16a34a",
+                  boxShadow: "0 4px 20px rgba(22,163,74,0.12)",
+                  position: "relative",
+                }}>
+                  <span style={{
+                    display: "inline-block", background: "#16a34a", color: "#fff",
+                    fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+                    textTransform: "uppercase", padding: "4px 14px", borderRadius: 20,
+                    position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)",
+                    whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(22,163,74,0.35)",
+                  }}>FIRST 9 ONLY</span>
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#16a34a" }}>Founding Agency</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+                    <span style={{ fontSize: "clamp(32px, 3.5vw, 44px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$500</span>
+                    <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo per site</span>
+                  </div>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", marginBottom: 4 }}>6-month commitment</p>
+                  <p className="lp-body-sm" style={{ marginBottom: 16 }}>Reduced from $1,997/mo. Includes case study rights.</p>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
+                    background: foundingAgencySlotsRemaining === 0 ? "#fef2f2" : "#f0fdf4",
+                    border: `1px solid ${foundingAgencySlotsRemaining === 0 ? "#fecaca" : "#bbf7d0"}`,
+                    borderRadius: 8, padding: "8px 14px",
+                  }} data-testid="text-founding-slots">
+                    <span style={{ fontSize: 20 }}>{foundingAgencySlotsRemaining === 0 ? "🔒" : "🟢"}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: foundingAgencySlotsRemaining === 0 ? "#dc2626" : "#16a34a" }}>
+                      {foundingAgencySlotsRemaining === 0
+                        ? "All 9 slots claimed — offer closed"
+                        : `${foundingAgencySlotsRemaining} of 9 slots remaining`}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", marginBottom: 20, flex: 1 }}>
+                    {["50,000+ pages per site", "Auto-scoring & tiering", "Weekly reports", "Google indexing", "White-label dashboard", "Email support"].map((f, i) => (
+                      <div key={i} className="lp-feature-row">
+                        <span className="lp-feature-check" style={{ color: "#16a34a" }}>✓</span>
+                        <span>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {foundingAgencySlotsRemaining === 0 ? (
+                    <button disabled style={{
+                      width: "100%", padding: "14px 24px", background: "#f3f4f6", color: "#9ca3af",
+                      border: "2px solid #e5e7eb", borderRadius: 8, cursor: "not-allowed",
+                      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+                      fontSize: 15, fontWeight: 700, minHeight: 50,
+                    }} data-testid="btn-founding-closed">
+                      Offer Closed
+                    </button>
+                  ) : (
+                    <StripeButton tier="foundingAgency" label="Claim Offer →" featured />
+                  )}
+                </div>
+              )}
+
               {/* Growth Bundle — featured */}
               <div className="lp-pricing-card featured" data-testid="card-pricing-bundle" style={{ display: "flex", flexDirection: "column" }}>
                 <span className="lp-badge">Most Popular</span>
@@ -915,22 +989,6 @@ export default function NexusLandingPage() {
             </div>
           </FadeIn>
 
-          {/* Founding offer */}
-          <FadeIn delay={140}>
-            <div style={{
-              marginTop: 40, border: "2px dashed #bbf7d0",
-              background: "#f0fdf4", borderRadius: 14, padding: "36px 32px",
-              textAlign: "center",
-            }} data-testid="card-pricing-founding">
-              <span className="lp-eyebrow" style={{ color: "#16a34a" }}>Founding Agency Offer — First 5 agencies only</span>
-              <p className="lp-body-sm" style={{ color: "#374151", marginTop: 4 }}>
-                Setup reduced to $500/site. 6-month commitment required. Case study and testimonial rights requested.
-              </p>
-              <a href={BOOKING_URL} className="lp-btn" style={{ marginTop: 20, background: "#16a34a", boxShadow: "0 4px 14px rgba(22,163,74,0.3)" }} data-testid="link-founding-book">
-                Claim Founding Pricing →
-              </a>
-            </div>
-          </FadeIn>
         </div>
       </section>
 

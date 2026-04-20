@@ -6004,11 +6004,13 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
           const PRICE_BUNDLE = process.env.STRIPE_PRICE_BUNDLE;
           const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
           const PRICE_ADDON = process.env.STRIPE_PRICE_ADDON_SITE;
+          const PRICE_FOUNDING = process.env.STRIPE_PRICE_FOUNDING_AGENCY;
           let planType = "custom";
           if (priceId && priceId === PRICE_LOCAL) planType = "local_launch";
           else if (priceId && priceId === PRICE_BUNDLE) planType = "growth_bundle";
           else if (priceId && priceId === PRICE_BUNDLE_ANNUAL) planType = "growth_bundle_annual";
           else if (priceId && priceId === PRICE_ADDON) planType = "addon_site";
+          else if (priceId && priceId === PRICE_FOUNDING) planType = "founding_agency";
 
           // Generate unique token (collision check, though astronomically unlikely)
           let token = "";
@@ -6817,20 +6819,47 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
 
   // ── Stripe Checkout ───────────────────────────────────────────────────────────
 
-  app.get("/api/stripe/config", (_req: Request, res: Response) => {
+  app.get("/api/stripe/config", async (_req: Request, res: Response) => {
+    const FOUNDING_SLOTS_TOTAL = 9;
+    let foundingAgencySlotsRemaining = FOUNDING_SLOTS_TOTAL;
+    try {
+      const [{ cnt }] = await db
+        .select({ cnt: sql<number>`count(*)::int` })
+        .from(onboardingSubmissions)
+        .where(dEq(onboardingSubmissions.planType, "founding_agency"));
+      foundingAgencySlotsRemaining = Math.max(0, FOUNDING_SLOTS_TOTAL - (cnt ?? 0));
+    } catch {}
     res.json({
       addonSiteEnabled: !!process.env.STRIPE_PRICE_ADDON_SITE,
       bundleAnnualEnabled: !!process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
+      foundingAgencyEnabled: !!process.env.STRIPE_PRICE_FOUNDING_AGENCY,
+      foundingAgencySlotsRemaining,
     });
   });
 
   app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
     const { tier } = req.body as { tier?: string };
+
+    // Founding Agency slot guard
+    if (tier === "foundingAgency") {
+      const FOUNDING_SLOTS_TOTAL = 9;
+      try {
+        const [{ cnt }] = await db
+          .select({ cnt: sql<number>`count(*)::int` })
+          .from(onboardingSubmissions)
+          .where(dEq(onboardingSubmissions.planType, "founding_agency"));
+        if ((cnt ?? 0) >= FOUNDING_SLOTS_TOTAL) {
+          return res.json({ error: "slots_full" });
+        }
+      } catch {}
+    }
+
     const priceIdMap: Record<string, string | undefined> = {
       bundle: process.env.STRIPE_PRICE_BUNDLE,
       bundleAnnual: process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
       pilot: process.env.STRIPE_PRICE_PILOT,
       addonSite: process.env.STRIPE_PRICE_ADDON_SITE,
+      foundingAgency: process.env.STRIPE_PRICE_FOUNDING_AGENCY,
     };
     const priceId = tier ? priceIdMap[tier] : undefined;
     if (!priceId) {

@@ -1,0 +1,93 @@
+Here's the complete message to add Founding Agency tier to pricing AND create the Stripe product:
+
+---
+
+Read AGENT_RULES.md before doing anything.
+
+## TASK — Add Founding Agency Tier to Pricing Page + Create Stripe Product
+
+Add the Founding Agency offer as a 4th pricing tier on spotonnexus.com AND create the corresponding Stripe product for checkout.
+
+## Step 1 — Create Stripe Product
+
+In Stripe Dashboard:
+
+1. Go to **Products** → **Add product**
+2. Name: `Founding Agency`
+3. Description: `Founding Agency Tier - $500/month per site, 6-month commitment`
+4. Pricing:
+   - Type: **Recurring**
+   - Interval: **Monthly**
+   - Price: **$500.00 USD**
+   - Billing period: **Monthly**
+5. Save the product
+6. Copy the **Price ID** (looks like `price_XXXX...`)
+7. Add to your Replit secrets as: `STRIPE_PRICE_FOUNDING_AGENCY`
+
+## Step 2 — Update Pricing Page
+
+Add Founding Agency as the 2nd pricing card (between Local Launch and Growth Bundle):
+
+```
+FOUNDING AGENCY
+"FIRST 9 ONLY" badge
+
+$500/month per site
+6-month commitment
+
+Features:
+✓ 50,000+ pages per site
+✓ Auto-scoring & tiering
+✓ Weekly reports
+✓ Google indexing
+✓ White-label dashboard
+✓ Email support
+
+[Claim Offer →] button (green, links to /api/stripe/create-checkout-session?plan=founding-agency)
+
+Small text below: "Reduced from $1,997/month. Includes case study rights."
+```
+
+## Step 3 — Add Slot Counter
+
+Create a config or database entry:
+```
+founding_agency_slots_remaining = 9
+```
+
+On the pricing card, show:
+```
+"X slots remaining" (update in real-time as purchases happen)
+```
+
+When slots = 0:
+- Disable button
+- Show: "Founding Agency offer closed. All 9 slots claimed."
+
+## Step 4 — Update Checkout Handler
+
+In your Stripe checkout endpoint (`/api/stripe/create-checkout-session`), add:
+
+```
+if (plan === 'founding-agency') {
+  priceId = process.env.STRIPE_PRICE_FOUNDING_AGENCY;
+  decrement founding_agency_slots_remaining by 1;
+  set commitment = '6 months';
+  include_case_study_rights = true;
+}
+```
+
+## Step 5 — Verify
+
+Test the flow:
+1. Go to pricing page
+2. See all 4 tiers with 6-month commitment on each
+3. Click "Claim Offer" on Founding Agency
+4. Go to Stripe checkout
+5. Complete purchase
+6. Slot counter decrements (9 → 8)
+7. Repeat until slots = 0, then button disables
+
+---
+
+Paste this into Replit and build it.
