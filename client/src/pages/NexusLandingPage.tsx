@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-const BOOKING_URL = (import.meta as any).env?.VITE_BOOKING_URL || "#pricing";
+const BOOKING_URL = (import.meta as any).env?.VITE_BOOKING_URL || "https://link.spotonnexus.com/widget/booking/b1Be8Hfa2mgRZsFYviiF";
 const GA_ID = (import.meta as any).env?.VITE_GA_MEASUREMENT_ID || "";
 const PHONE = "(844) 723-1900";
 const PHONE_HREF = "tel:+18447231900";
