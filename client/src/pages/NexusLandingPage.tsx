@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const BOOKING_URL = (import.meta as any).env?.VITE_BOOKING_URL || "#pricing";
 const GA_ID = (import.meta as any).env?.VITE_GA_MEASUREMENT_ID || "";
-const PHONE = "(435) 999-5348";
-const PHONE_HREF = "tel:+14359995348";
+const PHONE = "(844) 723-1900";
+const PHONE_HREF = "tel:+18447231900";
 
 function useFadeInUp() {
   const ref = useRef<HTMLDivElement>(null);
