@@ -75,7 +75,7 @@ function Accordion({ items }: { items: { q: string; a: string }[] }) {
   );
 }
 
-type Tier = "bundle" | "bundleAnnual" | "pilot" | "foundingAgency";
+type Tier = "bundle" | "bundleAnnual" | "pilot" | "foundingAgency" | "localLaunch";
 
 async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?: string }> {
   const resp = await fetch("/api/stripe/create-checkout-session", {
@@ -435,29 +435,40 @@ export default function NexusLandingPage() {
       .catch(() => {});
   }, []);
 
-  const pilotFeatures = [
-    "1 client website",
-    "Up to 5,000 pages",
-    "Quality scoring & tier promotion",
-    "Automated sitemap & indexing",
-    "Weekly reporting",
-    "Onboarding call included",
+  const localLaunchFeatures = [
+    "1 site",
+    "5,000 pages",
+    "Auto-scoring & tiering",
+    "Weekly reports",
+    "Google indexing",
+    "White-label dashboard",
+    "Email support",
   ];
-  const bundleFeatures = [
-    "3 client websites",
-    "10,000 pages per site",
-    "Everything in Local Launch",
-    "Multi-tenant dashboard",
+  const foundingFeatures = [
+    "1-5 sites",
+    "50,000 pages per site",
+    "Auto-scoring & tiering",
+    "Weekly reports",
+    "Google indexing",
+    "White-label dashboard",
+    "Email support",
+    "Case study & testimonial rights",
+  ];
+  const growthBundleFeatures = [
+    "3 sites",
+    "25,000 pages per site (75K total)",
+    "Auto-scoring & tiering",
+    "Weekly reports",
+    "Google indexing",
+    "White-label dashboard",
     "Priority support",
-    "White-label ready",
-    "Founding Agency pricing",
   ];
-  const customFeatures = [
-    "4+ client websites",
-    "50,000+ pages per site",
-    "Everything in Growth Bundle",
+  const enterpriseFeatures = [
+    "4+ sites",
+    "100,000+ pages per site",
+    "All features included",
+    "Dedicated support",
     "Custom integrations",
-    "Dedicated success manager",
     "SLA guarantee",
   ];
 
@@ -847,20 +858,21 @@ export default function NexusLandingPage() {
                 <div style={{ marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>Local Launch</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
                   <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$1,997</span>
                   <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
                 </div>
-                <p className="lp-body-sm" style={{ marginBottom: 28 }}>For agencies testing programmatic SEO with their first client.</p>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Single-service businesses testing programmatic SEO</p>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
-                  {pilotFeatures.map((f, i) => (
+                  {localLaunchFeatures.map((f, i) => (
                     <div key={i} className="lp-feature-row">
                       <span className="lp-feature-check">✓</span>
                       <span>{f}</span>
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="pilot" label="Get Started — $1,997/mo" />
+                <StripeButton tier="localLaunch" label="Start Free Trial" />
               </div>
 
               {/* Founding Agency */}
@@ -883,11 +895,11 @@ export default function NexusLandingPage() {
                     <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#16a34a" }}>Founding Agency</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                    <span style={{ fontSize: "clamp(32px, 3.5vw, 44px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$500</span>
+                    <span style={{ fontSize: "clamp(32px, 3.5vw, 44px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$1,497</span>
                     <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo per site</span>
                   </div>
                   <p style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", marginBottom: 4 }}>6-month commitment</p>
-                  <p className="lp-body-sm" style={{ marginBottom: 16 }}>Reduced from $1,997/mo. Includes case study rights.</p>
+                  <p className="lp-body-sm" style={{ marginBottom: 16 }}>Save $500/month. Lock in founding rate before price increase.</p>
                   <div style={{
                     display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
                     background: foundingAgencySlotsRemaining === 0 ? "#fef2f2" : "#f0fdf4",
@@ -902,7 +914,7 @@ export default function NexusLandingPage() {
                     </span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", marginBottom: 20, flex: 1 }}>
-                    {["50,000+ pages per site", "Auto-scoring & tiering", "Weekly reports", "Google indexing", "White-label dashboard", "Email support"].map((f, i) => (
+                    {foundingFeatures.map((f, i) => (
                       <div key={i} className="lp-feature-row">
                         <span className="lp-feature-check" style={{ color: "#16a34a" }}>✓</span>
                         <span>{f}</span>
@@ -930,30 +942,34 @@ export default function NexusLandingPage() {
                 <div style={{ marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#3b82f6" }}>Growth Bundle</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 6 }}>
-                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">
-                    {billingPeriod === "annual" && bundleAnnualEnabled ? "$2,500" : "$3,000"}
-                  </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$3,000</span>
                   <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
                 </div>
-                {billingPeriod === "annual" && bundleAnnualEnabled && (
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "#16a34a", marginBottom: 4 }} data-testid="text-bundle-annual-note">
-                    Save $6,000/year with annual billing
-                  </p>
-                )}
-                <p className="lp-body-sm" style={{ marginBottom: 28 }}>3 clients. Full automation. Your highest-margin SEO offer.</p>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Agencies with 3 clients. Most popular.</p>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
-                  {bundleFeatures.map((f, i) => (
+                  {growthBundleFeatures.map((f, i) => (
                     <div key={i} className="lp-feature-row">
                       <span className="lp-feature-check">✓</span>
                       <span>{f}</span>
                     </div>
                   ))}
                 </div>
-                {billingPeriod === "annual" && bundleAnnualEnabled
-                  ? <StripeButton tier="bundleAnnual" label="Get Started — $2,500/mo" featured />
-                  : <StripeButton tier="bundle" label="Get Started — $3,000/mo" featured />
-                }
+                <a href={BOOKING_URL} target="_blank" rel="noopener noreferrer"
+                  data-testid="link-pricing-bundle-cta"
+                  style={{
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    width: "100%", padding: "14px 24px",
+                    background: "#3b82f6", color: "#fff",
+                    border: "none", borderRadius: 8, cursor: "pointer",
+                    fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+                    fontSize: 15, fontWeight: 700, textDecoration: "none",
+                    minHeight: 50, boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
+                    transition: "background 0.2s, box-shadow 0.2s",
+                  }}>
+                  Book a Call
+                </a>
               </div>
 
               {/* Enterprise */}
@@ -961,19 +977,20 @@ export default function NexusLandingPage() {
                 <div style={{ marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>Enterprise</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
                   <span style={{ fontSize: "clamp(26px, 3vw, 36px)", fontWeight: 800, color: "#111827", lineHeight: 1.1, letterSpacing: "-0.03em" }}>Custom</span>
                 </div>
-                <p className="lp-body-sm" style={{ marginBottom: 28 }}>For agencies scaling beyond 3 clients or needing national coverage.</p>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Agencies scaling aggressively</p>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
-                  {customFeatures.map((f, i) => (
+                  {enterpriseFeatures.map((f, i) => (
                     <div key={i} className="lp-feature-row">
                       <span className="lp-feature-check">✓</span>
                       <span>{f}</span>
                     </div>
                   ))}
                 </div>
-                <a href={PHONE_HREF} style={{
+                <a href={BOOKING_URL} target="_blank" rel="noopener noreferrer" style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   padding: "14px 24px", background: "#fff", color: "#374151",
                   border: "2px solid #d1d5db", borderRadius: 8, cursor: "pointer",
@@ -982,7 +999,7 @@ export default function NexusLandingPage() {
                   minHeight: 50, transition: "border-color 0.2s, color 0.2s",
                   width: "100%",
                 }} data-testid="link-pricing-custom-cta">
-                  Call {PHONE}
+                  Contact Sales
                 </a>
               </div>
 

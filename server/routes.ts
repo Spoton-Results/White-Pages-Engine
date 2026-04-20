@@ -6000,7 +6000,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
           }
 
           // Map price ID → plan_type
-          const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
+          const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
           const PRICE_BUNDLE = process.env.STRIPE_PRICE_BUNDLE;
           const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
           const PRICE_ADDON = process.env.STRIPE_PRICE_ADDON_SITE;
@@ -6855,6 +6855,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     }
 
     const priceIdMap: Record<string, string | undefined> = {
+      localLaunch: process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_PILOT,
       bundle: process.env.STRIPE_PRICE_BUNDLE,
       bundleAnnual: process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
       pilot: process.env.STRIPE_PRICE_PILOT,
