@@ -367,7 +367,7 @@ export default function NexusLandingPage() {
   const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
   useEffect(() => {
-    document.title = "Nexus by SpotOn — Scale Local SEO Without Scaling Headcount";
+    document.title = "Nexus by SpotOn Results — Scale Local SEO Without Scaling Headcount";
 
     const setMeta = (selector: string, attr: string, name: string, value: string) => {
       let el = document.querySelector(selector) as HTMLMetaElement | null;
@@ -375,7 +375,7 @@ export default function NexusLandingPage() {
       el.setAttribute("content", value);
     };
     const desc = "Generate thousands of local SEO pages for agency clients. Quality scoring, tier promotion, automated indexing, and weekly reporting — starting at $1,997/mo.";
-    const title = "Nexus by SpotOn — Scale Local SEO Without Scaling Headcount";
+    const title = "Nexus by SpotOn Results — Scale Local SEO Without Scaling Headcount";
     setMeta('meta[name="description"]', "name", "description", desc);
     [
       ['meta[property="og:title"]', "property", "og:title", title],
@@ -989,7 +989,7 @@ export default function NexusLandingPage() {
       <footer style={{ background: "#111827", padding: "40px 24px" }}>
         <div className="lp-container" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <span style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", fontWeight: 800, fontSize: 15, letterSpacing: "-0.02em", color: "#6b7280" }}>
-            Nexus by SpotOn
+            Nexus by SpotOn Results
           </span>
           <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
             {[
