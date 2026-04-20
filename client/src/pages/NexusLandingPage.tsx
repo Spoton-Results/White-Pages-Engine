@@ -468,7 +468,7 @@ export default function NexusLandingPage() {
     { q: "Can I white-label it for clients?", a: "Yes. Each client gets their own account, brand profile, and dashboard. They never need to know Nexus is the infrastructure behind it." },
     { q: "What's quality scoring?", a: "Every page is scored on a 100-point scale across content depth, structure, and completeness. Only pages above your threshold get promoted to Google — so you never publish thin content at scale." },
     { q: "What if I need more than 3 clients?", a: "Contact us for custom pricing. We handle agencies managing 10+ clients with millions of pages. There's no hard ceiling." },
-    { q: "Is there a setup fee?", a: "Founding Agency pricing includes reduced setup at $500/site for the first 5 agencies. Standard setup is $1,000/site after that." },
+    { q: "Is there a setup fee?", a: "Founding Agency pricing includes reduced setup at $500/site for the first 9 agencies. Standard setup is $1,000/site after that." },
     { q: "Can I cancel anytime?", a: "Yes. Monthly plans can be cancelled before the next billing cycle. Annual plans are non-refundable but you keep access through the term." },
   ];
 
