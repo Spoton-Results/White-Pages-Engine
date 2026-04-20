@@ -1,0 +1,110 @@
+Read AGENT_RULES.md before doing anything.
+TASK — Rebuild Nexus Landing Page for High Conversion (Marketing Agencies)
+The current landing page is too dark and doesn't convert. Rebuild it to be bright, clear, and persuasive for marketing agency owners.
+Key Changes Needed:
+
+Dump the dark theme — agencies expect professional/clean, not tech-dark
+Lead with ROI, not features — show "$X per month, Y more clients per month"
+Social proof first — "Trusted by 150+ agencies" with logos
+Clear value prop — "Scale local SEO for clients without scaling headcount"
+Simple CTA flow — Book a call or See Pricing (no confusion)
+Mobile-first — 80% of visitors on phone
+
+Layout (Top to Bottom):
+Hero Section
+
+Headline: "Scale local SEO without scaling headcount"
+Subheading: "Generate thousands of optimized pages. Manage everything from one dashboard."
+CTA: "Book a Strategy Call" (primary blue button)
+No video, no dark background — just clean white/light gray with blue accents
+
+Social Proof
+
+"Trusted by 150+ agencies managing 1.5M+ published pages"
+4-5 agency logos (placeholder or real if you have them)
+
+Problem Section
+
+Headline: "The agency SEO trap"
+3 cards:
+
+"Selling SEO but can't scale"
+"Hiring more people but margins drop"
+"Thin template pages that don't rank"
+
+
+Each card shows the cost/headache
+
+Solution Section
+
+Headline: "Nexus: The infrastructure to deliver at scale"
+4 features with icons (NOT dark cards):
+
+"Generate pages instantly" — write once, publish to 100 cities
+"Quality controls built in" — scoring and tier promotion, not trash pages
+"Automated everything" — sitemap, indexing, reporting (no manual work)
+"White-label multi-tenant" — each client gets their own dashboard
+
+
+
+How It Works
+
+4 simple steps with icons/numbers:
+
+"Upload client info & locations"
+"Nexus generates optimized pages"
+"Pages score, tier, and publish automatically"
+"Weekly reports sent to clients"
+
+
+Each step has 1 sentence of copy
+
+Pricing Table
+
+3 tiers side-by-side:
+
+Local Launch — $1,997/mo, 1 site, 5K pages
+Growth Bundle — $3,000/mo, 3 sites, 10K pages/site (most popular)
+Enterprise — Custom, 4+ sites, 50K pages/site
+
+
+Annual discount callout (20% off)
+
+FAQ Section
+
+6-8 FAQs in accordion format:
+
+"How many pages can I generate per site?" → "Millions. Start with 5-50K, scale based on performance."
+"Do I need my own API key?" → "Recommended. Or we handle it for a markup."
+"How long until pages rank?" → "Depends on domain authority. Pages are submitted to Google immediately."
+"Can I white-label it?" → "Yes. Each client gets their own account and branded dashboard."
+etc.
+
+
+
+Footer
+
+Company info
+Links: About, Blog, Terms, Privacy
+Copyright
+
+Files to Update:
+client/src/pages/landing/index.tsx (if it exists)
+OR create new: client/src/pages/landing-v2/index.tsx
+Style using Tailwind with:
+
+White (#FFFFFF) background
+Light gray (#F5F7FA) for sections
+Blue (#3B82F6) for buttons and accents
+Dark gray (#1F2937) for text
+No dark mode on landing page
+
+Design Requirements:
+
+Mobile-first (responsive)
+Fast load (no heavy images, use simple SVG icons)
+All copy is benefit-focused, not feature-focused
+Every section has clear CTA or social proof
+Phone number (435) 999-5348 visible on mobile
+"Book a Strategy Call" button on every section (scrolling shouldn't lose CTA)
+
