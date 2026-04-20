@@ -63,7 +63,7 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+async function runBackgroundStartup() {
   // Run safe schema migrations (idempotent ADD COLUMN IF NOT EXISTS)
   try {
     const { db } = await import("./db");
@@ -162,7 +162,6 @@ app.use((req, res, next) => {
     console.log("[startup] Automation tables ensured.");
 
     // Domain migration: update old subdomain-based domains to root domain + /pages proxyPath
-    // Idempotent — only fires when the old domain is still present
     await db.execute(sql`
       UPDATE websites
       SET domain = 'spotonresults.com',
@@ -186,17 +185,14 @@ app.use((req, res, next) => {
     console.error("[startup] Schema migration failed (non-fatal):", err);
   }
 
-  // Seed database on startup
+  // Seed database
   try {
     await seedDatabase();
   } catch (err) {
     console.error("Seeding failed (non-fatal):", err);
   }
 
-  // Sync ALL website published-page counters on every startup.
-  // Background jobs may have inserted pages without updating the counter
-  // (e.g. cancelled mid-run, killed by a redeploy). This one-time pass
-  // ensures the UI always shows the real count after any restart.
+  // Sync ALL website published-page counters
   try {
     const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
     const allWebsites = await getWebsites();
@@ -209,8 +205,7 @@ app.use((req, res, next) => {
     console.error("[startup] Page count sync failed (non-fatal):", err);
   }
 
-  // Re-tier all scored pages with the current Tier 1 threshold (75).
-  // This is idempotent — safe to run on every restart.
+  // Re-tier all scored pages with current Tier 1 threshold
   try {
     const { getWebsites, bulkUpdatePageTiers } = await import("./storage");
     const allWebsites = await getWebsites();
@@ -237,7 +232,6 @@ app.use((req, res, next) => {
     const { runBankWriteJob } = await import("./services/bank-write-background");
     const stale = await getStaleRunningJobs();
 
-    // Bulk page-generation jobs
     const bulkJobs = stale.filter(j => Array.isArray((j.settings as any)?.services));
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
@@ -252,13 +246,11 @@ app.use((req, res, next) => {
       }
     }
 
-    // Bank-write jobs — reset any "running" services back to "pending" so they re-run
     const bankJobs = stale.filter(j => (j.settings as any)?.type === "bank_write");
     if (bankJobs.length > 0) {
       console.log(`[startup] Resuming ${bankJobs.length} interrupted bank-write job(s)...`);
       for (const j of bankJobs) {
         const settings = j.settings as any;
-        // Reset any "running" service back to "pending" so it gets re-processed
         if (Array.isArray(settings?.progress)) {
           settings.progress = settings.progress.map((p: any) =>
             p.status === "running" ? { ...p, status: "pending" } : p,
@@ -276,7 +268,9 @@ app.use((req, res, next) => {
   } catch (err) {
     console.error("[startup] Job recovery failed (non-fatal):", err);
   }
+}
 
+(async () => {
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -309,18 +303,14 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
 
-      // Sitemap startup task — two-phase, runs in background after server is ready.
-      //
-      // Phase 1 (fast): warm the in-memory cache from any already-stored xml_content
-      //   rows (single DB row per chunk — ~10ms each). Sites that have been regenerated
-      //   at least once are fully covered here.
-      //
-      // Phase 2 (one-time migration): for any website whose sitemaps still have
-      //   null xml_content (i.e. generated before the xml_content fix), run a full
-      //   sitemap regeneration which stores the XML to the DB permanently. After this
-      //   runs once, Phase 1 handles everything on every future restart.
-      //
-      // Both websites run in parallel so total time = max(site_a, site_b) not sum.
+      // Run all heavy startup tasks in the background after the port is open
+      setImmediate(() => {
+        runBackgroundStartup().catch(err => {
+          console.error("[startup] Background startup failed (non-fatal):", err);
+        });
+      });
+
+      // Sitemap startup task — warm cache then one-time regen for any missing xml_content
       setImmediate(async () => {
         try {
           const { getWebsites, getSitemaps } = await import("./storage");
@@ -334,11 +324,7 @@ app.use((req, res, next) => {
 
           await Promise.all(withPages.map(async (w) => {
             try {
-              // Phase 1: warm from stored xml_content (fast, ms per chunk)
               await warmSitemapCache(w.id);
-
-              // Phase 2: if any chunk still has null xml_content, do a full regen
-              // to store it permanently. This path runs at most once per website.
               const chunks = await getSitemaps(w.id);
               const needsRegen = chunks.length > 0 && chunks.some(c => !c.xmlContent);
               if (needsRegen) {
@@ -358,7 +344,6 @@ app.use((req, res, next) => {
       });
 
       // Auto 6: Weekly auto-demote — run once 5 min after startup, then every 7 days
-      // Uses runWeeklyAutoDemoteWithJobs so each run creates a visible Jobs dashboard entry
       setTimeout(async () => {
         try {
           const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
@@ -373,8 +358,8 @@ app.use((req, res, next) => {
           } catch (err) {
             console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
           }
-        }, 7 * 24 * 60 * 60 * 1000); // every 7 days
-      }, 5 * 60 * 1000); // 5 minutes after startup
+        }, 7 * 24 * 60 * 60 * 1000);
+      }, 5 * 60 * 1000);
 
       // Phase 7: Daily wave readiness check — unlocks Wave 2+ on 14-day cadence
       setTimeout(async () => {
@@ -391,8 +376,8 @@ app.use((req, res, next) => {
           } catch (err) {
             console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err);
           }
-        }, 24 * 60 * 60 * 1000); // every 24 hours
-      }, 10 * 60 * 1000); // 10 minutes after startup
+        }, 24 * 60 * 60 * 1000);
+      }, 10 * 60 * 1000);
 
       // Auto 8: Weekly summary email — check every hour, send on Monday mornings (UTC)
       setInterval(async () => {
@@ -405,7 +390,7 @@ app.use((req, res, next) => {
             console.error("[auto8] Weekly email failed (non-fatal):", err);
           }
         }
-      }, 60 * 60 * 1000); // check every hour
+      }, 60 * 60 * 1000);
 
       // Phase 9: Weekly Launch Health calculation — Monday 06:00 UTC
       setInterval(async () => {
