@@ -10,6 +10,8 @@ interface ReportData {
     tier1Pages: number;
     tier2Pages: number;
     servicesCovered: number;
+    estImpressions?: number;
+    estClicks?: number;
   };
   bankHealth: {
     totalServices: number;
@@ -150,24 +152,33 @@ export default function ClientReportPage() {
         {/* Pages Published */}
         <div>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            Pages Published
+            SEO Performance
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
-              { label: "Total Pages Published", value: fmt(stats.totalPages), highlight: false },
-              { label: "Tier 1 — Google Priority", value: fmt(stats.tier1Pages), highlight: true },
-              { label: "Tier 2 — Live", value: fmt(stats.tier2Pages), highlight: false },
-              { label: "Services Covered", value: fmt(stats.servicesCovered), highlight: false },
+              { label: "Total Pages Published", value: fmt(stats.totalPages), color: "text-gray-900" },
+              { label: "Tier 1 — Google Priority", value: fmt(stats.tier1Pages), color: "text-emerald-600" },
+              { label: "Tier 2 — Live", value: fmt(stats.tier2Pages), color: "text-blue-600" },
+              { label: "Services Covered", value: fmt(stats.servicesCovered), color: "text-gray-900" },
+              ...(stats.estImpressions != null ? [
+                { label: "Est. Monthly Impressions*", value: stats.estImpressions >= 1000 ? `${(stats.estImpressions / 1000).toFixed(1)}k` : fmt(stats.estImpressions), color: "text-violet-600" },
+                { label: "Est. Monthly Clicks*", value: fmt(stats.estClicks ?? 0), color: "text-blue-500" },
+              ] : []),
             ].map(s => (
               <div key={s.label} className="bg-white rounded-xl border p-4 space-y-1">
-                <div className={`text-2xl font-bold ${s.highlight ? "text-emerald-600" : "text-gray-900"}`}
-                  data-testid={`stat-${s.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                <div className={`text-2xl font-bold ${s.color}`}
+                  data-testid={`stat-${s.label.toLowerCase().replace(/[\s*]+/g, "-")}`}>
                   {s.value}
                 </div>
                 <div className="text-xs text-gray-500 leading-tight">{s.label}</div>
               </div>
             ))}
           </div>
+          {stats.estImpressions != null && (
+            <p className="text-[10px] text-gray-400 mt-2">
+              * Impression and click estimates are based on page tier and quality scores. Connect Google Search Console for real data.
+            </p>
+          )}
         </div>
 
         {/* Leads & Conversions */}

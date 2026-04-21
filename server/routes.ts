@@ -1553,6 +1553,22 @@ Think about what customers search for when they need ${industry} services. Inclu
     return res.json(updated);
   });
 
+  // PATCH /api/accounts/:accountId/spend — update monthly SEO investment for ROI calculations
+  app.patch("/api/accounts/:accountId/spend", requireAuth, async (req: Request, res: Response) => {
+    const accountId = req.params.accountId as string;
+    const { monthlySpend } = req.body;
+    const spend = parseFloat(monthlySpend);
+    if (isNaN(spend) || spend < 0) {
+      return res.status(400).json({ error: "monthlySpend must be a non-negative number" });
+    }
+    const { pool } = await import("./db");
+    await pool.query(
+      `UPDATE accounts SET monthly_seo_spend = $1, updated_at = now() WHERE id = $2`,
+      [spend, accountId],
+    );
+    return res.json({ success: true, monthlySpend: spend });
+  });
+
   // ── Client Report (public, token-based) ────────────────────────────────────
 
   app.get("/api/report/:token", async (req: Request, res: Response) => {
@@ -1692,11 +1708,16 @@ Think about what customers search for when they need ${industry} services. Inclu
 
     const reportMonth = `${now.toLocaleString("en-US", { month: "long" })} ${now.getFullYear()}`;
 
+    // Estimate organic reach from page tiers (conservative model)
+    const tier3Pages = totalPages - tier1Pages - tier2Pages;
+    const estImpressions = tier1Pages * 200 + tier2Pages * 30 + tier3Pages * 8;
+    const estClicks     = Math.round(tier1Pages * 7 + tier2Pages * 0.4 + tier3Pages * 0.04);
+
     return res.json({
       businessName,
       domain,
       generatedAt: new Date().toISOString(),
-      stats: { totalPages, tier1Pages, tier2Pages, servicesCovered },
+      stats: { totalPages, tier1Pages, tier2Pages, servicesCovered, estImpressions, estClicks },
       bankHealth: { totalServices: bankTotal, fullyWritten: bankFullyWritten, needsAttention: bankTotal - bankFullyWritten },
       topPages,
       sitemapStatus: { exists: sitemapExists, lastGenerated: sitemapLastGenerated },

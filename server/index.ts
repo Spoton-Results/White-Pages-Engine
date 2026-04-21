@@ -182,6 +182,9 @@ async function runBackgroundStartup() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_booked_jobs_page ON booked_jobs(page_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_booked_jobs_date ON booked_jobs(booked_date)`);
     console.log("[startup] Schema migration: Phase 10 tracked_calls / tracked_leads / booked_jobs ensured.");
+    // Phase 11 — ROI tracking field on accounts
+    await db.execute(sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`);
+    console.log("[startup] Schema migration: Phase 11 accounts.monthly_seo_spend ensured.");
     // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
     const idxStatements = [
       `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,

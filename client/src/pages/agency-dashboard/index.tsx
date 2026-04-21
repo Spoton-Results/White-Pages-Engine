@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import {
@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/table";
 import {
   PhoneCall, FileText, DollarSign, TrendingUp,
-  Clock, CheckCircle, Loader2, CalendarDays,
+  CheckCircle, Loader2, CalendarDays, Pencil, Check,
+  BarChart3, Globe, Zap, Target, ArrowUpRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -53,7 +54,13 @@ function fmtDate(iso: string) {
 }
 
 function fmtCurrency(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency", currency: "USD", maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function fmtNum(n: number) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 // ── Stat Card ────────────────────────────────────────────────────────────────
@@ -88,6 +95,63 @@ function StatCard({
   );
 }
 
+// ── ROI Metric Card ──────────────────────────────────────────────────────────
+
+function RoiCard({
+  label, value, sub, accent, loading,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  accent: string;
+  loading?: boolean;
+}) {
+  return (
+    <Card className={`border-l-4 ${accent}`}>
+      <CardContent className="p-5">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">{label}</div>
+        {loading ? (
+          <Skeleton className="h-8 w-20 mb-1" />
+        ) : (
+          <div className="text-2xl font-bold tracking-tight">{value}</div>
+        )}
+        <div className="text-xs text-muted-foreground mt-1">{sub}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── SEO Tier Bar ─────────────────────────────────────────────────────────────
+
+function TierBar({ t1, t2, t3 }: { t1: number; t2: number; t3: number }) {
+  const total = t1 + t2 + t3 || 1;
+  return (
+    <div className="flex h-2.5 rounded-full overflow-hidden gap-px">
+      {t1 > 0 && (
+        <div
+          className="bg-emerald-500 rounded-l-full"
+          style={{ width: `${(t1 / total) * 100}%` }}
+          title={`Tier 1: ${t1} pages`}
+        />
+      )}
+      {t2 > 0 && (
+        <div
+          className="bg-blue-400"
+          style={{ width: `${(t2 / total) * 100}%` }}
+          title={`Tier 2: ${t2} pages`}
+        />
+      )}
+      {t3 > 0 && (
+        <div
+          className="bg-gray-200 rounded-r-full"
+          style={{ width: `${(t3 / total) * 100}%` }}
+          title={`Tier 3: ${t3} pages`}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AgencyDashboardPage() {
@@ -101,33 +165,41 @@ export default function AgencyDashboardPage() {
   const [bookDialog, setBookDialog] = useState<{ leadId: string; name: string } | null>(null);
   const [jobValue, setJobValue] = useState("");
 
-  // ── Accounts list (superAdmin only) ─────────────────────────────────────
+  // Monthly spend inline edit
+  const [spendEditing, setSpendEditing] = useState(false);
+  const [spendInput, setSpendInput] = useState("");
+  const spendInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Accounts list (superAdmin only) ────────────────────────────────────────
   const { data: accounts } = useQuery<any[]>({
     queryKey: ["accounts-list"],
     queryFn: () => api.get<any[]>("/api/accounts"),
     enabled: !!user?.isSuperAdmin,
   });
 
-  // Resolve which account we're viewing
-  const accountId = user?.isSuperAdmin
-    ? selectedAccountId
-    : user?.accountId ?? "";
+  const accountId = user?.isSuperAdmin ? selectedAccountId : user?.accountId ?? "";
 
-  // Auto-select first account for superAdmins
   useMemo(() => {
     if (user?.isSuperAdmin && accounts?.length && !selectedAccountId) {
       setSelectedAccountId(accounts[0].id);
     }
   }, [accounts, user?.isSuperAdmin, selectedAccountId]);
 
-  // ── Dashboard summary ────────────────────────────────────────────────────
+  // ── Dashboard summary (now includes SEO + ROI) ─────────────────────────────
   const { data: summary, isLoading: summaryLoading } = useQuery<any>({
     queryKey: ["agency-dashboard", accountId, month],
     queryFn: () => api.get<any>(`/api/dashboard/agency/${accountId}?month=${month}`),
     enabled: !!accountId,
   });
 
-  // ── Websites for the account ─────────────────────────────────────────────
+  // Pre-fill spend input when summary loads
+  useEffect(() => {
+    if (summary?.roi?.monthlySpend != null && !spendEditing) {
+      setSpendInput(String(summary.roi.monthlySpend));
+    }
+  }, [summary?.roi?.monthlySpend, spendEditing]);
+
+  // ── Websites for the account ────────────────────────────────────────────────
   const { data: allWebsites } = useQuery<any[]>({
     queryKey: ["all-websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
@@ -139,7 +211,7 @@ export default function AgencyDashboardPage() {
     [allWebsites, accountId],
   );
 
-  // ── Form submissions (leads) across all websites ─────────────────────────
+  // ── Form submissions (leads) ────────────────────────────────────────────────
   const { data: rawLeads, isLoading: leadsLoading } = useQuery<any[]>({
     queryKey: ["agency-leads", accountId, month, accountWebsites.map((w: any) => w.id).join(",")],
     queryFn: async () => {
@@ -151,35 +223,50 @@ export default function AgencyDashboardPage() {
             .catch(() => [] as any[]),
         ),
       );
-      return results
-        .flat()
-        .sort((a: any, b: any) =>
-          new Date(b.formTimestamp).getTime() - new Date(a.formTimestamp).getTime(),
-        );
+      return results.flat().sort((a: any, b: any) =>
+        new Date(b.formTimestamp).getTime() - new Date(a.formTimestamp).getTime(),
+      );
     },
     enabled: accountWebsites.length > 0,
   });
 
-  // ── Booked jobs metrics ──────────────────────────────────────────────────
+  // ── Booked jobs ─────────────────────────────────────────────────────────────
   const { data: jobMetrics, isLoading: jobsLoading } = useQuery<any>({
     queryKey: ["booked-job-metrics", accountId, month],
     queryFn: () => api.get<any>(`/api/leads/metrics/${accountId}?month=${month}`),
     enabled: !!accountId,
   });
 
-  // ── Mark as booked mutation ──────────────────────────────────────────────
+  // ── Update monthly spend ────────────────────────────────────────────────────
+  const updateSpend = useMutation({
+    mutationFn: (spend: number) =>
+      api.patch<any>(`/api/accounts/${accountId}/spend`, { monthlySpend: spend }),
+    onSuccess: () => {
+      toast({ title: "Investment updated", description: "Monthly SEO investment saved." });
+      qc.invalidateQueries({ queryKey: ["agency-dashboard", accountId, month] });
+      setSpendEditing(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Could not save monthly investment.", variant: "destructive" });
+    },
+  });
+
+  function saveSpend() {
+    const v = parseFloat(spendInput);
+    if (!isNaN(v) && v >= 0) updateSpend.mutate(v);
+    else setSpendEditing(false);
+  }
+
+  // ── Book job mutation ───────────────────────────────────────────────────────
   const markBooked = useMutation({
     mutationFn: ({ leadId, value }: { leadId: string; value: string }) =>
       api.post<any>("/api/leads/update-status", {
-        leadId,
-        status: "booked",
-        jobValue: parseFloat(value),
-        accountId,
+        leadId, status: "booked", jobValue: parseFloat(value), accountId,
       }),
     onSuccess: (data) => {
       toast({
         title: "Job recorded",
-        description: `$${parseFloat(jobValue).toLocaleString()} booked. Job ID: ${data.bookedJobId?.slice(0, 8)}…`,
+        description: `${fmtCurrency(parseFloat(jobValue))} booked. Job ID: ${data.bookedJobId?.slice(0, 8)}…`,
       });
       qc.invalidateQueries({ queryKey: ["agency-dashboard", accountId, month] });
       qc.invalidateQueries({ queryKey: ["booked-job-metrics", accountId, month] });
@@ -194,22 +281,72 @@ export default function AgencyDashboardPage() {
 
   const leads = rawLeads ?? [];
   const jobs = jobMetrics?.jobs ?? [];
+  const roi = summary?.roi ?? {};
+  const seo = summary?.seo ?? {};
+  const hasSpend = (roi.monthlySpend ?? 0) > 0;
+  const hasActivity = (summary?.leads?.totalLeads ?? 0) > 0 || (summary?.leads?.bookedJobs ?? 0) > 0;
 
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
 
-        {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Leads & Conversions</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {summary?.accountName ? `${summary.accountName} — ` : ""}Leads &amp; ROI
+            </h1>
             <p className="text-muted-foreground text-sm mt-0.5">
-              Track calls, form submissions, and booked jobs by month.
+              Track SEO performance, lead flow, and return on investment.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Account selector — super admins only */}
+            {/* Monthly spend inline edit */}
+            <div className="flex items-center gap-1.5 border rounded-md px-3 py-1.5 bg-background text-sm">
+              <DollarSign className="size-3.5 text-muted-foreground shrink-0" />
+              {spendEditing ? (
+                <>
+                  <input
+                    ref={spendInputRef}
+                    type="number"
+                    min="0"
+                    step="100"
+                    className="w-24 outline-none bg-transparent text-sm"
+                    value={spendInput}
+                    onChange={(e) => setSpendInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveSpend(); if (e.key === "Escape") setSpendEditing(false); }}
+                    onBlur={saveSpend}
+                    autoFocus
+                    data-testid="input-monthly-spend"
+                    placeholder="0"
+                  />
+                  <span className="text-muted-foreground">/mo</span>
+                  {updateSpend.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                  ) : (
+                    <button onClick={saveSpend} className="text-emerald-600 hover:text-emerald-700">
+                      <Check className="size-3.5" />
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground text-xs">
+                    {hasSpend ? `${fmtCurrency(roi.monthlySpend)}/mo investment` : "Set monthly investment"}
+                  </span>
+                  <button
+                    onClick={() => { setSpendEditing(true); setTimeout(() => spendInputRef.current?.focus(), 50); }}
+                    className="text-muted-foreground hover:text-foreground ml-1"
+                    data-testid="button-edit-spend"
+                  >
+                    <Pencil className="size-3" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Account selector */}
             {user?.isSuperAdmin && accounts && (
               <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
                 <SelectTrigger className="w-48" data-testid="select-account">
@@ -238,43 +375,217 @@ export default function AgencyDashboardPage() {
           </div>
         </div>
 
-        {/* ── Stat cards ── */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            icon={PhoneCall}
-            label="Calls This Month"
-            value={summary?.calls?.thisMonth ?? "—"}
-            sub={summary?.calls?.thisMonth ? `Avg ${summary.calls.avgDuration}` : undefined}
-            color="text-blue-500"
-            loading={summaryLoading && !!accountId}
-          />
-          <StatCard
-            icon={FileText}
-            label="Form Submissions"
-            value={summary?.forms?.thisMonth ?? "—"}
-            sub={summary?.forms?.thisMonth ? `${summary.forms.conversionRate} of total leads` : undefined}
-            color="text-violet-500"
-            loading={summaryLoading && !!accountId}
-          />
-          <StatCard
-            icon={CheckCircle}
-            label="Booked Jobs"
-            value={summary?.leads?.bookedJobs ?? "—"}
-            sub={summary?.leads?.bookedJobs ? `${summary.leads.totalLeads} total leads` : undefined}
-            color="text-emerald-500"
-            loading={summaryLoading && !!accountId}
-          />
-          <StatCard
-            icon={DollarSign}
-            label="Revenue Attributed"
-            value={summary?.leads?.totalJobValue != null ? fmtCurrency(summary.leads.totalJobValue) : "—"}
-            sub={summary?.leads?.bookedJobs ? `Avg ${fmtCurrency(summary.leads.avgJobValue ?? 0)} / job` : undefined}
-            color="text-amber-500"
-            loading={summaryLoading && !!accountId}
-          />
+        {/* ── ROI Impact section (when spend is set) ───────────────────────── */}
+        {hasSpend ? (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Target className="size-4 text-emerald-600" />
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                ROI Impact — {fmtCurrency(roi.monthlySpend)} invested
+              </h2>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <RoiCard
+                label="ROI Multiple"
+                value={roi.roiMultiple != null ? `${roi.roiMultiple}x` : "—"}
+                sub="Revenue per $1 invested"
+                accent="border-l-emerald-500"
+                loading={summaryLoading && !!accountId}
+              />
+              <RoiCard
+                label="Revenue This Month"
+                value={roi.totalJobValue != null ? fmtCurrency(roi.totalJobValue) : "—"}
+                sub="Total attributed revenue"
+                accent="border-l-blue-500"
+                loading={summaryLoading && !!accountId}
+              />
+              <RoiCard
+                label="Net Revenue"
+                value={roi.netRevenue != null ? (roi.netRevenue >= 0 ? `+${fmtCurrency(roi.netRevenue)}` : fmtCurrency(roi.netRevenue)) : "—"}
+                sub="Revenue minus investment"
+                accent={roi.netRevenue >= 0 ? "border-l-emerald-400" : "border-l-red-400"}
+                loading={summaryLoading && !!accountId}
+              />
+              <RoiCard
+                label="Cost Per Lead"
+                value={roi.cpl != null ? fmtCurrency(roi.cpl) : "—"}
+                sub="Per call or form submission"
+                accent="border-l-violet-500"
+                loading={summaryLoading && !!accountId}
+              />
+              <RoiCard
+                label="Cost Per Booking"
+                value={roi.cpa != null ? fmtCurrency(roi.cpa) : "—"}
+                sub="Per booked job"
+                accent="border-l-amber-500"
+                loading={summaryLoading && !!accountId}
+              />
+            </div>
+            {!hasActivity && !summaryLoading && (
+              <p className="text-xs text-muted-foreground mt-2">
+                No leads or booked jobs this month yet — ROI metrics will populate as activity comes in.
+              </p>
+            )}
+          </div>
+        ) : (
+          !summaryLoading && !!accountId && (
+            <div className="rounded-xl border border-dashed p-5 flex items-center gap-4 bg-muted/30">
+              <Target className="size-8 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-sm font-medium">Unlock ROI Metrics</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Click the <strong>Set monthly investment</strong> field above to enter this client's monthly SEO spend.
+                  We'll calculate CPL, CPA, ROI multiple, and net revenue automatically.
+                </p>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* ── Activity stat cards ──────────────────────────────────────────── */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="size-4 text-amber-500" />
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Lead Activity
+            </h2>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              icon={PhoneCall} label="Calls This Month"
+              value={summary?.calls?.thisMonth ?? "—"}
+              sub={summary?.calls?.thisMonth ? `Avg ${summary.calls.avgDuration}` : undefined}
+              color="text-blue-500" loading={summaryLoading && !!accountId}
+            />
+            <StatCard
+              icon={FileText} label="Form Submissions"
+              value={summary?.forms?.thisMonth ?? "—"}
+              sub={summary?.forms?.thisMonth ? `${summary.forms.conversionRate} of total leads` : undefined}
+              color="text-violet-500" loading={summaryLoading && !!accountId}
+            />
+            <StatCard
+              icon={CheckCircle} label="Booked Jobs"
+              value={summary?.leads?.bookedJobs ?? "—"}
+              sub={summary?.leads?.bookedJobs ? `${summary.leads.totalLeads} total leads` : undefined}
+              color="text-emerald-500" loading={summaryLoading && !!accountId}
+            />
+            <StatCard
+              icon={DollarSign} label="Revenue Attributed"
+              value={summary?.leads?.totalJobValue != null ? fmtCurrency(summary.leads.totalJobValue) : "—"}
+              sub={summary?.leads?.bookedJobs ? `Avg ${fmtCurrency(summary.leads.avgJobValue ?? 0)} / job` : undefined}
+              color="text-amber-500" loading={summaryLoading && !!accountId}
+            />
+          </div>
         </div>
 
-        {/* ── Top pages + call performance ── */}
+        {/* ── SEO Performance ──────────────────────────────────────────────── */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <BarChart3 className="size-4 text-blue-500" />
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              SEO Performance
+            </h2>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+
+            {/* Page tier breakdown */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Globe className="size-4 text-muted-foreground" />
+                  Published Pages
+                </CardTitle>
+                <CardDescription>Content indexed and active in Google.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {summaryLoading && !!accountId ? (
+                  <Skeleton className="h-16 w-full" />
+                ) : seo.total === 0 ? (
+                  <p className="text-sm text-muted-foreground">No published pages yet.</p>
+                ) : (
+                  <>
+                    <TierBar t1={seo.tier1} t2={seo.tier2} t3={seo.tier3} />
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: "Tier 1 — Google Priority", value: seo.tier1, color: "text-emerald-600", badgeCls: "bg-emerald-100 text-emerald-700" },
+                        { label: "Tier 2 — Live", value: seo.tier2, color: "text-blue-600", badgeCls: "bg-blue-100 text-blue-700" },
+                        { label: "Tier 3 — Indexed", value: seo.tier3, color: "text-gray-500", badgeCls: "bg-gray-100 text-gray-600" },
+                        { label: "Total Published", value: seo.total, color: "text-foreground", badgeCls: "bg-gray-100 text-gray-700" },
+                      ].map((s) => (
+                        <div key={s.label} className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">{s.label}</span>
+                          <span className={`text-sm font-bold ${s.color}`}>{s.value ?? 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1 border-t">
+                      <span className="text-xs text-muted-foreground">Avg quality score</span>
+                      <span className={`text-sm font-bold ml-auto ${(seo.avgScore ?? 0) >= 80 ? "text-emerald-600" : (seo.avgScore ?? 0) >= 60 ? "text-amber-600" : "text-gray-500"}`}>
+                        {seo.avgScore ?? "—"}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Impression / click estimates */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ArrowUpRight className="size-4 text-muted-foreground" />
+                  Estimated Organic Reach
+                </CardTitle>
+                <CardDescription>
+                  Monthly estimates based on page tier and quality scores.
+                  <span className="block text-[10px] mt-0.5 opacity-60">*Estimates only — connect Google Search Console for real data.</span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {summaryLoading && !!accountId ? (
+                  <Skeleton className="h-24 w-full" />
+                ) : seo.total === 0 ? (
+                  <p className="text-sm text-muted-foreground">Publish pages to see impression estimates.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-2xl font-bold text-blue-600" data-testid="stat-est-impressions">
+                          {fmtNum(seo.estImpressions ?? 0)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Estimated monthly impressions</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-2xl font-bold text-violet-600" data-testid="stat-est-clicks">
+                          {fmtNum(seo.estClicks ?? 0)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Estimated monthly clicks</div>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 text-xs text-muted-foreground border-t pt-3">
+                      <div className="flex justify-between">
+                        <span>Tier 1 pages ({seo.tier1})</span>
+                        <span>~{fmtNum((seo.tier1 ?? 0) * 200)} impressions</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tier 2 pages ({seo.tier2})</span>
+                        <span>~{fmtNum((seo.tier2 ?? 0) * 30)} impressions</span>
+                      </div>
+                      {(seo.tier3 ?? 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span>Tier 3 pages ({seo.tier3})</span>
+                          <span>~{fmtNum((seo.tier3 ?? 0) * 8)} impressions</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* ── Top pages + call performance ─────────────────────────────────── */}
         {summary && (
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
@@ -287,12 +598,12 @@ export default function AgencyDashboardPage() {
                   <p className="text-sm text-muted-foreground">No call data yet.</p>
                 ) : (
                   <div className="space-y-2">
-                    {summary.calls.topPages.map(([pageId, count]: [string, number], i: number) => (
-                      <div key={pageId} className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground truncate max-w-[280px] font-mono text-xs">
-                          {i + 1}. {pageId.slice(0, 8)}…
+                    {summary.calls.topPages.map(([title, count]: [string, number], i: number) => (
+                      <div key={i} className="flex items-center justify-between text-sm gap-3">
+                        <span className="text-muted-foreground truncate text-xs flex-1">
+                          {i + 1}. {title}
                         </span>
-                        <Badge variant="secondary">{count} call{count !== 1 ? "s" : ""}</Badge>
+                        <Badge variant="secondary" className="shrink-0">{count} call{count !== 1 ? "s" : ""}</Badge>
                       </div>
                     ))}
                   </div>
@@ -310,12 +621,12 @@ export default function AgencyDashboardPage() {
                   <p className="text-sm text-muted-foreground">No form data yet.</p>
                 ) : (
                   <div className="space-y-2">
-                    {summary.forms.topPages.map(([pageId, count]: [string, number], i: number) => (
-                      <div key={pageId} className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground truncate max-w-[280px] font-mono text-xs">
-                          {i + 1}. {pageId.slice(0, 8)}…
+                    {summary.forms.topPages.map(([title, count]: [string, number], i: number) => (
+                      <div key={i} className="flex items-center justify-between text-sm gap-3">
+                        <span className="text-muted-foreground truncate text-xs flex-1">
+                          {i + 1}. {title}
                         </span>
-                        <Badge variant="secondary">{count} form{count !== 1 ? "s" : ""}</Badge>
+                        <Badge variant="secondary" className="shrink-0">{count} form{count !== 1 ? "s" : ""}</Badge>
                       </div>
                     ))}
                   </div>
@@ -325,7 +636,7 @@ export default function AgencyDashboardPage() {
           </div>
         )}
 
-        {/* ── Form Submissions table ── */}
+        {/* ── Form Submissions table ───────────────────────────────────────── */}
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -374,12 +685,8 @@ export default function AgencyDashboardPage() {
                         </TableCell>
                         <TableCell>
                           <div className="text-xs space-y-0.5">
-                            {lead.submitterEmail && (
-                              <div className="text-muted-foreground">{lead.submitterEmail}</div>
-                            )}
-                            {lead.submitterPhone && (
-                              <div className="text-muted-foreground">{lead.submitterPhone}</div>
-                            )}
+                            {lead.submitterEmail && <div className="text-muted-foreground">{lead.submitterEmail}</div>}
+                            {lead.submitterPhone && <div className="text-muted-foreground">{lead.submitterPhone}</div>}
                           </div>
                         </TableCell>
                         <TableCell className="max-w-[180px]">
@@ -392,18 +699,14 @@ export default function AgencyDashboardPage() {
                           )}
                         </TableCell>
                         <TableCell className="max-w-[200px]">
-                          <span className="text-xs text-muted-foreground line-clamp-2">
-                            {lead.message || "—"}
-                          </span>
+                          <span className="text-xs text-muted-foreground line-clamp-2">{lead.message || "—"}</span>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {fmtDate(lead.formTimestamp)}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs gap-1"
+                            size="sm" variant="outline" className="text-xs gap-1"
                             data-testid={`button-book-lead-${lead.id}`}
                             onClick={() => setBookDialog({ leadId: lead.id, name: lead.submitterName || lead.submitterEmail || "this lead" })}
                           >
@@ -420,7 +723,7 @@ export default function AgencyDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* ── Booked Jobs table ── */}
+        {/* ── Booked Jobs table ────────────────────────────────────────────── */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
@@ -433,9 +736,7 @@ export default function AgencyDashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             {!accountId ? (
-              <div className="px-6 py-8 text-center text-sm text-muted-foreground">
-                Select an account to see booked jobs.
-              </div>
+              <div className="px-6 py-8 text-center text-sm text-muted-foreground">Select an account to see booked jobs.</div>
             ) : jobsLoading ? (
               <div className="px-6 py-4 space-y-3">
                 {[1, 2].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
@@ -494,32 +795,20 @@ export default function AgencyDashboardPage() {
             <div className="space-y-1.5">
               <Label htmlFor="job-value">Job Value ($)</Label>
               <Input
-                id="job-value"
-                type="number"
-                min="0"
-                step="100"
-                placeholder="e.g. 5000"
-                value={jobValue}
-                onChange={(e) => setJobValue(e.target.value)}
+                id="job-value" type="number" min="0" step="100" placeholder="e.g. 5000"
+                value={jobValue} onChange={(e) => setJobValue(e.target.value)}
                 data-testid="input-job-value"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => { setBookDialog(null); setJobValue(""); }}
-            >
+            <Button variant="outline" onClick={() => { setBookDialog(null); setJobValue(""); }}>
               Cancel
             </Button>
             <Button
               disabled={!jobValue || isNaN(parseFloat(jobValue)) || markBooked.isPending}
               data-testid="button-confirm-book"
-              onClick={() => {
-                if (bookDialog) {
-                  markBooked.mutate({ leadId: bookDialog.leadId, value: jobValue });
-                }
-              }}
+              onClick={() => { if (bookDialog) markBooked.mutate({ leadId: bookDialog.leadId, value: jobValue }); }}
             >
               {markBooked.isPending ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
               Record Job
