@@ -92,6 +92,13 @@ export default function WebsitesPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const fixStateHubTitles = useMutation({
+    mutationFn: (websiteId?: string) =>
+      api.post<{ fixed: number; message: string }>(`/api/admin/fix-state-hub-titles`, websiteId ? { websiteId } : {}),
+    onSuccess: (data) => toast({ title: "Titles Fixed", description: data.message }),
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   // Pre-fill edit form when a website is selected for editing
   useEffect(() => {
     if (editWebsite) {
@@ -127,9 +134,21 @@ export default function WebsitesPage() {
             <h1 className="text-2xl font-bold tracking-tight">Websites</h1>
             <p className="text-muted-foreground text-sm mt-0.5">Manage target domains and deployment settings.</p>
           </div>
-          <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-add-website">
-            <Plus className="size-4" />Add Website
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={fixStateHubTitles.isPending}
+              data-testid="button-fix-state-hub-titles-global"
+              onClick={() => fixStateHubTitles.mutate(undefined)}
+              title="Fix pages where state name appears twice (e.g. 'Wyoming, Wyoming')"
+            >
+              {fixStateHubTitles.isPending ? "Fixing…" : "Fix State, State Titles"}
+            </Button>
+            <Button className="gap-2" size="sm" onClick={() => setShowCreate(true)} data-testid="button-add-website">
+              <Plus className="size-4" />Add Website
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
@@ -400,16 +419,28 @@ export default function WebsitesPage() {
                   <Input value={replaceText} onChange={e => setReplaceText(e.target.value)} placeholder="e.g. subtracker.spotonresults.com" data-testid="input-content-replace" />
                 </div>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={!findText || contentReplace.isPending}
-                data-testid="button-content-replace"
-                onClick={() => contentReplace.mutate({ id: editWebsite.id, find: findText, replace: replaceText })}
-              >
-                {contentReplace.isPending ? "Replacing…" : "Replace in Pages"}
-              </Button>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!findText || contentReplace.isPending}
+                  data-testid="button-content-replace"
+                  onClick={() => contentReplace.mutate({ id: editWebsite.id, find: findText, replace: replaceText })}
+                >
+                  {contentReplace.isPending ? "Replacing…" : "Replace in Pages"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={fixStateHubTitles.isPending}
+                  data-testid="button-fix-state-hub-titles"
+                  onClick={() => fixStateHubTitles.mutate(editWebsite.id)}
+                >
+                  {fixStateHubTitles.isPending ? "Fixing…" : "Fix \"State, State\" Titles"}
+                </Button>
+              </div>
             </div>
 
             <DialogFooter>

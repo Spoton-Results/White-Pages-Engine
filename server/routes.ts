@@ -5788,6 +5788,34 @@ score is 0-100. label must be one of: "Hot", "Warm", "Cold".`,
     res.json({ deleted: count, minLength, websiteId });
   });
 
+  // ── One-time admin fix: collapse "State, State" duplicates in state_hub titles/H1s ──
+  // Applies globally (all websites) or to a specific website if websiteId is provided.
+  app.post("/api/admin/fix-state-hub-titles", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+    const { websiteId } = req.body as { websiteId?: string };
+    const { pool } = await import("./db");
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*) AS c FROM pages WHERE page_type = 'state_hub' AND h1 LIKE '% in %, %'${websiteId ? " AND website_id = $1" : ""}`,
+      websiteId ? [websiteId] : []
+    );
+    const toFix = parseInt(countRes.rows[0].c, 10);
+    if (toFix === 0) return res.json({ fixed: 0, message: "No pages need fixing." });
+
+    const result = await pool.query(
+      `UPDATE pages
+       SET
+         h1    = replace(h1,    ', ' || split_part(split_part(h1, ' in ', 2), ', ', 1), ''),
+         title = replace(title, ', ' || split_part(split_part(h1, ' in ', 2), ', ', 1) || ' | ', ' | ')
+       WHERE page_type = 'state_hub'
+         AND h1 LIKE '% in %, %'${websiteId ? " AND website_id = $1" : ""}`,
+      websiteId ? [websiteId] : []
+    );
+
+    const fixed = result.rowCount ?? 0;
+    console.log(`[fix-state-hub-titles] Fixed ${fixed} pages${websiteId ? ` for website ${websiteId}` : " globally"}`);
+    return res.json({ fixed, message: `Fixed ${fixed} state hub page title${fixed !== 1 ? "s" : ""}.` });
+  });
+
   // ── Automation Settings (per-tenant) ─────────────────────────────────────────
 
   app.get("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
