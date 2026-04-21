@@ -22,6 +22,7 @@ import {
   PhoneCall, FileText, DollarSign, TrendingUp,
   CheckCircle, Loader2, CalendarDays, Pencil, Check,
   BarChart3, Globe, Zap, Target, ArrowUpRight,
+  Link2, Link2Off, Copy, CheckCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -170,6 +171,13 @@ export default function AgencyDashboardPage() {
   const [spendInput, setSpendInput] = useState("");
   const spendInputRef = useRef<HTMLInputElement>(null);
 
+  // GSC connect dialog
+  const [gscDialog, setGscDialog] = useState(false);
+  const [gscWebsiteId, setGscWebsiteId] = useState("");
+  const [gscSiteUrlInput, setGscSiteUrlInput] = useState("");
+  const [gscError, setGscError] = useState("");
+  const [gscCopied, setGscCopied] = useState(false);
+
   // ── Accounts list (superAdmin only) ────────────────────────────────────────
   const { data: accounts } = useQuery<any[]>({
     queryKey: ["accounts-list"],
@@ -198,6 +206,13 @@ export default function AgencyDashboardPage() {
       setSpendInput(String(summary.roi.monthlySpend));
     }
   }, [summary?.roi?.monthlySpend, spendEditing]);
+
+  // ── Google Search Console service account email ─────────────────────────────
+  const { data: saEmailData } = useQuery<{ email: string | null; configured: boolean }>({
+    queryKey: ["gsc-sa-email"],
+    queryFn: () => api.get("/api/gsc/sa-email"),
+    enabled: !!accountId,
+  });
 
   // ── Websites for the account ────────────────────────────────────────────────
   const { data: allWebsites } = useQuery<any[]>({
@@ -255,6 +270,46 @@ export default function AgencyDashboardPage() {
     const v = parseFloat(spendInput);
     if (!isNaN(v) && v >= 0) updateSpend.mutate(v);
     else setSpendEditing(false);
+  }
+
+  // ── GSC connect mutation ────────────────────────────────────────────────────
+  const gscConnect = useMutation({
+    mutationFn: ({ websiteId, siteUrl }: { websiteId: string; siteUrl: string }) =>
+      api.post<any>(`/api/websites/${websiteId}/gsc-connect`, { siteUrl }),
+    onSuccess: () => {
+      toast({ title: "Connected!", description: "Google Search Console connected. Real data will appear shortly." });
+      qc.invalidateQueries({ queryKey: ["agency-dashboard", accountId, month] });
+      setGscDialog(false);
+      setGscError("");
+    },
+    onError: (err: any) => {
+      setGscError(err.message ?? "Connection failed. Check the site URL and try again.");
+    },
+  });
+
+  const gscDisconnect = useMutation({
+    mutationFn: (websiteId: string) => api.delete<any>(`/api/websites/${websiteId}/gsc-connect`),
+    onSuccess: () => {
+      toast({ title: "Disconnected", description: "Google Search Console has been disconnected." });
+      qc.invalidateQueries({ queryKey: ["agency-dashboard", accountId, month] });
+    },
+  });
+
+  function openGscDialog() {
+    const unconfigured = seo.gsc?.unconfiguredSites ?? [];
+    const first = unconfigured[0];
+    setGscWebsiteId(first?.id ?? "");
+    setGscSiteUrlInput(first?.suggestedUrl ?? "");
+    setGscError("");
+    setGscDialog(true);
+  }
+
+  function copyEmail() {
+    const email = saEmailData?.email ?? "";
+    navigator.clipboard.writeText(email).then(() => {
+      setGscCopied(true);
+      setTimeout(() => setGscCopied(false), 2000);
+    });
   }
 
   // ── Book job mutation ───────────────────────────────────────────────────────
@@ -529,37 +584,105 @@ export default function AgencyDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Impression / click estimates */}
+            {/* Organic Reach — real GSC data or estimates */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <ArrowUpRight className="size-4 text-muted-foreground" />
-                  Estimated Organic Reach
-                </CardTitle>
-                <CardDescription>
-                  Monthly estimates based on page tier and quality scores.
-                  <span className="block text-[10px] mt-0.5 opacity-60">*Estimates only — connect Google Search Console for real data.</span>
-                </CardDescription>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <ArrowUpRight className="size-4 text-muted-foreground" />
+                      Organic Reach
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      {seo.gsc?.connected
+                        ? "Live data from Google Search Console."
+                        : "Estimates based on page tier and quality scores."}
+                    </CardDescription>
+                  </div>
+                  {seo.gsc?.connected ? (
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 shrink-0">
+                      <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Live · GSC
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted border border-dashed rounded-full px-2 py-0.5 shrink-0">
+                      Estimated
+                    </span>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {summaryLoading && !!accountId ? (
                   <Skeleton className="h-24 w-full" />
                 ) : seo.total === 0 ? (
-                  <p className="text-sm text-muted-foreground">Publish pages to see impression estimates.</p>
-                ) : (
+                  <p className="text-sm text-muted-foreground">Publish pages to see reach data.</p>
+                ) : seo.gsc?.connected ? (
+                  /* ── Real GSC data ── */
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
-                        <div className="text-2xl font-bold text-blue-600" data-testid="stat-est-impressions">
-                          {fmtNum(seo.estImpressions ?? 0)}
+                        <div className="text-2xl font-bold text-blue-600" data-testid="stat-gsc-impressions">
+                          {fmtNum(seo.gsc.impressions ?? 0)}
                         </div>
-                        <div className="text-xs text-muted-foreground">Estimated monthly impressions</div>
+                        <div className="text-xs text-muted-foreground">Impressions (last 28d)</div>
                       </div>
                       <div className="space-y-1">
-                        <div className="text-2xl font-bold text-violet-600" data-testid="stat-est-clicks">
-                          {fmtNum(seo.estClicks ?? 0)}
+                        <div className="text-2xl font-bold text-violet-600" data-testid="stat-gsc-clicks">
+                          {fmtNum(seo.gsc.clicks ?? 0)}
                         </div>
-                        <div className="text-xs text-muted-foreground">Estimated monthly clicks</div>
+                        <div className="text-xs text-muted-foreground">Clicks (last 28d)</div>
+                      </div>
+                    </div>
+                    {seo.gsc.avgPosition != null && (
+                      <div className="flex items-center gap-2 text-xs border-t pt-3">
+                        <span className="text-muted-foreground">Average position</span>
+                        <span className="font-semibold ml-auto">{seo.gsc.avgPosition}</span>
+                      </div>
+                    )}
+                    {/* Disconnect links */}
+                    <div className="border-t pt-3 flex flex-wrap gap-2">
+                      {seo.gsc.connectedSites?.map((s: any) => (
+                        <div key={s.websiteId} className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded-md px-2 py-1">
+                          <Link2 className="size-3 text-emerald-500" />
+                          <span className="truncate max-w-[140px]">{s.domain}</span>
+                          <button
+                            className="ml-1 text-muted-foreground hover:text-destructive"
+                            title="Disconnect"
+                            data-testid={`button-gsc-disconnect-${s.websiteId}`}
+                            onClick={() => gscDisconnect.mutate(s.websiteId)}
+                            disabled={gscDisconnect.isPending}
+                          >
+                            <Link2Off className="size-3" />
+                          </button>
+                        </div>
+                      ))}
+                      {(seo.gsc.unconfiguredSites?.length ?? 0) > 0 && (
+                        <button
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                          onClick={openGscDialog}
+                          data-testid="button-gsc-connect-more"
+                        >
+                          <Link2 className="size-3" />
+                          Connect more sites
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Estimate + connect CTA ── */
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-2xl font-bold text-blue-600/60" data-testid="stat-est-impressions">
+                          ~{fmtNum(seo.estImpressions ?? 0)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Est. monthly impressions</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-2xl font-bold text-violet-600/60" data-testid="stat-est-clicks">
+                          ~{fmtNum(seo.estClicks ?? 0)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Est. monthly clicks</div>
                       </div>
                     </div>
                     <div className="space-y-1.5 text-xs text-muted-foreground border-t pt-3">
@@ -578,6 +701,16 @@ export default function AgencyDashboardPage() {
                         </div>
                       )}
                     </div>
+                    {(seo.gsc?.unconfiguredSites?.length ?? 0) > 0 && (
+                      <Button
+                        variant="outline" size="sm" className="w-full gap-2 mt-1"
+                        onClick={openGscDialog}
+                        data-testid="button-gsc-connect"
+                      >
+                        <Link2 className="size-3.5" />
+                        Connect Google Search Console
+                      </Button>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -781,6 +914,109 @@ export default function AgencyDashboardPage() {
         </Card>
 
       </div>
+
+      {/* ── GSC Connect Dialog ── */}
+      <Dialog open={gscDialog} onOpenChange={(open) => { if (!open) { setGscDialog(false); setGscError(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link2 className="size-4 text-blue-500" />
+              Connect Google Search Console
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            {/* Step 1 */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Step 1 — Add the service account to your property</p>
+              {saEmailData?.configured ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    In <strong>Google Search Console</strong>, go to Settings → Users and permissions → Add user, then paste this email with <strong>Full</strong> permission:
+                  </p>
+                  <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2">
+                    <code className="text-xs flex-1 break-all">{saEmailData.email}</code>
+                    <button
+                      onClick={copyEmail}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      title="Copy"
+                      data-testid="button-copy-sa-email"
+                    >
+                      {gscCopied ? <CheckCheck className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                  The Google service account is not configured. Contact your platform admin to set up the Google integration.
+                </p>
+              )}
+            </div>
+
+            {/* Step 2 */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Step 2 — Enter your GSC property URL</p>
+              <p className="text-xs text-muted-foreground">
+                Use the exact URL shown in Search Console (e.g. <code>https://example.com/</code> or <code>sc-domain:example.com</code>).
+              </p>
+
+              {/* Website selector if multiple sites */}
+              {(seo.gsc?.unconfiguredSites?.length ?? 0) > 1 && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Website</Label>
+                  <Select
+                    value={gscWebsiteId}
+                    onValueChange={(id) => {
+                      setGscWebsiteId(id);
+                      const site = seo.gsc.unconfiguredSites.find((s: any) => s.id === id);
+                      setGscSiteUrlInput(site?.suggestedUrl ?? "");
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-gsc-website">
+                      <SelectValue placeholder="Select website…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {seo.gsc.unconfiguredSites.map((s: any) => (
+                        <SelectItem key={s.id} value={s.id}>{s.domain}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label htmlFor="gsc-site-url" className="text-xs">Property URL</Label>
+                <Input
+                  id="gsc-site-url"
+                  placeholder="https://yourdomain.com/"
+                  value={gscSiteUrlInput}
+                  onChange={(e) => setGscSiteUrlInput(e.target.value)}
+                  data-testid="input-gsc-site-url"
+                  disabled={!saEmailData?.configured}
+                />
+              </div>
+
+              {gscError && (
+                <p className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2">
+                  {gscError}
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setGscDialog(false); setGscError(""); }}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!gscSiteUrlInput || !gscWebsiteId || !saEmailData?.configured || gscConnect.isPending}
+              data-testid="button-gsc-test-connect"
+              onClick={() => gscConnect.mutate({ websiteId: gscWebsiteId, siteUrl: gscSiteUrlInput })}
+            >
+              {gscConnect.isPending ? <Loader2 className="size-4 animate-spin mr-2" /> : <Link2 className="size-4 mr-2" />}
+              Test &amp; Connect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Book Job Dialog ── */}
       <Dialog open={!!bookDialog} onOpenChange={(open) => { if (!open) { setBookDialog(null); setJobValue(""); } }}>

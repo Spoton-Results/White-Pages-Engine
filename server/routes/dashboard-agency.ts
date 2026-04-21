@@ -3,6 +3,7 @@ import { db, pool } from "../db";
 import { websites, trackedCalls, trackedLeads, bookedJobs } from "@shared/schema";
 import { eq, and, gte, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { querySiteAnalytics, getServiceAccountEmail } from "../services/gsc-search-console";
 
 const router = Router();
 
@@ -33,11 +34,12 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     const acct = acctRes.rows[0] ?? {};
     const monthlySpend: number = acct.monthly_seo_spend ?? 0;
 
-    // Websites for account
-    const siteRows = await db
-      .select({ id: websites.id })
-      .from(websites)
-      .where(eq(websites.accountId, accountId));
+    // Websites for account — include domain and settings for GSC lookup
+    const siteQueryRes = await pool.query(
+      `SELECT id, domain, COALESCE(settings, '{}') AS settings FROM websites WHERE account_id = $1`,
+      [accountId],
+    );
+    const siteRows = siteQueryRes.rows as Array<{ id: string; domain: string; settings: Record<string, any> }>;
     const websiteIds = siteRows.map((w) => w.id);
 
     // ── Call data ──────────────────────────────────────────────────────────────
@@ -165,6 +167,35 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
       seoAvgScore = pageCount > 0 ? Math.round(scoreSum / pageCount) : 0;
     }
 
+    // ── Google Search Console real data ────────────────────────────────────────
+    let gscImpressions = 0, gscClicks = 0;
+    const gscPositions: number[] = [];
+    let gscConnected = false;
+    const gscSites: Array<{ websiteId: string; domain: string; siteUrl: string }> = [];
+
+    for (const site of siteRows) {
+      const gscSiteUrl: string | undefined = site.settings?.gscSiteUrl;
+      if (!gscSiteUrl) continue;
+      gscSites.push({ websiteId: site.id, domain: site.domain, siteUrl: gscSiteUrl });
+      const data = await querySiteAnalytics(gscSiteUrl, startDate, endDate).catch(() => null);
+      if (data) {
+        gscImpressions += data.impressions;
+        gscClicks      += data.clicks;
+        if (data.avgPosition) gscPositions.push(data.avgPosition);
+        gscConnected = true;
+      }
+    }
+
+    const gscAvgPosition = gscPositions.length > 0
+      ? Math.round(gscPositions.reduce((a, b) => a + b, 0) / gscPositions.length * 10) / 10
+      : null;
+
+    const saConfigured = !!getServiceAccountEmail();
+    // websites eligible for GSC connect (those without one yet)
+    const unconfiguredSites = siteRows
+      .filter((s) => !s.settings?.gscSiteUrl)
+      .map((s) => ({ id: s.id, domain: s.domain, suggestedUrl: `https://${s.domain}/` }));
+
     // ── ROI Metrics ────────────────────────────────────────────────────────────
     const totalLeads    = callRows.length + formRows.length;
     const totalJobValue = jobRows.reduce((sum, j) => sum + parseFloat(j.jobValue ?? "0"), 0);
@@ -209,6 +240,15 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
         avgScore:       seoAvgScore,
         estImpressions,
         estClicks,
+        gsc: {
+          connected:       gscConnected,
+          saConfigured,
+          impressions:     gscConnected ? gscImpressions : null,
+          clicks:          gscConnected ? gscClicks      : null,
+          avgPosition:     gscConnected ? gscAvgPosition : null,
+          connectedSites:  gscSites,
+          unconfiguredSites,
+        },
       },
       roi: {
         monthlySpend,

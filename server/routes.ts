@@ -1553,6 +1553,68 @@ Think about what customers search for when they need ${industry} services. Inclu
     return res.json(updated);
   });
 
+  // GET /api/gsc/sa-email — returns the service account email for admin to add to GSC
+  app.get("/api/gsc/sa-email", requireAuth, async (req: Request, res: Response) => {
+    const { getServiceAccountEmail } = await import("./services/gsc-search-console");
+    const email = getServiceAccountEmail();
+    return res.json({ email, configured: !!email });
+  });
+
+  // POST /api/websites/:id/gsc-connect — test a GSC property URL and save it if valid
+  app.post("/api/websites/:id/gsc-connect", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { siteUrl } = req.body as { siteUrl?: string };
+    if (!siteUrl?.trim()) return res.status(400).json({ error: "siteUrl is required" });
+
+    const { testAndConnect, getServiceAccountEmail } = await import("./services/gsc-search-console");
+    const saEmail = getServiceAccountEmail();
+    if (!saEmail) {
+      return res.status(503).json({ error: "Google service account is not configured. Set GOOGLE_INDEXING_SA_JSON." });
+    }
+
+    const now = new Date();
+    const endDate   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startDate = new Date(endDate.getTime() - 28 * 86_400_000);
+
+    const data = await testAndConnect(siteUrl.trim(), startDate, endDate);
+    if (!data) {
+      return res.status(400).json({
+        error: `Could not retrieve data for "${siteUrl}". Make sure you added ${saEmail} to this property in Google Search Console (Settings → Users and permissions → Add user) and wait 1–2 minutes before retrying.`,
+      });
+    }
+
+    const { pool } = await import("./db");
+    await pool.query(
+      `UPDATE websites
+       SET settings = COALESCE(settings, '{}')::jsonb
+                   || $1::jsonb
+       WHERE id = $2`,
+      [JSON.stringify({ gscSiteUrl: siteUrl.trim(), gscConnectedAt: new Date().toISOString() }), websiteId],
+    );
+
+    return res.json({
+      success: true,
+      siteUrl: siteUrl.trim(),
+      saEmail,
+      impressions:  data.impressions,
+      clicks:       data.clicks,
+      avgPosition:  data.avgPosition,
+    });
+  });
+
+  // DELETE /api/websites/:id/gsc-connect — disconnect GSC for a website
+  app.delete("/api/websites/:id/gsc-connect", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const { pool } = await import("./db");
+    await pool.query(
+      `UPDATE websites
+       SET settings = settings - 'gscSiteUrl' - 'gscConnectedAt'
+       WHERE id = $1`,
+      [websiteId],
+    );
+    return res.json({ success: true });
+  });
+
   // PATCH /api/accounts/:accountId/spend — update monthly SEO investment for ROI calculations
   app.patch("/api/accounts/:accountId/spend", requireAuth, async (req: Request, res: Response) => {
     const accountId = req.params.accountId as string;
