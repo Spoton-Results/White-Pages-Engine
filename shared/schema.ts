@@ -599,3 +599,66 @@ export const callTrackingNumbers = pgTable("call_tracking_numbers", {
 export const insertCallTrackingNumberSchema = createInsertSchema(callTrackingNumbers).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertCallTrackingNumber = z.infer<typeof insertCallTrackingNumberSchema>;
 export type CallTrackingNumber = typeof callTrackingNumbers.$inferSelect;
+
+// ─── Phase 10: Tracked Calls ──────────────────────────────────────────────────
+
+export const trackedCalls = pgTable("tracked_calls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  locationId: varchar("location_id").references(() => locations.id, { onDelete: "set null" }),
+  dynamicNumber: varchar("dynamic_number", { length: 20 }).notNull(),
+  callerPhoneHash: varchar("caller_phone_hash", { length: 255 }),
+  callDurationSeconds: integer("call_duration_seconds"),
+  callTimestamp: timestamp("call_timestamp").notNull(),
+  callStatus: varchar("call_status", { length: 50 }),
+  callProviderId: varchar("call_provider_id", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertTrackedCallSchema = createInsertSchema(trackedCalls).omit({ id: true, createdAt: true });
+export type InsertTrackedCall = z.infer<typeof insertTrackedCallSchema>;
+export type TrackedCall = typeof trackedCalls.$inferSelect;
+
+// ─── Phase 10: Tracked Leads ─────────────────────────────────────────────────
+
+export const trackedLeads = pgTable("tracked_leads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  locationId: varchar("location_id").references(() => locations.id, { onDelete: "set null" }),
+  formName: varchar("form_name", { length: 255 }),
+  submitterName: varchar("submitter_name", { length: 255 }),
+  submitterEmail: varchar("submitter_email", { length: 255 }),
+  submitterPhone: varchar("submitter_phone", { length: 20 }),
+  message: text("message"),
+  sourcePageUrl: text("source_page_url"),
+  sourcePageTitle: varchar("source_page_title", { length: 255 }),
+  formTimestamp: timestamp("form_timestamp").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertTrackedLeadSchema = createInsertSchema(trackedLeads).omit({ id: true, createdAt: true });
+export type InsertTrackedLead = z.infer<typeof insertTrackedLeadSchema>;
+export type TrackedLead = typeof trackedLeads.$inferSelect;
+
+// ─── Phase 10: Booked Jobs ────────────────────────────────────────────────────
+
+export const bookedJobs = pgTable("booked_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  leadId: varchar("lead_id").references(() => trackedLeads.id, { onDelete: "set null" }),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  jobValue: decimal("job_value", { precision: 10, scale: 2 }),
+  bookedDate: timestamp("booked_date").notNull(),
+  status: varchar("status", { length: 50 }).default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertBookedJobSchema = createInsertSchema(bookedJobs).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertBookedJob = z.infer<typeof insertBookedJobSchema>;
+export type BookedJob = typeof bookedJobs.$inferSelect;

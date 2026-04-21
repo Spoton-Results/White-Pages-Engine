@@ -1,6 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { sessionMiddleware, requireAuth, requireSuperAdmin, loginUser, hashPassword } from "./auth";
+import callTrackingRouter from "./routes/call-tracking";
+import formTrackingRouter from "./routes/form-tracking";
+import leadsRouter from "./routes/leads";
+import dashboardAgencyRouter from "./routes/dashboard-agency";
+import dashboardAdminRouter from "./routes/dashboard-admin";
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices, generateQueryClusters } from "./services/claude";
@@ -6915,6 +6920,13 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
       return res.status(500).json({ error: "checkout_failed" });
     }
   });
+
+  // ── Phase 10 routes: call tracking, form tracking, leads, dashboards ──────
+  app.use("/api/call-tracking", callTrackingRouter);
+  app.use("/api/form-tracking", formTrackingRouter);
+  app.use("/api/leads", leadsRouter);
+  app.use("/api/dashboard", dashboardAgencyRouter);
+  app.use("/api/admin", dashboardAdminRouter);
 
   return httpServer;
 }
