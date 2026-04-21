@@ -619,6 +619,11 @@ export default function AgencyDashboardPage() {
                 ) : seo.gsc?.connected ? (
                   /* ── Real GSC data ── */
                   <div className="space-y-4">
+                    {(seo.gsc.impressions === 0 && seo.gsc.clicks === 0) ? (
+                      <div className="rounded-md bg-muted/50 border border-dashed px-4 py-3 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Connected ✓</span> — Google hasn't recorded data for this property yet. This usually populates within 24–72 hours of pages being indexed.
+                      </div>
+                    ) : (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <div className="text-2xl font-bold text-blue-600" data-testid="stat-gsc-impressions">
@@ -633,7 +638,8 @@ export default function AgencyDashboardPage() {
                         <div className="text-xs text-muted-foreground">Clicks (last 28d)</div>
                       </div>
                     </div>
-                    {seo.gsc.avgPosition != null && (
+                    )}
+                    {seo.gsc.impressions > 0 && seo.gsc.avgPosition != null && (
                       <div className="flex items-center gap-2 text-xs border-t pt-3">
                         <span className="text-muted-foreground">Average position</span>
                         <span className="font-semibold ml-auto">{seo.gsc.avgPosition}</span>

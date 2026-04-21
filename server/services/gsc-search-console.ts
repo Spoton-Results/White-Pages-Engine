@@ -140,9 +140,15 @@ export async function querySiteAnalytics(
   }
   const totalData = await totalRes.json() as any;
   const row = totalData.rows?.[0];
+
+  // 200 with no rows = site is connected but has no GSC data yet (new site / no indexed pages).
+  // Still treat as a successful connection — return all-zeros summary so the UI can show
+  // "Connected — awaiting data" rather than an error.
   if (!row) {
-    console.warn(`[gsc-sc] No data returned for "${siteUrl}" (${start} → ${end}) — site may be new or SA not yet granted access`);
-    return null;
+    console.log(`[gsc-sc] Connected to "${siteUrl}" but no data yet (${start} → ${end}) — site may be new or not yet indexed`);
+    const empty: GscSummary = { impressions: 0, clicks: 0, ctr: 0, avgPosition: 0, topPages: [] };
+    _cache.set(cacheKey, { data: empty, exp: Date.now() + 3_600_000 });
+    return empty;
   }
 
   // Per-page breakdown (top 10)
