@@ -167,17 +167,25 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
       seoAvgScore = pageCount > 0 ? Math.round(scoreSum / pageCount) : 0;
     }
 
-    // ── Google Search Console real data ────────────────────────────────────────
+    // ── Google Search Console real data (parallel) ─────────────────────────────
     let gscImpressions = 0, gscClicks = 0;
     const gscPositions: number[] = [];
     let gscConnected = false;
     const gscSites: Array<{ websiteId: string; domain: string; siteUrl: string }> = [];
 
-    for (const site of siteRows) {
-      const gscSiteUrl: string | undefined = site.settings?.gscSiteUrl;
-      if (!gscSiteUrl) continue;
+    const gscResults = await Promise.all(
+      siteRows.map(async (site) => {
+        const gscSiteUrl: string | undefined = site.settings?.gscSiteUrl;
+        if (!gscSiteUrl) return null;
+        const data = await querySiteAnalytics(gscSiteUrl, startDate, endDate).catch(() => null);
+        return { site, gscSiteUrl, data };
+      }),
+    );
+
+    for (const result of gscResults) {
+      if (!result) continue;
+      const { site, gscSiteUrl, data } = result;
       gscSites.push({ websiteId: site.id, domain: site.domain, siteUrl: gscSiteUrl });
-      const data = await querySiteAnalytics(gscSiteUrl, startDate, endDate).catch(() => null);
       if (data) {
         gscImpressions += data.impressions;
         gscClicks      += data.clicks;

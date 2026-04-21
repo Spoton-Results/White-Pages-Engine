@@ -187,7 +187,7 @@ export default function AgencyDashboardPage() {
 
   const accountId = user?.isSuperAdmin ? selectedAccountId : user?.accountId ?? "";
 
-  useMemo(() => {
+  useEffect(() => {
     if (user?.isSuperAdmin && accounts?.length && !selectedAccountId) {
       setSelectedAccountId(accounts[0].id);
     }
