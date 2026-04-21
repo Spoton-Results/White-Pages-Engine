@@ -442,6 +442,7 @@ export default function PublishedPagesPage() {
                 <TableRow>
                   <TableHead>Title / Slug</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Tier</TableHead>
                   <TableHead className="text-right">Score</TableHead>
                   <TableHead className="text-right">Words</TableHead>
                   <TableHead>Published</TableHead>
@@ -452,14 +453,14 @@ export default function PublishedPagesPage() {
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 6 }).map((_, j) => (
+                      {Array.from({ length: 7 }).map((_, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : pages.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       No published pages yet.
                     </TableCell>
                   </TableRow>
@@ -503,6 +504,17 @@ export default function PublishedPagesPage() {
                       <Badge variant="outline" className="text-xs capitalize">
                         {page.pageType?.replace(/_/g, " ")}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {page.tier === 1 ? (
+                        <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-100" variant="outline">T1 ★</Badge>
+                      ) : page.tier === 2 ? (
+                        <Badge className="text-[10px] bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-100" variant="outline">T2</Badge>
+                      ) : page.tier === 3 ? (
+                        <Badge className="text-[10px] bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-100" variant="outline">T3</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {page.publishScore != null
