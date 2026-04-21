@@ -71,6 +71,7 @@ import WelcomePage from "@/pages/WelcomePage";
 import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
+import AgencyDashboardPage from "@/pages/agency-dashboard";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -202,6 +203,9 @@ function Router() {
       </Route>
       <Route path="/leads">
         <AuthGuard><LeadsPage /></AuthGuard>
+      </Route>
+      <Route path="/agency-dashboard">
+        <AuthGuard><AgencyDashboardPage /></AuthGuard>
       </Route>
       <Route path="/search-control">
         <AuthGuard><SearchControlPage /></AuthGuard>
