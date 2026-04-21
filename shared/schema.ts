@@ -580,3 +580,22 @@ export const clientWeeklyDigests = pgTable("client_weekly_digests", {
   status: varchar("status", { length: 20 }).default("pending"),
 });
 export type ClientWeeklyDigest = typeof clientWeeklyDigests.$inferSelect;
+
+// ─── Phase 10: Call Tracking Numbers ─────────────────────────────────────────
+
+export const callTrackingNumbers = pgTable("call_tracking_numbers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
+  pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  locationId: varchar("location_id").references(() => locations.id, { onDelete: "set null" }),
+  dynamicNumber: varchar("dynamic_number", { length: 20 }).notNull().unique(),
+  forwardToNumber: varchar("forward_to_number", { length: 20 }).notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertCallTrackingNumberSchema = createInsertSchema(callTrackingNumbers).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertCallTrackingNumber = z.infer<typeof insertCallTrackingNumberSchema>;
+export type CallTrackingNumber = typeof callTrackingNumbers.$inferSelect;

@@ -114,6 +114,22 @@ async function runBackgroundStartup() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_website ON client_weekly_digests(website_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_status ON client_weekly_digests(status)`);
     console.log("[startup] Schema migration: Phase 9 health/digest tables ensured.");
+    // Phase 10 — Call Tracking Numbers
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS call_tracking_numbers (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+      service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+      location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
+      dynamic_number VARCHAR(20) NOT NULL UNIQUE,
+      forward_to_number VARCHAR(20) NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_call_tracking_page ON call_tracking_numbers(page_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_call_tracking_website ON call_tracking_numbers(website_id)`);
+    console.log("[startup] Schema migration: Phase 10 call_tracking_numbers table ensured.");
     // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
     const idxStatements = [
       `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,
