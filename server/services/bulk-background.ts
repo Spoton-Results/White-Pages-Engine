@@ -206,10 +206,19 @@ function applyBlueprintTemplates(
       rawSlug = `${rawSlug}--${ss}`;
     }
   }
+  // De-dup "State Name, State Name" in text fields when a blueprint that uses
+  // {city}, {state} is applied to a state-level target (location === state name).
+  // The slug already has this protection above (lines 190–192); title/H1/meta need it too.
+  const dedupState = (text: string): string => {
+    if (vars.location.toLowerCase() !== vars.state.toLowerCase()) return text;
+    const escaped = vars.state.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(`\\b${escaped}\\s*,\\s*${escaped}\\b`, "gi"), vars.state);
+  };
+
   return {
-    title: interp(blueprint.titleTemplate),
-    h1: interp(blueprint.h1Template),
-    metaDescription: interp(blueprint.metaDescTemplate),
+    title: dedupState(interp(blueprint.titleTemplate)),
+    h1: dedupState(interp(blueprint.h1Template)),
+    metaDescription: dedupState(interp(blueprint.metaDescTemplate)),
     slug: rawSlug,
   };
 }

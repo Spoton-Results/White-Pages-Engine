@@ -181,6 +181,25 @@ async function runBackgroundStartup() {
         AND id = (SELECT id FROM websites WHERE name = 'SubTrackers' OR name = 'Subtracker pages' LIMIT 1)
     `);
     console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
+
+    // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
+    // Caused by blueprint templates using {city}, {state} applied to state-level targets
+    // where location === state name (e.g. "New Mexico, New Mexico" → "New Mexico").
+    // Uses string ops (no backreference regex): extracts the state name from the h1, then
+    // removes the trailing ", StateName" from h1 and ", StateName | " from title.
+    // This patch is idempotent — pages without the pattern are unaffected by the LIKE filter.
+    const patch = await db.execute(sql`
+      UPDATE pages
+      SET
+        h1    = replace(h1,    ', ' || split_part(split_part(h1, ' in ', 2), ', ', 1), ''),
+        title = replace(title, ', ' || split_part(split_part(h1, ' in ', 2), ', ', 1) || ' | ', ' | ')
+      WHERE page_type = 'state_hub'
+        AND h1 LIKE '% in %, %'
+    `);
+    const patched = (patch as any).rowCount ?? 0;
+    if (patched > 0) {
+      console.log(`[startup] Data patch: fixed ${patched} state_hub pages with duplicate "State, State" in title/H1.`);
+    }
   } catch (err) {
     console.error("[startup] Schema migration failed (non-fatal):", err);
   }
