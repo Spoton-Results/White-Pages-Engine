@@ -1,11 +1,9 @@
 import { Router } from "express";
 import { db } from "../db";
-import {
-  callTrackingNumbers,
-  trackedCalls,
-} from "@shared/schema";
+import { callTrackingNumbers, trackedCalls } from "@shared/schema";
 import { eq, and, gte, lt } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { getPhoneProvider, getPublicBaseUrl } from "../services/phone-provider";
 import crypto from "crypto";
 
 const router = Router();
@@ -16,11 +14,22 @@ router.post("/provision-number", requireAuth, async (req, res) => {
     const { pageId, serviceId, locationId, websiteId, forwardToNumber } = req.body;
 
     if (!pageId || !websiteId || !forwardToNumber || !serviceId) {
-      return res.status(400).json({ error: "Missing required fields: pageId, serviceId, websiteId, forwardToNumber" });
+      return res.status(400).json({
+        error: "Missing required fields: pageId, serviceId, websiteId, forwardToNumber",
+      });
     }
 
-    // Placeholder — replace with CallRail/Twilio provisioning in production
-    const dynamicNumber = `+1555${Math.floor(Math.random() * 9000000 + 1000000)}`;
+    const baseUrl = getPublicBaseUrl();
+    const provider = getPhoneProvider();
+
+    // Derive area code from the forwardToNumber for local number provisioning
+    const areaCode = forwardToNumber.replace(/\D/g, "").slice(1, 4) || undefined;
+
+    const provisioned = await provider.provisionNumber({
+      areaCode,
+      voiceWebhookUrl: `${baseUrl}/api/call-tracking/twilio-voice`,
+      statusCallbackUrl: `${baseUrl}/api/call-tracking/twilio-status`,
+    });
 
     const [record] = await db
       .insert(callTrackingNumbers)
@@ -29,7 +38,7 @@ router.post("/provision-number", requireAuth, async (req, res) => {
         pageId,
         serviceId,
         locationId: locationId ?? null,
-        dynamicNumber,
+        dynamicNumber: provisioned.phoneNumber,
         forwardToNumber,
         isActive: true,
       })
@@ -39,10 +48,11 @@ router.post("/provision-number", requireAuth, async (req, res) => {
       success: true,
       dynamicNumber: record.dynamicNumber,
       pageId: record.pageId,
+      provider: provisioned.provider,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error provisioning number:", error);
-    return res.status(500).json({ error: "Failed to provision number" });
+    return res.status(500).json({ error: error.message || "Failed to provision number" });
   }
 });
 
@@ -71,7 +81,96 @@ router.get("/number/:pageId", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/call-tracking/webhook  (no auth — called by call provider)
+// POST /api/call-tracking/twilio-voice
+// Twilio calls this when someone dials a tracking number.
+// Returns TwiML to forward the call to the client's real number.
+router.post("/twilio-voice", async (req, res) => {
+  try {
+    const to = req.body.To as string | undefined;
+    if (!to) {
+      return res.status(400).send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+    }
+
+    // Normalize the number Twilio sends (+12135551234 format)
+    const [record] = await db
+      .select()
+      .from(callTrackingNumbers)
+      .where(eq(callTrackingNumbers.dynamicNumber, to))
+      .limit(1);
+
+    if (!record || !record.isActive) {
+      return res.status(200).type("text/xml").send(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Say>This number is not in service.</Say></Response>`,
+      );
+    }
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial callerId="${record.dynamicNumber}" record="record-from-answer-dual" recordingStatusCallback="/api/call-tracking/twilio-status">
+    ${record.forwardToNumber}
+  </Dial>
+</Response>`;
+
+    return res.status(200).type("text/xml").send(twiml);
+  } catch (error) {
+    console.error("Error in twilio-voice webhook:", error);
+    return res.status(200).type("text/xml").send(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Say>An error occurred. Please try again.</Say></Response>`,
+    );
+  }
+});
+
+// POST /api/call-tracking/twilio-status
+// Twilio calls this when a call completes. Records the call in tracked_calls.
+router.post("/twilio-status", async (req, res) => {
+  try {
+    const {
+      To: to,
+      From: from,
+      CallSid,
+      CallStatus,
+      CallDuration,
+      Timestamp,
+    } = req.body as Record<string, string>;
+
+    if (!to || !CallSid) return res.sendStatus(200);
+
+    const callerPhoneHash = from
+      ? crypto.createHash("sha256").update(from).digest("hex")
+      : null;
+
+    const [trackingRecord] = await db
+      .select()
+      .from(callTrackingNumbers)
+      .where(eq(callTrackingNumbers.dynamicNumber, to))
+      .limit(1);
+
+    if (trackingRecord) {
+      await db.insert(trackedCalls).values({
+        websiteId: trackingRecord.websiteId,
+        pageId: trackingRecord.pageId,
+        serviceId: trackingRecord.serviceId,
+        locationId: trackingRecord.locationId ?? null,
+        dynamicNumber: to,
+        callerPhoneHash,
+        callDurationSeconds: CallDuration ? parseInt(CallDuration, 10) : null,
+        callTimestamp: Timestamp ? new Date(Timestamp) : new Date(),
+        callStatus: CallStatus ?? null,
+        callProviderId: CallSid,
+      });
+      console.log(`[call-tracking] Recorded call ${CallSid} — ${CallStatus} — ${CallDuration ?? "?"}s`);
+    }
+
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error("Error in twilio-status webhook:", error);
+    return res.sendStatus(200); // Always 200 to Twilio to prevent retries
+  }
+});
+
+// POST /api/call-tracking/webhook
+// Generic webhook for custom call providers (non-Twilio).
+// Body: { dynamic_number, caller_phone, call_duration, call_status, timestamp, call_id }
 router.post("/webhook", async (req, res) => {
   try {
     const { dynamic_number, caller_phone, call_duration, call_status, timestamp, call_id } = req.body;

@@ -6,6 +6,7 @@ import formTrackingRouter from "./routes/form-tracking";
 import leadsRouter from "./routes/leads";
 import dashboardAgencyRouter from "./routes/dashboard-agency";
 import dashboardAdminRouter from "./routes/dashboard-admin";
+import widgetRouter from "./routes/widget";
 import * as storage from "./storage";
 import { runGenerationJob } from "./services/generation";
 import { generateBlueprint, suggestServices, generateQueryClusters } from "./services/claude";
@@ -1631,6 +1632,66 @@ Think about what customers search for when they need ${industry} services. Inclu
       sitemapLastGenerated = smRes.rows[0]?.last_generated ?? null;
     }
 
+    // ── Leads & conversions for current month ─────────────────────────────────
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+    let callsThisMonth = 0;
+    let formsThisMonth = 0;
+    let bookedJobsCount = 0;
+    let totalJobValue = 0;
+    const recentFormLeads: Array<{ name: string; submittedAt: string; sourcePageTitle: string | null }> = [];
+    const recentBookedJobs: Array<{ jobValue: number; jobStatus: string; bookedAt: string }> = [];
+
+    if (websiteId) {
+      const callsRes = await pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM tracked_calls
+         WHERE website_id = $1 AND call_timestamp >= $2 AND call_timestamp < $3`,
+        [websiteId, monthStart, monthEnd],
+      );
+      callsThisMonth = callsRes.rows[0]?.cnt ?? 0;
+
+      const formsRes = await pool.query(
+        `SELECT COUNT(*)::int AS cnt, json_agg(json_build_object(
+           'name', submitter_name, 'submittedAt', form_timestamp, 'sourcePageTitle', source_page_title
+         ) ORDER BY form_timestamp DESC) AS rows
+         FROM tracked_leads
+         WHERE website_id = $1 AND form_timestamp >= $2 AND form_timestamp < $3`,
+        [websiteId, monthStart, monthEnd],
+      );
+      formsThisMonth = formsRes.rows[0]?.cnt ?? 0;
+      for (const r of (formsRes.rows[0]?.rows ?? []).slice(0, 5)) {
+        recentFormLeads.push({
+          name: r.name ?? "Unknown",
+          submittedAt: r.submittedAt,
+          sourcePageTitle: r.sourcePageTitle ?? null,
+        });
+      }
+
+      const jobsRes = await pool.query(
+        `SELECT COUNT(*)::int AS cnt,
+                COALESCE(SUM(job_value), 0)::float AS total_value,
+                json_agg(json_build_object(
+                  'jobValue', job_value, 'jobStatus', status, 'bookedAt', booked_date
+                ) ORDER BY booked_date DESC) AS rows
+         FROM booked_jobs
+         WHERE website_id = $1 AND booked_date >= $2 AND booked_date < $3`,
+        [websiteId, monthStart, monthEnd],
+      );
+      bookedJobsCount = jobsRes.rows[0]?.cnt ?? 0;
+      totalJobValue   = jobsRes.rows[0]?.total_value ?? 0;
+      for (const r of (jobsRes.rows[0]?.rows ?? []).slice(0, 5)) {
+        recentBookedJobs.push({
+          jobValue: r.jobValue ?? 0,
+          jobStatus: r.jobStatus ?? "completed",
+          bookedAt: r.bookedAt,
+        });
+      }
+    }
+
+    const reportMonth = `${now.toLocaleString("en-US", { month: "long" })} ${now.getFullYear()}`;
+
     return res.json({
       businessName,
       domain,
@@ -1639,6 +1700,15 @@ Think about what customers search for when they need ${industry} services. Inclu
       bankHealth: { totalServices: bankTotal, fullyWritten: bankFullyWritten, needsAttention: bankTotal - bankFullyWritten },
       topPages,
       sitemapStatus: { exists: sitemapExists, lastGenerated: sitemapLastGenerated },
+      leads: {
+        month: reportMonth,
+        callsThisMonth,
+        formsThisMonth,
+        bookedJobsCount,
+        totalJobValue,
+        recentFormLeads,
+        recentBookedJobs,
+      },
     });
   });
 
@@ -6927,6 +6997,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
   app.use("/api/leads", leadsRouter);
   app.use("/api/dashboard", dashboardAgencyRouter);
   app.use("/api/admin", dashboardAdminRouter);
+  app.use("/widget", widgetRouter);
 
   return httpServer;
 }

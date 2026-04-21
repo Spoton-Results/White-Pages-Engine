@@ -26,10 +26,31 @@ interface ReportData {
     exists: boolean;
     lastGenerated: string | null;
   };
+  leads?: {
+    month: string;
+    callsThisMonth: number;
+    formsThisMonth: number;
+    bookedJobsCount: number;
+    totalJobValue: number;
+    recentFormLeads: Array<{
+      name: string;
+      submittedAt: string;
+      sourcePageTitle: string | null;
+    }>;
+    recentBookedJobs: Array<{
+      jobValue: number;
+      jobStatus: string;
+      bookedAt: string;
+    }>;
+  };
 }
 
 function fmt(n: number) {
   return n.toLocaleString();
+}
+
+function fmtMoney(n: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }
 
 function fmtDate(iso: string | null) {
@@ -82,13 +103,24 @@ export default function ClientReportPage() {
     );
   }
 
-  const { businessName, domain, generatedAt, stats, bankHealth, topPages, sitemapStatus } = data;
+  const { businessName, domain, generatedAt, stats, bankHealth, topPages, sitemapStatus, leads } = data;
   const bankReady = bankHealth.totalServices > 0 && bankHealth.needsAttention === 0;
 
   const tierBadge = (tier: number) => {
     if (tier === 1) return <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">T1</span>;
     if (tier === 2) return <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">T2</span>;
     return <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">T3</span>;
+  };
+
+  const statusBadge = (s: string) => {
+    const map: Record<string, string> = {
+      completed: "bg-emerald-100 text-emerald-700",
+      scheduled: "bg-blue-100 text-blue-700",
+      pending: "bg-amber-100 text-amber-700",
+      cancelled: "bg-red-100 text-red-700",
+    };
+    const cls = map[s] ?? "bg-gray-100 text-gray-600";
+    return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>{s}</span>;
   };
 
   return (
@@ -115,7 +147,7 @@ export default function ClientReportPage() {
 
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
 
-        {/* Stats row */}
+        {/* Pages Published */}
         <div>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
             Pages Published
@@ -138,7 +170,93 @@ export default function ClientReportPage() {
           </div>
         </div>
 
-        {/* Bank Health */}
+        {/* Leads & Conversions */}
+        {leads && (
+          <div>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+              Leads &amp; Conversions — {leads.month}
+            </h2>
+
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+              {[
+                { label: "Calls Received", value: fmt(leads.callsThisMonth), color: "text-blue-600" },
+                { label: "Form Submissions", value: fmt(leads.formsThisMonth), color: "text-violet-600" },
+                { label: "Jobs Booked", value: fmt(leads.bookedJobsCount), color: "text-emerald-600" },
+                { label: "Revenue Attributed", value: fmtMoney(leads.totalJobValue), color: "text-emerald-600" },
+              ].map(s => (
+                <div key={s.label} className="bg-white rounded-xl border p-4 space-y-1">
+                  <div className={`text-2xl font-bold ${s.color}`} data-testid={`leads-${s.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                    {s.value}
+                  </div>
+                  <div className="text-xs text-gray-500 leading-tight">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Recent form leads */}
+            {leads.recentFormLeads.length > 0 && (
+              <div className="bg-white rounded-xl border overflow-hidden mb-4">
+                <div className="px-6 py-4 border-b">
+                  <h3 className="text-sm font-semibold text-gray-900">Recent Form Submissions</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Source Page</th>
+                      <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {leads.recentFormLeads.map((lead, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-6 py-3 font-medium text-gray-900" data-testid={`report-lead-name-${i}`}>{lead.name}</td>
+                        <td className="px-6 py-3 text-gray-500 hidden sm:table-cell text-xs truncate max-w-xs">{lead.sourcePageTitle ?? "—"}</td>
+                        <td className="px-6 py-3 text-gray-500 text-right whitespace-nowrap">{fmtDate(lead.submittedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Recent booked jobs */}
+            {leads.recentBookedJobs.length > 0 && (
+              <div className="bg-white rounded-xl border overflow-hidden">
+                <div className="px-6 py-4 border-b">
+                  <h3 className="text-sm font-semibold text-gray-900">Recent Booked Jobs</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Job Value</th>
+                      <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {leads.recentBookedJobs.map((job, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-6 py-3" data-testid={`report-job-status-${i}`}>{statusBadge(job.jobStatus)}</td>
+                        <td className="px-6 py-3 text-right font-semibold text-emerald-600" data-testid={`report-job-value-${i}`}>{fmtMoney(job.jobValue)}</td>
+                        <td className="px-6 py-3 text-right text-gray-500 whitespace-nowrap">{fmtDate(job.bookedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {leads.callsThisMonth === 0 && leads.formsThisMonth === 0 && leads.bookedJobsCount === 0 && (
+              <div className="bg-white rounded-xl border px-6 py-8 text-center text-sm text-gray-400">
+                No lead activity recorded yet for {leads.month}. Calls and form submissions will appear here once tracking is active.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Content Bank Health */}
         <div className="bg-white rounded-xl border p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4" data-testid="report-bank-health-header">
             Content Bank Health
