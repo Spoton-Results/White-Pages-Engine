@@ -173,11 +173,16 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     let gscConnected = false;
     const gscSites: Array<{ websiteId: string; domain: string; siteUrl: string }> = [];
 
+    // 3-second timeout per site — never let a slow GSC API block the whole dashboard
+    const GSC_TIMEOUT_MS = 3000;
     const gscResults = await Promise.all(
       siteRows.map(async (site) => {
         const gscSiteUrl: string | undefined = site.settings?.gscSiteUrl;
         if (!gscSiteUrl) return null;
-        const data = await querySiteAnalytics(gscSiteUrl, startDate, endDate).catch(() => null);
+        const data = await Promise.race([
+          querySiteAnalytics(gscSiteUrl, startDate, endDate).catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), GSC_TIMEOUT_MS)),
+        ]);
         return { site, gscSiteUrl, data };
       }),
     );

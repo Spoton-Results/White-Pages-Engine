@@ -509,21 +509,21 @@ export default function AgencyDashboardPage() {
             />
             <StatCard
               icon={FileText} label="Form Submissions"
-              value={summary?.forms?.thisMonth ?? "—"}
-              sub={summary?.forms?.thisMonth ? `${summary.forms.conversionRate} of total leads` : undefined}
-              color="text-violet-500" loading={summaryLoading && !!accountId}
+              value={leadsLoading ? undefined : leads.length}
+              sub={leads.length > 0 ? `${leads.length} submission${leads.length !== 1 ? "s" : ""} this month` : undefined}
+              color="text-violet-500" loading={leadsLoading && !!accountId}
             />
             <StatCard
               icon={CheckCircle} label="Booked Jobs"
-              value={summary?.leads?.bookedJobs ?? "—"}
-              sub={summary?.leads?.bookedJobs ? `${summary.leads.totalLeads} total leads` : undefined}
-              color="text-emerald-500" loading={summaryLoading && !!accountId}
+              value={jobsLoading ? undefined : (jobMetrics?.totalJobsBooked ?? 0)}
+              sub={(jobMetrics?.totalJobsBooked ?? 0) > 0 ? `${leads.length} total leads` : undefined}
+              color="text-emerald-500" loading={jobsLoading && !!accountId}
             />
             <StatCard
               icon={DollarSign} label="Revenue Attributed"
-              value={summary?.leads?.totalJobValue != null ? fmtCurrency(summary.leads.totalJobValue) : "—"}
-              sub={summary?.leads?.bookedJobs ? `Avg ${fmtCurrency(summary.leads.avgJobValue ?? 0)} / job` : undefined}
-              color="text-amber-500" loading={summaryLoading && !!accountId}
+              value={jobsLoading ? undefined : (jobMetrics?.totalJobValue != null ? fmtCurrency(jobMetrics.totalJobValue) : "—")}
+              sub={(jobMetrics?.totalJobsBooked ?? 0) > 0 ? `Avg ${fmtCurrency(jobMetrics?.avgJobValue ?? 0)} / job` : undefined}
+              color="text-amber-500" loading={jobsLoading && !!accountId}
             />
           </div>
         </div>
