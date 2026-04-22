@@ -81,8 +81,24 @@ export function invalidateSitemapCache(websiteId: string) {
 // Caches the fully-rendered HTML for each slug so repeated requests (crawlers,
 // multiple users) skip all 7 DB queries and return in <5 ms from memory.
 // Also used for dynamically-generated pages (same key space, same TTL).
+// SIZE-CAPPED: max 300 entries (~30 MB). When full, oldest 60 entries are evicted.
 const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
 const PAGE_HTML_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const PAGE_HTML_CACHE_MAX = 300;
+const PAGE_HTML_CACHE_EVICT = 60; // evict this many when full
+
+function pageHtmlCacheSet(key: string, value: { html: string; expiresAt: number }) {
+  if (pageHtmlCache.size >= PAGE_HTML_CACHE_MAX) {
+    // Map iteration order = insertion order — delete the oldest entries
+    let evicted = 0;
+    for (const k of pageHtmlCache.keys()) {
+      pageHtmlCache.delete(k);
+      if (++evicted >= PAGE_HTML_CACHE_EVICT) break;
+    }
+  }
+  pageHtmlCache.set(key, value);
+}
+
 export function invalidatePageCache(websiteId: string, slug?: string) {
   if (slug) {
     pageHtmlCache.delete(`${websiteId}:${slug}`);
@@ -430,7 +446,7 @@ async function tryGenerateDynamicPage(
     const html = renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, proxyPath || undefined);
 
     // Cache the rendered HTML so the next request for this slug is instant
-    pageHtmlCache.set(`${website.id}:${slug}`, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
+    pageHtmlCacheSet(`${website.id}:${slug}`, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
 
     console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
     return { html };
@@ -4299,7 +4315,7 @@ Return ONLY valid JSON (no markdown):
 
     // Store in cache (only for non-admin previews to avoid caching draft previews)
     if (!isAdminPreview) {
-      pageHtmlCache.set(pageCacheKey, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
+      pageHtmlCacheSet(pageCacheKey, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
     }
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
