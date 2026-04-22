@@ -173,11 +173,19 @@ export async function triggerPostGenerationScoring(
 
 // ─── Auto 5: Fallback URL promotion queue ────────────────────────────────────
 
+const _fallbackCheckCache = new Map<string, number>();
+const FALLBACK_CHECK_DEBOUNCE_MS = 10 * 60 * 1000; // 10 minutes per slug
+
 export async function checkFallbackPromotion(
   websiteId: string,
   slug: string,
   automationSettings: AutomationSettings,
 ): Promise<void> {
+  const cacheKey = `${websiteId}:${slug}`;
+  const lastChecked = _fallbackCheckCache.get(cacheKey);
+  if (lastChecked && Date.now() - lastChecked < FALLBACK_CHECK_DEBOUNCE_MS) return;
+  _fallbackCheckCache.set(cacheKey, Date.now());
+
   try {
     const { fallbackHitThreshold, fallbackHitWindowDays } = automationSettings;
     const hit = await storage.getFallbackHit(websiteId, slug);
