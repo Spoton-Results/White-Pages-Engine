@@ -540,7 +540,10 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
       {open && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: "2rem", width: "min(680px, 95vw)", maxHeight: "90vh", overflow: "auto" }}>
-            <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "#111827", marginTop: 0, marginBottom: "1.25rem" }}>Bulk Generate Hub Pages</h2>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.25rem" }}>
+              <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "#111827", margin: 0 }}>Bulk Generate Hub Pages</h2>
+              <button onClick={handleClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", fontSize: "1.4rem", lineHeight: 1, padding: "2px 6px", borderRadius: 6 }}>✕</button>
+            </div>
             {!jobId ? (
               <>
                 <div style={{ marginBottom: 14 }}>
@@ -657,11 +660,15 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
                   {jobData ? `${jobData.done} / ${jobData.total} processed` : "Starting…"}
                   {isDone && ` — ${jobData?.created ?? 0} created`}
                 </div>
-                {isDone && (
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  {isDone ? (
                     <button onClick={handleClose} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", fontWeight: 600, cursor: "pointer" }}>Close</button>
-                  </div>
-                )}
+                  ) : (
+                    <button onClick={handleClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontWeight: 600, cursor: "pointer" }}>
+                      Run in Background
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
