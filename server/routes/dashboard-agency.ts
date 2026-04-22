@@ -191,11 +191,12 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
       if (!result) continue;
       const { site, gscSiteUrl, data } = result;
       gscSites.push({ websiteId: site.id, domain: site.domain, siteUrl: gscSiteUrl });
+      // Connected = the site has a saved gscSiteUrl, regardless of whether data came back yet
+      gscConnected = true;
       if (data) {
         gscImpressions += data.impressions;
         gscClicks      += data.clicks;
         if (data.avgPosition) gscPositions.push(data.avgPosition);
-        gscConnected = true;
       }
     }
 

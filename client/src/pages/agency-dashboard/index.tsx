@@ -616,6 +616,11 @@ export default function AgencyDashboardPage() {
                 ) : seo.gsc?.connected ? (
                   /* ── Real GSC data ── */
                   <div className="space-y-4">
+                    {(seo.gsc.impressions == null || seo.gsc.impressions === 0) && (seo.gsc.clicks == null || seo.gsc.clicks === 0) ? (
+                      <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded-md px-3 py-2">
+                        Connected — Google is still processing data for this property. Check back in 24–48 hours for live impressions and clicks.
+                      </p>
+                    ) : (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <div className="text-2xl font-bold text-blue-600" data-testid="stat-gsc-impressions">
@@ -630,6 +635,7 @@ export default function AgencyDashboardPage() {
                         <div className="text-xs text-muted-foreground">Clicks (last 28d)</div>
                       </div>
                     </div>
+                    )}
                     {seo.gsc.avgPosition != null && (
                       <div className="flex items-center gap-2 text-xs border-t pt-3">
                         <span className="text-muted-foreground">Average position</span>
