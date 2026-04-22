@@ -197,11 +197,31 @@ export async function deleteBrandProfile(id: string): Promise<void> {
 // ─── Websites ─────────────────────────────────────────────────────────────────
 
 export async function getWebsites(accountId?: string): Promise<Website[]> {
-  const query = db.select().from(websites);
+  const { pool } = await import("./db");
   if (accountId) {
-    return query.where(eq(websites.accountId, accountId)).orderBy(desc(websites.createdAt));
+    // Raw SQL to avoid Drizzle ORM camelCase→snake_case bug with account_id column in production
+    const res = await pool.query(
+      `SELECT * FROM websites WHERE account_id = $1 ORDER BY created_at DESC`,
+      [accountId]
+    );
+    return res.rows.map((r: any) => ({
+      id: r.id,
+      accountId: r.account_id,
+      brandProfileId: r.brand_profile_id,
+      name: r.name,
+      domain: r.domain,
+      subdomain: r.subdomain,
+      status: r.status,
+      primaryColor: r.primary_color,
+      secondaryColor: r.secondary_color,
+      settings: r.settings,
+      publishedPages: r.published_pages,
+      pageCount: r.page_count,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
   }
-  return query.orderBy(desc(websites.createdAt));
+  return db.select().from(websites).orderBy(desc(websites.createdAt));
 }
 
 export async function getWebsite(id: string): Promise<Website | undefined> {
@@ -698,23 +718,22 @@ export async function getWebsiteMetricsSummary(websiteId: string) {
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 
 export async function getDashboardStats() {
-  // Use cached publishedPages column (updated by syncWebsitePublishedCount) to avoid
-  // a full COUNT over millions of page rows on every request.
-  const [accountRows, websiteRows, jobRows] = await Promise.all([
-    db.select({ count: count() }).from(accounts),
-    db.select({ publishedPages: websites.publishedPages }).from(websites),
-    db.select({ count: count() }).from(generationJobs).where(eq(generationJobs.status, "running")),
+  // Use raw SQL to avoid Drizzle ORM camelCase→snake_case column mapping bugs
+  // that cause published_pages and other columns to return 0 in compiled production builds.
+  const { pool } = await import("./db");
+  const [accountRes, websiteRes, jobRes] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS count FROM accounts`),
+    pool.query(`SELECT COALESCE(SUM(published_pages), 0)::int AS published_pages, COUNT(*)::int AS total FROM websites`),
+    pool.query(`SELECT COUNT(*)::int AS count FROM generation_jobs WHERE status = 'running'`),
   ]);
 
-  const publishedPages = websiteRows.reduce((s, w) => s + (w.publishedPages || 0), 0);
-
   return {
-    totalAccounts: Number(accountRows[0].count),
-    totalWebsites: websiteRows.length,
-    publishedPages,
+    totalAccounts: Number(accountRes.rows[0]?.count ?? 0),
+    totalWebsites: Number(websiteRes.rows[0]?.total ?? 0),
+    publishedPages: Number(websiteRes.rows[0]?.published_pages ?? 0),
     draftPages: 0,
     reviewPages: 0,
-    activeJobs: Number(jobRows[0].count),
+    activeJobs: Number(jobRes.rows[0]?.count ?? 0),
   };
 }
 
@@ -1273,10 +1292,29 @@ export async function getHubPage(id: string): Promise<HubPage | undefined> {
 }
 
 export async function getHubPageBySlug(websiteId: string, slug: string): Promise<HubPage | undefined> {
-  const [row] = await db.select()
-    .from(hubPages)
-    .where(and(eq(hubPages.websiteId, websiteId), eq(hubPages.slug, slug)));
-  return row;
+  // Raw SQL to avoid Drizzle ORM camelCase→snake_case bug with website_id column in production
+  const { pool } = await import("./db");
+  const res = await pool.query(
+    `SELECT * FROM hub_pages WHERE website_id = $1 AND slug = $2 LIMIT 1`,
+    [websiteId, slug]
+  );
+  if (!res.rows[0]) return undefined;
+  const r = res.rows[0];
+  return {
+    id: r.id,
+    websiteId: r.website_id,
+    accountId: r.account_id,
+    hubType: r.hub_type,
+    name: r.name,
+    slug: r.slug,
+    parentSlug: r.parent_slug,
+    status: r.status,
+    content: r.content,
+    metaDescription: r.meta_description,
+    maxChildLinks: r.max_child_links,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  } as HubPage;
 }
 
 export async function createHubPage(data: InsertHubPage): Promise<HubPage> {
