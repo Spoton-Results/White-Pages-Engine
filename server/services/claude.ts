@@ -1,10 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
-const MODEL = "claude-haiku-4-5-20251001";
+import { callAI } from "./ai-provider";
 
 export interface GeneratedPage {
   title: string;
@@ -133,31 +127,6 @@ function extractJson(raw: string): string | null {
   return obj;
 }
 
-/** Retry wrapper — handles transient overload / rate-limit errors */
-async function callWithRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  baseDelayMs = 3000,
-): Promise<T> {
-  let lastError: any;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      lastError = err;
-      const isRetryable =
-        err?.status === 429 ||
-        err?.status === 529 ||
-        err?.status >= 500 ||
-        err?.message?.includes("overloaded") ||
-        err?.message?.includes("rate_limit");
-      if (!isRetryable || attempt === maxRetries) throw err;
-      const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000;
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-  throw lastError;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // First-pass prompt uses a DELIMITER format to avoid HTML-inside-JSON issues.
@@ -294,18 +263,10 @@ Respond ONLY with a JSON array (no markdown, no code fences):
   }
 ]`;
 
-  return callWithRetry(async () => {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 2000,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = extractJson(raw);
-    if (!jsonStr) throw new Error("Claude did not return valid JSON");
-    return JSON.parse(jsonStr) as SuggestedService[];
-  });
+  const { text: raw } = await callAI({ prompt, maxTokens: 2000 });
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) throw new Error("AI did not return valid JSON for suggestServices");
+  return JSON.parse(jsonStr) as SuggestedService[];
 }
 
 export interface GeneratedBlueprint {
@@ -374,111 +335,87 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   ]
 }`;
 
-  return callWithRetry(async () => {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = extractJson(raw);
-    if (!jsonStr) throw new Error("Claude did not return valid JSON");
-    return JSON.parse(jsonStr) as GeneratedBlueprint;
-  });
+  const { text: raw } = await callAI({ prompt, maxTokens: 1500 });
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) throw new Error("AI did not return valid JSON for generateBlueprint");
+  return JSON.parse(jsonStr) as GeneratedBlueprint;
 }
 
 export async function generateFirstPass(ctx: PageContext): Promise<GeneratedPage> {
   const prompt = buildFirstPassPrompt(ctx);
 
-  return callWithRetry(async () => {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 8000,
-      messages: [{ role: "user", content: prompt }],
-    });
+  const { text: raw, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 8000 });
 
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+  // Parse using section delimiters — no JSON for the HTML content
+  const title = extractSection(raw, "TITLE") || interpolate(ctx.titleTemplate, ctx);
+  const metaDescription = extractSection(raw, "META") || "";
+  const h1 = extractSection(raw, "H1") || "";
+  const slug = (extractSection(raw, "SLUG") || "")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+  const publishScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "PUBLISH_SCORE")) || 0.5));
+  const localSignalScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "LOCAL_SIGNAL_SCORE")) || 0.5));
+  const contentHtml = extractSection(raw, "CONTENT");
+  const faqRaw = extractSection(raw, "FAQ");
 
-    // Parse using section delimiters — no JSON for the HTML content
-    const title = extractSection(raw, "TITLE") || interpolate(ctx.titleTemplate, ctx);
-    const metaDescription = extractSection(raw, "META") || "";
-    const h1 = extractSection(raw, "H1") || "";
-    const slug = (extractSection(raw, "SLUG") || "")
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9-]/g, "");
-    const publishScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "PUBLISH_SCORE")) || 0.5));
-    const localSignalScore = Math.min(1, Math.max(0, parseFloat(extractSection(raw, "LOCAL_SIGNAL_SCORE")) || 0.5));
-    const contentHtml = extractSection(raw, "CONTENT");
-    const faqRaw = extractSection(raw, "FAQ");
+  if (!contentHtml) {
+    throw new Error(
+      `AI returned no CONTENT section. Response starts: ${raw.substring(0, 300)}`
+    );
+  }
 
-    if (!contentHtml) {
-      throw new Error(
-        `Claude returned no CONTENT section. Response starts: ${raw.substring(0, 300)}`
-      );
+  let faqItems: Array<{ question: string; answer: string }> = [];
+  if (faqRaw) {
+    try {
+      const jsonStr = extractJson(faqRaw) || faqRaw;
+      faqItems = JSON.parse(jsonStr);
+    } catch {
+      // FAQ parse failure is non-fatal
     }
+  }
 
-    let faqItems: Array<{ question: string; answer: string }> = [];
-    if (faqRaw) {
-      try {
-        const jsonStr = extractJson(faqRaw) || faqRaw;
-        faqItems = JSON.parse(jsonStr);
-      } catch {
-        // FAQ parse failure is non-fatal
-      }
-    }
-
-    return {
-      title,
-      metaDescription,
-      h1,
-      slug,
-      contentHtml,
-      wordCount: countWordsInHtml(contentHtml),
-      publishScore,
-      localSignalScore,
-      faqItems,
-      promptTokens: message.usage.input_tokens,
-      completionTokens: message.usage.output_tokens,
-    };
-  });
+  return {
+    title,
+    metaDescription,
+    h1,
+    slug,
+    contentHtml,
+    wordCount: countWordsInHtml(contentHtml),
+    publishScore,
+    localSignalScore,
+    faqItems,
+    promptTokens,
+    completionTokens,
+  };
 }
 
 export async function reviewAndRewrite(html: string, ctx: PageContext): Promise<ReviewResult> {
   const prompt = buildReviewPrompt(html, ctx);
 
-  return callWithRetry(async () => {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = extractJson(raw);
-    if (!jsonStr) {
-      return {
-        passed: true,
-        score: 0.7,
-        issues: [],
-        notes: "Review parse failed — treating as passed",
-        promptTokens: message.usage.input_tokens,
-        completionTokens: message.usage.output_tokens,
-      };
-    }
-
-    const parsed = JSON.parse(jsonStr);
+  const { text: raw, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 1024 });
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) {
     return {
-      passed: Boolean(parsed.passed),
-      score: parseFloat(parsed.score) || 0,
-      issues: parsed.issues || [],
-      rewrittenHtml: parsed.rewrittenHtml,
-      notes: parsed.notes || "",
-      promptTokens: message.usage.input_tokens,
-      completionTokens: message.usage.output_tokens,
+      passed: true,
+      score: 0.7,
+      issues: [],
+      notes: "Review parse failed — treating as passed",
+      promptTokens,
+      completionTokens,
     };
-  });
+  }
+
+  const parsed = JSON.parse(jsonStr);
+  return {
+    passed: Boolean(parsed.passed),
+    score: parseFloat(parsed.score) || 0,
+    issues: parsed.issues || [],
+    rewrittenHtml: parsed.rewrittenHtml,
+    notes: parsed.notes || "",
+    promptTokens,
+    completionTokens,
+  };
 }
 
 // ── Query Cluster Generation ──────────────────────────────────────────────────
@@ -534,24 +471,16 @@ Respond ONLY with a JSON array (no markdown, no code fences):
   }
 ]`;
 
-  return callWithRetry(async () => {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 3000,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = extractJson(raw);
-    if (!jsonStr) throw new Error("Claude did not return valid JSON");
-    const parsed = JSON.parse(jsonStr) as GeneratedCluster[];
-    return parsed.map(c => ({
-      name: c.name || "",
-      intentType: (["transactional", "informational", "local", "navigational"].includes(c.intentType) ? c.intentType : "informational") as GeneratedCluster["intentType"],
-      primaryKeyword: c.primaryKeyword || "",
-      secondaryKeywords: Array.isArray(c.secondaryKeywords) ? c.secondaryKeywords : [],
-      searchVolume: typeof c.searchVolume === "number" ? c.searchVolume : null,
-      difficulty: typeof c.difficulty === "number" ? Math.min(100, Math.max(0, c.difficulty)) : null,
-    }));
-  });
+  const { text: raw } = await callAI({ prompt, maxTokens: 3000 });
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) throw new Error("AI did not return valid JSON for generateQueryClusters");
+  const parsed = JSON.parse(jsonStr) as GeneratedCluster[];
+  return parsed.map(c => ({
+    name: c.name || "",
+    intentType: (["transactional", "informational", "local", "navigational"].includes(c.intentType) ? c.intentType : "informational") as GeneratedCluster["intentType"],
+    primaryKeyword: c.primaryKeyword || "",
+    secondaryKeywords: Array.isArray(c.secondaryKeywords) ? c.secondaryKeywords : [],
+    searchVolume: typeof c.searchVolume === "number" ? c.searchVolume : null,
+    difficulty: typeof c.difficulty === "number" ? Math.min(100, Math.max(0, c.difficulty)) : null,
+  }));
 }

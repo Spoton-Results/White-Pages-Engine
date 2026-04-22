@@ -1,9 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as db from "../storage";
 import { logApiUsage } from "./usage-logger";
-
-const MODEL = "claude-haiku-4-5-20251001";
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 150_000, maxRetries: 3 });
+import { callAI } from "./ai-provider";
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
@@ -330,26 +327,20 @@ async function writeSingleSection(
   ctx?: BrandContext,
 ): Promise<void> {
   const prompt = SECTION_PROMPTS[section](serviceName, ctx);
-  const message = await client.messages.create({
-    model: MODEL,
-    max_tokens: 2500,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const { text: raw, provider, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 2500 });
 
   try {
     await logApiUsage({
       accountId,
       websiteId,
       generationType: `variation_writing:${section}`,
-      modelUsed: MODEL,
-      inputTokens: message.usage.input_tokens,
-      outputTokens: message.usage.output_tokens,
+      modelUsed: provider,
+      inputTokens: promptTokens,
+      outputTokens: completionTokens,
     });
   } catch (logErr: any) {
     console.warn("[usage-logger] variation_writing log failed (non-fatal):", logErr?.message);
   }
-
-  const raw = (message.content[0] as any).text as string;
   const variations = parseVariations(raw);
   if (variations.length === 0) {
     throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
