@@ -1,0 +1,142 @@
+Read AGENT_RULES.md before doing anything.
+
+TASK: Improve annual pricing card copy so the annual option scans faster and feels more intentional.
+
+GOAL
+Update the annual state on the pricing cards with:
+1. stronger CTA button copy
+2. tighter billing subtext
+3. cleaner savings text
+
+SCOPE
+Apply only to annual-eligible plans:
+- Local Launch
+- Growth Bundle
+
+Do not change:
+- Founding Agency (monthly only)
+- Enterprise (contact sales)
+
+COPY CHANGES
+
+LOCAL LAUNCH
+When Annual is selected:
+- CTA button text: "Choose Annual"
+- Billing subtext: "Billed annually at $19,171.20"
+- Savings subtext: "Save $4,792.80/year"
+
+GROWTH BUNDLE
+When Annual is selected:
+- CTA button text: "Get Started Annual"
+- Billing subtext: "Billed annually at $28,800"
+- Savings subtext: "Save $7,200/year"
+
+MONTHLY STATE
+Keep the existing monthly CTA/button copy for monthly mode unless the file structure requires a unified button prop.
+If button text is dynamic by billing period, use:
+- Local Launch monthly: keep current CTA or use "Start Free Trial" if already wired
+- Growth Bundle monthly: keep current CTA or use "Get Started"
+
+FOUNDING AGENCY
+- Always monthly only
+- Keep current CTA
+- Keep "Monthly only" label
+- Do not change based on annual toggle
+
+ENTERPRISE
+- Keep "Contact Sales"
+- No Stripe checkout
+
+IMPLEMENTATION NOTES
+Update the pricing card render logic so each plan can return billing-period-specific display strings.
+
+Suggested pattern:
+
+```ts
+const getPlanDisplay = (plan: any, billingPeriod: 'monthly' | 'annual') => {
+  if (plan.slug === 'local-launch') {
+    if (billingPeriod === 'annual') {
+      return {
+        ctaText: 'Choose Annual',
+        billingText: 'Billed annually at $19,171.20',
+        savingsText: 'Save $4,792.80/year',
+      };
+    }
+
+    return {
+      ctaText: 'Start Free Trial',
+        billingText: plan.commitmentText || '6-month commitment',
+        savingsText: null,
+    };
+  }
+
+  if (plan.slug === 'growth-bundle') {
+    if (billingPeriod === 'annual') {
+      return {
+        ctaText: 'Get Started Annual',
+        billingText: 'Billed annually at $28,800',
+        savingsText: 'Save $7,200/year',
+      };
+    }
+
+    return {
+      ctaText: 'Get Started',
+      billingText: plan.commitmentText || '6-month commitment',
+      savingsText: null,
+    };
+  }
+
+  if (plan.slug === 'founding-agency') {
+    return {
+      ctaText: 'Claim Offer →',
+      billingText: plan.commitmentText || '6-month commitment',
+      savingsText: null,
+    };
+  }
+
+  if (plan.slug === 'enterprise') {
+    return {
+      ctaText: 'Contact Sales',
+      billingText: plan.commitmentText || '6-month commitment',
+      savingsText: null,
+    };
+  }
+
+  return {
+    ctaText: 'Get Started',
+    billingText: null,
+    savingsText: null,
+  };
+};
+```
+
+UI RULES
+- In annual mode, show the main large price as the monthly equivalent (already implemented)
+- Directly under that, show the billing line:
+  - "Billed annually at $19,171.20"
+  - "Billed annually at $28,800"
+- Directly under that, show the savings line:
+  - "Save $4,792.80/year"
+  - "Save $7,200/year"
+- Keep the text concise and easy to scan
+- Do not use longer sentence forms like "Save $4,792.80 per year"
+
+DESIGN INTENT
+The annual state should feel like a deliberate premium buying decision, not just a pricing math state.
+CTA text should tell the user what action to take, not repeat the discount mechanics.
+
+TEST
+Verify:
+- Annual toggle shows the new CTA text for Local Launch and Growth Bundle
+- Annual billing line uses exact text above
+- Annual savings line uses exact text above
+- Monthly mode remains unchanged for non-annual copy
+- Founding Agency still stays monthly only
+- Enterprise still stays contact sales
+- No layout wrapping issues or button overflow on desktop/mobile
+
+RETURN
+- exact files changed
+- exact CTA strings used
+- exact billing/savings strings used
+- any layout fixes needed to prevent wrapping

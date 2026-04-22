@@ -878,7 +878,7 @@ export default function NexusLandingPage() {
                 {billingPeriod === "annual" ? (
                   <>
                     <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Billed annually at $19,171.20</p>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $4,792.80 per year</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $4,792.80/year</p>
                   </>
                 ) : (
                   <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
@@ -892,7 +892,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Save 20% Annually" : "Start Free Trial"} />
+                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Choose Annual" : "Start Free Trial"} />
               </div>
 
               {/* Founding Agency */}
@@ -975,7 +975,7 @@ export default function NexusLandingPage() {
                 {billingPeriod === "annual" ? (
                   <>
                     <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Billed annually at $28,800</p>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $7,200 per year</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $7,200/year</p>
                   </>
                 ) : (
                   <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
@@ -989,7 +989,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="bundle" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Save 20% Annually" : "Get Started →"} featured />
+                <StripeButton tier="bundle" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Get Started Annual" : "Get Started →"} featured />
               </div>
 
               {/* Enterprise */}
