@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { onboardingSubmissions, websites as websitesTable } from "@shared/schema";
 import * as storage from "../storage";
 import { STANDARD_CITIES } from "../data/standardCities";
