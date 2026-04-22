@@ -6,3 +6,9 @@ id = "_ZGcmaa8p60VxPZFNqIqW"
 uri = "file://NEXUS_FEATURES.md"
 type = "text"
 title = "Nexus Platform — Full Feature Reference"
+
+[[outputs]]
+id = "nCRu7HLEh9mgIfZa0Nsbm"
+uri = "file://nexus-canonicals.txt"
+type = "text"
+title = "Nexus Canonical URLs (480)"
