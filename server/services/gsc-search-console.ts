@@ -170,6 +170,25 @@ export async function querySiteAnalytics(
   return summary;
 }
 
+/**
+ * Verify that the service account has been granted access to a GSC property
+ * by calling the sites/{siteUrl} metadata endpoint.
+ * Returns true if the property is accessible, false if permission is denied (403/404),
+ * throws on token/network failures.
+ */
+export async function verifySiteAccess(siteUrl: string): Promise<boolean> {
+  const token = await getGscToken();
+  const encoded = encodeURIComponent(siteUrl);
+  const res = await fetch(
+    `https://searchconsole.googleapis.com/webmasters/v3/sites/${encoded}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.ok) return true;
+  if (res.status === 403 || res.status === 404) return false;
+  const text = await res.text();
+  throw new Error(`GSC site verify failed: ${res.status} — ${text.slice(0, 200)}`);
+}
+
 /** Force-fresh query used when testing a new connection. */
 export async function testAndConnect(
   siteUrl: string,

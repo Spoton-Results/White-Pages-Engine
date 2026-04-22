@@ -20,7 +20,7 @@ import {
   insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
   insertIndustrySchema, insertQueryClusterSchema, insertBlueprintSchema,
   insertPageSchema, insertGenerationJobSchema, onboardingSubmissions,
-  websites, pages,
+  websites, pages, trackedLeads,
 } from "@shared/schema";
 import { z } from "zod";
 import { db } from "./db";
@@ -1630,23 +1630,27 @@ Think about what customers search for when they need ${industry} services. Inclu
     const { siteUrl } = req.body as { siteUrl?: string };
     if (!siteUrl?.trim()) return res.status(400).json({ error: "siteUrl is required" });
 
-    const { testAndConnect, getServiceAccountEmail } = await import("./services/gsc-search-console");
+    const { verifySiteAccess, testAndConnect, getServiceAccountEmail } = await import("./services/gsc-search-console");
     const saEmail = getServiceAccountEmail();
     if (!saEmail) {
       return res.status(503).json({ error: "Google service account is not configured. Set GOOGLE_INDEXING_SA_JSON." });
     }
 
-    const now = new Date();
-    const endDate   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startDate = new Date(endDate.getTime() - 28 * 86_400_000);
-
-    const data = await testAndConnect(siteUrl.trim(), startDate, endDate);
-    if (!data) {
+    // Step 1 — verify the service account actually has access to this property
+    let hasAccess = false;
+    try {
+      hasAccess = await verifySiteAccess(siteUrl.trim());
+    } catch (verifyErr) {
+      console.error("[gsc-connect] verifySiteAccess error:", verifyErr);
+      return res.status(502).json({ error: "Could not reach Google Search Console. Please try again in a moment." });
+    }
+    if (!hasAccess) {
       return res.status(400).json({
-        error: `Could not retrieve data for "${siteUrl}". Make sure you added ${saEmail} to this property in Google Search Console (Settings → Users and permissions → Add user) and wait 1–2 minutes before retrying.`,
+        error: `Permission denied for "${siteUrl}". Make sure you added ${saEmail} to this property in Google Search Console (Settings → Users and permissions → Add user) with Full permission, then retry.`,
       });
     }
 
+    // Step 2 — save the connection (succeeds even if no analytics data yet)
     const { pool } = await import("./db");
     await pool.query(
       `UPDATE websites
@@ -1656,13 +1660,20 @@ Think about what customers search for when they need ${industry} services. Inclu
       [JSON.stringify({ gscSiteUrl: siteUrl.trim(), gscConnectedAt: new Date().toISOString() }), websiteId],
     );
 
+    // Step 3 — try to fetch analytics data (optional — site may have no impressions yet)
+    const now = new Date();
+    const endDate   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startDate = new Date(endDate.getTime() - 28 * 86_400_000);
+    const data = await testAndConnect(siteUrl.trim(), startDate, endDate);
+
     return res.json({
       success: true,
       siteUrl: siteUrl.trim(),
       saEmail,
-      impressions:  data.impressions,
-      clicks:       data.clicks,
-      avgPosition:  data.avgPosition,
+      impressions:  data?.impressions  ?? 0,
+      clicks:       data?.clicks       ?? 0,
+      avgPosition:  data?.avgPosition  ?? null,
+      noDataYet:    !data,
     });
   });
 
@@ -4933,6 +4944,31 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         phone: data.phone || null,
         message: data.message || null,
       });
+
+      // Bridge to tracked_leads so the Leads & ROI dashboard picks up this submission
+      if (data.pageId) {
+        try {
+          const [pg] = await db.select().from(pages).where(dEq(pages.id, data.pageId)).limit(1);
+          if (pg?.serviceId) {
+            await db.insert(trackedLeads).values({
+              websiteId: data.websiteId,
+              pageId: data.pageId,
+              serviceId: pg.serviceId,
+              locationId: pg.locationId ?? null,
+              formName: "Contact Form",
+              submitterName: data.name || null,
+              submitterEmail: data.email,
+              submitterPhone: data.phone || null,
+              message: data.message || null,
+              sourcePageUrl: data.pageSlug ? `/${data.pageSlug}` : null,
+              sourcePageTitle: pg.title || null,
+              formTimestamp: new Date(),
+            }).onConflictDoNothing();
+          }
+        } catch (bridgeErr) {
+          console.error("[contact] tracked_leads bridge failed (non-fatal):", bridgeErr);
+        }
+      }
 
       const contactEmail = (website.settings as any)?.contactEmail;
       if (contactEmail && process.env.SMTP_HOST) {
