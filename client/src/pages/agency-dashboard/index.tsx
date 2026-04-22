@@ -198,6 +198,7 @@ export default function AgencyDashboardPage() {
     queryKey: ["agency-dashboard", accountId, month],
     queryFn: () => api.get<any>(`/api/dashboard/agency/${accountId}?month=${month}`),
     enabled: !!accountId,
+    staleTime: 60_000,
   });
 
   // Pre-fill spend input when summary loads
@@ -226,23 +227,16 @@ export default function AgencyDashboardPage() {
     [allWebsites, accountId],
   );
 
-  // ── Form submissions (leads) ────────────────────────────────────────────────
+  // ── Form submissions (leads) — single account-level request, no per-website waterfall ──
   const { data: rawLeads, isLoading: leadsLoading } = useQuery<any[]>({
-    queryKey: ["agency-leads", accountId, month, accountWebsites.map((w: any) => w.id).join(",")],
+    queryKey: ["agency-leads", accountId, month],
     queryFn: async () => {
-      if (!accountWebsites.length) return [];
-      const results = await Promise.all(
-        accountWebsites.map((w: any) =>
-          api.get<any>(`/api/form-tracking/leads/${w.id}?month=${month}`)
-            .then((r: any) => r.leads ?? [])
-            .catch(() => [] as any[]),
-        ),
-      );
-      return results.flat().sort((a: any, b: any) =>
-        new Date(b.formTimestamp).getTime() - new Date(a.formTimestamp).getTime(),
-      );
+      if (!accountId) return [];
+      const r = await api.get<any>(`/api/form-tracking/account-leads?accountId=${accountId}&month=${month}`);
+      return r.leads ?? [];
     },
-    enabled: accountWebsites.length > 0,
+    enabled: !!accountId,
+    staleTime: 60_000,
   });
 
   // ── Booked jobs ─────────────────────────────────────────────────────────────
@@ -250,6 +244,7 @@ export default function AgencyDashboardPage() {
     queryKey: ["booked-job-metrics", accountId, month],
     queryFn: () => api.get<any>(`/api/leads/metrics/${accountId}?month=${month}`),
     enabled: !!accountId,
+    staleTime: 60_000,
   });
 
   // ── Update monthly spend ────────────────────────────────────────────────────
