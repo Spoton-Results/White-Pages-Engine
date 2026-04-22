@@ -877,6 +877,10 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   app.use(sessionMiddleware());
 
+  // ── Health check — must respond instantly with no DB access ──────────────
+  app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+  app.get("/_health", (_req, res) => res.status(200).json({ ok: true }));
+
   // ── Auth Routes ──────────────────────────────────────────────────────────
 
   app.post("/api/auth/login", async (req: Request, res: Response) => {
@@ -4413,6 +4417,7 @@ Return ONLY valid JSON (no markdown):
       );
       if (!host
         || host === "localhost"
+        || host === "127.0.0.1"
         || host === "0.0.0.0"
         || isLandingSpaPath
         || PLATFORM_SUFFIXES.some(s => host.endsWith(s))
