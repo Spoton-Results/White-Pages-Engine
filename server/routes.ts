@@ -80,6 +80,7 @@ export function invalidateSitemapCache(websiteId: string) {
 // ── Published page HTML cache ─────────────────────────────────────────────────
 // Caches the fully-rendered HTML for each slug so repeated requests (crawlers,
 // multiple users) skip all 7 DB queries and return in <5 ms from memory.
+// Also used for dynamically-generated pages (same key space, same TTL).
 const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
 const PAGE_HTML_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 export function invalidatePageCache(websiteId: string, slug?: string) {
@@ -91,6 +92,16 @@ export function invalidatePageCache(websiteId: string, slug?: string) {
     }
   }
 }
+
+// ── Location resolution cache ─────────────────────────────────────────────────
+// US cities and states never change — cache resolved location objects forever
+// (server restart clears it, which is fine).
+const locationCache = new Map<string, Awaited<ReturnType<typeof resolveLocationUncached>> | null>();
+
+// ── Service banks cache ───────────────────────────────────────────────────────
+// Variation banks change rarely; cache per website for 10 minutes.
+const serviceBanksCache = new Map<string, { services: string[]; banksByService: Map<string, any[]>; expiresAt: number }>();
+const SERVICE_BANKS_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function warmSitemapCache(websiteId: string): Promise<void> {
   try {
@@ -198,7 +209,7 @@ function titleCase(slug: string): string {
 }
 
 // Resolve location data from a location slug segment (handles both abbr and full-name formats)
-async function resolveLocation(locationSlug: string): Promise<{
+async function resolveLocationUncached(locationSlug: string): Promise<{
   cityName: string; stateAbbr: string; stateName: string; locationType: "city" | "state"; stateData: any; canonicalCitySlug: string;
 } | null> {
   // Abbreviation format: {city-slug}-{2-char-state}
@@ -244,15 +255,37 @@ async function resolveLocation(locationSlug: string): Promise<{
   return null;
 }
 
-// Find best matching service and its variation banks for a service slug
+async function resolveLocation(locationSlug: string): Promise<Awaited<ReturnType<typeof resolveLocationUncached>>> {
+  if (locationCache.has(locationSlug)) return locationCache.get(locationSlug)!;
+  const result = await resolveLocationUncached(locationSlug);
+  locationCache.set(locationSlug, result);
+  return result;
+}
+
+// Find best matching service and its variation banks for a service slug (cached)
 async function resolveServiceBanks(websiteId: string, serviceSlugFromUrl: string): Promise<{ serviceName: string; banks: any[] }> {
-  const bankServices = await storage.getVariationBankServices(websiteId);
+  // Populate / refresh the per-website service banks cache
+  let siteCache = serviceBanksCache.get(websiteId);
+  if (!siteCache || siteCache.expiresAt < Date.now()) {
+    const bankServices = await storage.getVariationBankServices(websiteId);
+    const banksByService = new Map<string, any[]>();
+    await Promise.all(
+      bankServices.map(async (s) => {
+        const banks = await storage.getVariationBanks(websiteId, s);
+        banksByService.set(s, banks);
+      })
+    );
+    siteCache = { services: bankServices, banksByService, expiresAt: Date.now() + SERVICE_BANKS_TTL_MS };
+    serviceBanksCache.set(websiteId, siteCache);
+  }
+
+  const { services: bankServices, banksByService } = siteCache;
   if (!bankServices.length) return { serviceName: titleCase(serviceSlugFromUrl), banks: [] };
 
   // 1. Exact slug match
   const exact = bankServices.find(s => slugify(s) === serviceSlugFromUrl);
   if (exact) {
-    const banks = await storage.getVariationBanks(websiteId, exact);
+    const banks = banksByService.get(exact) ?? [];
     if (banks.length) return { serviceName: exact, banks };
   }
 
@@ -261,14 +294,13 @@ async function resolveServiceBanks(websiteId: string, serviceSlugFromUrl: string
   let bestScore = 0;
   let bestService = bankServices[0];
   for (const s of bankServices) {
-    if (s.length > 120) continue; // skip bad/long service names
+    if (s.length > 120) continue;
     const sWords = slugify(s).split("-");
     const overlap = sWords.filter(w => urlWords.has(w)).length;
     if (overlap > bestScore) { bestScore = overlap; bestService = s; }
   }
-  // Use best match even if score is 0 (fall back to first valid service)
   const fallbackService = bestScore > 0 ? bestService : bankServices.find(s => s.length <= 120) || bankServices[0];
-  const banks = await storage.getVariationBanks(websiteId, fallbackService);
+  const banks = banksByService.get(fallbackService) ?? [];
   return { serviceName: titleCase(serviceSlugFromUrl), banks };
 }
 
@@ -395,8 +427,13 @@ async function tryGenerateDynamicPage(
     });
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
+    const html = renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, proxyPath || undefined);
+
+    // Cache the rendered HTML so the next request for this slug is instant
+    pageHtmlCache.set(`${website.id}:${slug}`, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
+
     console.log(`[dynamic-page] 200 generated: ${slug} → svc="${serviceName}" loc="${locationName}"`);
-    return { html: renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, proxyPath || undefined) };
+    return { html };
 
   } catch (err) {
     console.error("[dynamic-page] error for slug", slug, err);

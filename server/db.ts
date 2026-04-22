@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 40,
+  max: 60,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000,
+  connectionTimeoutMillis: 8000,   // fail fast — don't queue forever
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
