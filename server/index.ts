@@ -433,6 +433,16 @@ async function runBackgroundStartup() {
         }
       });
 
+      // Daily database backup — runs at 03:00 UTC, keeps last 7 files
+      setImmediate(async () => {
+        try {
+          const { scheduleDailyBackup } = await import("./backup");
+          scheduleDailyBackup(3);
+        } catch (err) {
+          console.error("[backup] Failed to schedule daily backup (non-fatal):", err);
+        }
+      });
+
       // Auto 6: Weekly auto-demote — run once 5 min after startup, then every 7 days
       setTimeout(async () => {
         try {
