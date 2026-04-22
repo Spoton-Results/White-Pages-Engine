@@ -77,6 +77,21 @@ export function invalidateSitemapCache(websiteId: string) {
   }
 }
 
+// ── Published page HTML cache ─────────────────────────────────────────────────
+// Caches the fully-rendered HTML for each slug so repeated requests (crawlers,
+// multiple users) skip all 7 DB queries and return in <5 ms from memory.
+const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
+const PAGE_HTML_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+export function invalidatePageCache(websiteId: string, slug?: string) {
+  if (slug) {
+    pageHtmlCache.delete(`${websiteId}:${slug}`);
+  } else {
+    for (const key of pageHtmlCache.keys()) {
+      if (key.startsWith(websiteId + ":")) pageHtmlCache.delete(key);
+    }
+  }
+}
+
 export async function warmSitemapCache(websiteId: string): Promise<void> {
   try {
     const website = await storage.getWebsite(websiteId);
@@ -138,25 +153,32 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
   const pageServiceSlug = page.slug && page.slug.includes("-in-")
     ? page.slug.slice(0, page.slug.lastIndexOf("-in-"))
     : undefined;
-  const statePages = await storage.getStateNavPages(websiteId, pageServiceSlug);
-  let cityPages: NavData["cityPages"] = [];
-  let stateDisplayName = "";
-  let siblingServices: NavData["siblingServices"] = [];
 
+  // Kick off all independent queries in parallel
+  const stateNavPromise = storage.getStateNavPages(websiteId, pageServiceSlug);
+  const siblingPromise = (page.pageType === "service_city" && page.slug)
+    ? storage.getSiblingServicePages(websiteId, page.slug, page.id)
+    : Promise.resolve([] as NavData["siblingServices"]);
+
+  let cityPagesPromise: Promise<NavData["cityPages"]> = Promise.resolve([]);
+  let stateDisplayName = "";
   if (page.pageType === "state_hub") {
     const match = page.title.match(/\bin\s+(.+?)(\s*\|.*)?$/i);
     if (match) {
       stateDisplayName = match[1].trim();
-      const stateEntry = await storage.getStateDataByName(stateDisplayName);
-      if (stateEntry?.stateAbbr) {
-        cityPages = await storage.getCityPagesForState(websiteId, stateEntry.stateAbbr);
-      }
+      cityPagesPromise = storage.getStateDataByName(stateDisplayName).then((stateEntry) =>
+        stateEntry?.stateAbbr
+          ? storage.getCityPagesForState(websiteId, stateEntry.stateAbbr)
+          : []
+      );
     }
   }
 
-  if (page.pageType === "service_city" && page.slug) {
-    siblingServices = await storage.getSiblingServicePages(websiteId, page.slug, page.id);
-  }
+  const [statePages, siblingServices, cityPages] = await Promise.all([
+    stateNavPromise,
+    siblingPromise,
+    cityPagesPromise,
+  ]);
 
   return [statePages, cityPages, stateDisplayName, siblingServices];
 }
@@ -3553,6 +3575,8 @@ Return ONLY valid JSON (no markdown):
       publishedAt: new Date(),
     });
 
+    invalidatePageCache(page.websiteId, page.slug);
+
     const website = await storage.getWebsite(page.websiteId);
     if (website) {
       await storage.updateWebsite(page.websiteId, {
@@ -3591,6 +3615,8 @@ Return ONLY valid JSON (no markdown):
       await storage.updatePage(p.id, { status: "published", publishedAt: now });
       count++;
     }
+
+    if (count > 0) invalidatePageCache(websiteId);
 
     if (website && count > 0) {
       await storage.updateWebsite(websiteId, {
@@ -3642,6 +3668,8 @@ Return ONLY valid JSON (no markdown):
         overridePublishedBy: adminName,
         overridePublishedAt: now,
       } as any);
+
+      invalidatePageCache(websiteId, page.slug);
 
       await storage.updateWebsite(websiteId, {
         publishedPages: (website.publishedPages || 0) + 1,
@@ -4090,11 +4118,23 @@ Return ONLY valid JSON (no markdown):
     const realProxyPath = rawPx.startsWith("/sites/") ? "" : rawPx;
     const isAdminPreview = reqHost !== req.params.domain.toLowerCase();
     const siteLinkBase = realProxyPath || (isAdminPreview ? `/sites/${req.params.domain}` : "");
-    console.log(`[sites-route] slug=${slug} reqHost=${reqHost} isAdminPreview=${isAdminPreview} siteLinkBase=${JSON.stringify(siteLinkBase)}`);
+    // ── Page HTML cache — return immediately if warm ──────────────────────────
+    const pageCacheKey = `${website.id}:${slug}`;
+    const cachedPage = pageHtmlCache.get(pageCacheKey);
+    if (cachedPage && cachedPage.expiresAt > Date.now()) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=600");
+      res.setHeader("X-Cache", "HIT");
+      return res.send(cachedPage.html);
+    }
 
-    const page = await storage.getPageBySlug(website.id, slug);
-    const brandProfiles = await storage.getBrandProfiles(website.accountId);
+    // Parallel: page lookup + brand lookup simultaneously
+    const [page, brandProfiles] = await Promise.all([
+      storage.getPageBySlug(website.id, slug),
+      storage.getBrandProfiles(website.accountId),
+    ]);
     const brand = brandProfiles[0];
+
     if (!page || page.status !== "published") {
       // Check hub pages first
       const hubPage = await storage.getHubPageBySlug(website.id, slug);
@@ -4114,15 +4154,23 @@ Return ONLY valid JSON (no markdown):
       return res.status(404).send(notFoundHtml("Page not found or not yet published"));
     }
 
-    // Get active content version
-    const version = await storage.getActivePageVersion(page.id);
-
-    const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-    const internalLinks = await storage.getOutboundLinksForPage(page.id);
+    // Parallel: content version + nav data + internal links
+    const [version, [statePages, cityPages, stateDisplayName, siblingServices], internalLinks] = await Promise.all([
+      storage.getActivePageVersion(page.id),
+      resolveNavData(page, website.id),
+      storage.getOutboundLinksForPage(page.id),
+    ]);
 
     const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, siteLinkBase || undefined);
+
+    // Store in cache (only for non-admin previews to avoid caching draft previews)
+    if (!isAdminPreview) {
+      pageHtmlCache.set(pageCacheKey, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
+    }
+
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("Cache-Control", "public, max-age=600");
+    res.setHeader("X-Cache", "MISS");
     return res.send(html);
   });
 
@@ -4766,6 +4814,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
             isActive: true,
           });
           await storage.setActivePageVersion(existingPage.id, pv.id);
+          invalidatePageCache(websiteId, finalSlug);
           results.updated++;
           results.slugs.push(finalSlug);
           continue;
