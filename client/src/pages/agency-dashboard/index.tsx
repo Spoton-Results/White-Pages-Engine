@@ -838,14 +838,24 @@ export default function AgencyDashboardPage() {
                           {fmtDate(lead.formTimestamp)}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm" variant="outline" className="text-xs gap-1"
-                            data-testid={`button-book-lead-${lead.id}`}
-                            onClick={() => setBookDialog({ leadId: lead.id, name: lead.submitterName || lead.submitterEmail || "this lead" })}
-                          >
-                            <DollarSign className="size-3" />
-                            Book Job
-                          </Button>
+                          {lead.bookedJob ? (
+                            <span
+                              className="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium"
+                              data-testid={`badge-booked-${lead.id}`}
+                            >
+                              <CheckCircle className="size-3" />
+                              Booked
+                            </span>
+                          ) : (
+                            <Button
+                              size="sm" variant="outline" className="text-xs gap-1"
+                              data-testid={`button-book-lead-${lead.id}`}
+                              onClick={() => setBookDialog({ leadId: lead.id, name: lead.submitterName || lead.submitterEmail || "this lead" })}
+                            >
+                              <DollarSign className="size-3" />
+                              Book Job
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

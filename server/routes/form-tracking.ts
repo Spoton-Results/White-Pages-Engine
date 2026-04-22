@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "../db";
-import { trackedLeads } from "@shared/schema";
-import { eq, and, gte, lt, desc } from "drizzle-orm";
+import { trackedLeads, bookedJobs } from "@shared/schema";
+import { eq, and, gte, lt, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 
 const router = Router();
@@ -75,9 +75,21 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
       .where(and(...conditions))
       .orderBy(desc(trackedLeads.formTimestamp));
 
+    const page = leads.slice(0, 100);
+    const leadIds = page.map((l) => l.id);
+    const jobs =
+      leadIds.length > 0
+        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
+        : [];
+    const jobsByLeadId: Record<string, (typeof jobs)[number]> = {};
+    for (const job of jobs) {
+      if (job.leadId) jobsByLeadId[job.leadId] = job;
+    }
+    const enriched = page.map((l) => ({ ...l, bookedJob: jobsByLeadId[l.id] ?? null }));
+
     return res.json({
       totalForms: leads.length,
-      leads: leads.slice(0, 100),
+      leads: enriched,
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
