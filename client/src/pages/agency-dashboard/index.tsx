@@ -177,6 +177,8 @@ export default function AgencyDashboardPage() {
   const [gscSiteUrlInput, setGscSiteUrlInput] = useState("");
   const [gscError, setGscError] = useState("");
   const [gscCopied, setGscCopied] = useState(false);
+  const [gscAccessibleSites, setGscAccessibleSites] = useState<string[]>([]);
+  const [gscSitesLoading, setGscSitesLoading] = useState(false);
 
   // ── Accounts list (superAdmin only) ────────────────────────────────────────
   const { data: accounts } = useQuery<any[]>({
@@ -921,7 +923,7 @@ export default function AgencyDashboardPage() {
       </div>
 
       {/* ── GSC Connect Dialog ── */}
-      <Dialog open={gscDialog} onOpenChange={(open) => { if (!open) { setGscDialog(false); setGscError(""); } }}>
+      <Dialog open={gscDialog} onOpenChange={(open) => { if (!open) { setGscDialog(false); setGscError(""); setGscAccessibleSites([]); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -963,6 +965,50 @@ export default function AgencyDashboardPage() {
               <p className="text-xs text-muted-foreground">
                 Use the exact URL shown in Search Console (e.g. <code>https://example.com/</code> or <code>sc-domain:example.com</code>).
               </p>
+
+              {/* Load accessible sites button */}
+              {saEmailData?.configured && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="text-xs text-blue-600 hover:text-blue-700 underline flex items-center gap-1"
+                    disabled={gscSitesLoading}
+                    data-testid="button-load-gsc-sites"
+                    onClick={async () => {
+                      setGscSitesLoading(true);
+                      try {
+                        const r = await api.get<any>("/api/gsc/list-sites");
+                        setGscAccessibleSites(r.sites ?? []);
+                        if ((r.sites ?? []).length === 0) setGscError("No properties found. Make sure the service account has been added to at least one GSC property.");
+                        else setGscError("");
+                      } catch { setGscError("Could not load properties from Google. Try again."); }
+                      finally { setGscSitesLoading(false); }
+                    }}
+                  >
+                    {gscSitesLoading ? <Loader2 className="size-3 animate-spin" /> : <Link2 className="size-3" />}
+                    {gscSitesLoading ? "Loading…" : "Load my accessible properties"}
+                  </button>
+
+                  {gscAccessibleSites.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Click a property to use it:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {gscAccessibleSites.map((site) => (
+                          <button
+                            key={site}
+                            type="button"
+                            onClick={() => { setGscSiteUrlInput(site); setGscError(""); }}
+                            className={`text-xs px-2 py-1 rounded border transition-colors ${gscSiteUrlInput === site ? "bg-blue-600 text-white border-blue-600" : "bg-muted hover:bg-blue-50 border-border hover:border-blue-300"}`}
+                            data-testid={`button-gsc-site-${site}`}
+                          >
+                            {site}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Website selector if multiple sites */}
               {(seo.gsc?.unconfiguredSites?.length ?? 0) > 1 && (

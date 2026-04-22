@@ -1696,44 +1696,68 @@ Think about what customers search for when they need ${industry} services. Inclu
     }
 
     // Step 1 — verify the service account actually has access to this property
-    let hasAccess = false;
+    // verifySiteAccess tries both the exact URL and the alternate format (sc-domain: ↔ https://)
+    // and returns the canonical URL that works, or null if neither format works.
+    let canonicalUrl: string | null = null;
     try {
-      hasAccess = await verifySiteAccess(siteUrl.trim());
+      canonicalUrl = await verifySiteAccess(siteUrl.trim());
     } catch (verifyErr) {
       console.error("[gsc-connect] verifySiteAccess error:", verifyErr);
       return res.status(502).json({ error: "Could not reach Google Search Console. Please try again in a moment." });
     }
-    if (!hasAccess) {
+    if (!canonicalUrl) {
+      // Try listing accessible sites to give a helpful hint
+      let hint = "";
+      try {
+        const { listAccessibleSites } = await import("./services/gsc-search-console");
+        const accessible = await listAccessibleSites();
+        if (accessible.length > 0) {
+          hint = ` Available properties for this service account: ${accessible.join(", ")}`;
+        }
+      } catch { /* not critical */ }
       return res.status(400).json({
-        error: `Permission denied for "${siteUrl}". Make sure you added ${saEmail} to this property in Google Search Console (Settings → Users and permissions → Add user) with Full permission, then retry.`,
+        error: `Permission denied for "${siteUrl.trim()}". Make sure you added ${saEmail} to this property in Google Search Console (Settings → Users and permissions → Add user) with Full permission, then retry.${hint}`,
       });
     }
 
-    // Step 2 — save the connection (succeeds even if no analytics data yet)
+    // Step 2 — save the connection using the canonical URL that actually worked
     const { pool } = await import("./db");
     await pool.query(
       `UPDATE websites
        SET settings = COALESCE(settings, '{}')::jsonb
                    || $1::jsonb
        WHERE id = $2`,
-      [JSON.stringify({ gscSiteUrl: siteUrl.trim(), gscConnectedAt: new Date().toISOString() }), websiteId],
+      [JSON.stringify({ gscSiteUrl: canonicalUrl, gscConnectedAt: new Date().toISOString() }), websiteId],
     );
 
     // Step 3 — try to fetch analytics data (optional — site may have no impressions yet)
     const now = new Date();
     const endDate   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startDate = new Date(endDate.getTime() - 28 * 86_400_000);
-    const data = await testAndConnect(siteUrl.trim(), startDate, endDate);
+    const data = await testAndConnect(canonicalUrl, startDate, endDate);
 
     return res.json({
       success: true,
-      siteUrl: siteUrl.trim(),
+      siteUrl: canonicalUrl,
       saEmail,
       impressions:  data?.impressions  ?? 0,
       clicks:       data?.clicks       ?? 0,
       avgPosition:  data?.avgPosition  ?? null,
       noDataYet:    !data,
     });
+  });
+
+  // GET /api/gsc/list-sites — return all GSC properties the service account can access
+  app.get("/api/gsc/list-sites", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { listAccessibleSites, getServiceAccountEmail } = await import("./services/gsc-search-console");
+      const saEmail = getServiceAccountEmail();
+      if (!saEmail) return res.json({ sites: [], saEmail: null });
+      const sites = await listAccessibleSites();
+      return res.json({ sites, saEmail });
+    } catch (err: any) {
+      return res.status(502).json({ error: err.message ?? "Could not reach Google Search Console" });
+    }
   });
 
   // DELETE /api/websites/:id/gsc-connect — disconnect GSC for a website

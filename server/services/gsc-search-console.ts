@@ -171,22 +171,58 @@ export async function querySiteAnalytics(
 }
 
 /**
- * Verify that the service account has been granted access to a GSC property
- * by calling the sites/{siteUrl} metadata endpoint.
- * Returns true if the property is accessible, false if permission is denied (403/404),
- * throws on token/network failures.
+ * List all GSC properties the service account has access to.
+ * Returns an array of siteUrl strings (e.g. "https://example.com/" or "sc-domain:example.com").
  */
-export async function verifySiteAccess(siteUrl: string): Promise<boolean> {
+export async function listAccessibleSites(): Promise<string[]> {
   const token = await getGscToken();
-  const encoded = encodeURIComponent(siteUrl);
   const res = await fetch(
-    `https://searchconsole.googleapis.com/webmasters/v3/sites/${encoded}`,
+    "https://searchconsole.googleapis.com/webmasters/v3/sites",
     { headers: { Authorization: `Bearer ${token}` } },
   );
-  if (res.ok) return true;
-  if (res.status === 403 || res.status === 404) return false;
-  const text = await res.text();
-  throw new Error(`GSC site verify failed: ${res.status} — ${text.slice(0, 200)}`);
+  if (!res.ok) return [];
+  const data = await res.json() as any;
+  return (data.siteEntry ?? []).map((e: any) => e.siteUrl as string);
+}
+
+/**
+ * Verify that the service account has been granted access to a GSC property.
+ * Tries both the exact URL provided AND the alternate format (sc-domain: ↔ https://).
+ * Returns the canonical siteUrl that actually works, or null if neither works.
+ */
+export async function verifySiteAccess(siteUrl: string): Promise<string | null> {
+  const token = await getGscToken();
+
+  async function tryUrl(url: string): Promise<boolean> {
+    const encoded = encodeURIComponent(url);
+    const res = await fetch(
+      `https://searchconsole.googleapis.com/webmasters/v3/sites/${encoded}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (res.ok) return true;
+    if (res.status === 403 || res.status === 404) return false;
+    const text = await res.text();
+    throw new Error(`GSC site verify failed: ${res.status} — ${text.slice(0, 200)}`);
+  }
+
+  // Try exact URL first
+  if (await tryUrl(siteUrl)) return siteUrl;
+
+  // Build the alternate format and try that too
+  let alternate: string | null = null;
+  if (siteUrl.startsWith("sc-domain:")) {
+    const domain = siteUrl.slice("sc-domain:".length).replace(/\/$/, "");
+    alternate = `https://${domain}/`;
+  } else {
+    try {
+      const domain = new URL(siteUrl).hostname.replace(/^www\./, "");
+      alternate = `sc-domain:${domain}`;
+    } catch { /* invalid URL — skip */ }
+  }
+
+  if (alternate && await tryUrl(alternate)) return alternate;
+
+  return null;
 }
 
 /** Force-fresh query used when testing a new connection. */
