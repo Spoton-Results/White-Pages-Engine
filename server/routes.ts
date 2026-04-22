@@ -258,11 +258,43 @@ async function tryGenerateDynamicPage(
     // Hard limit: never dynamically generate pages with very long slugs
     if (slug.length > 200) return null;
 
-    const inIdx = slug.lastIndexOf("-in-");
-    if (inIdx < 1) return null;
+    // Parse: try "{service}-in-{location}" first, then fall back to "{service}-{location}"
+    let serviceSlugFromUrl: string;
+    let locationSlug: string;
 
-    const serviceSlugFromUrl = slug.slice(0, inIdx);
-    const locationSlug = slug.slice(inIdx + 4);
+    const inIdx = slug.lastIndexOf("-in-");
+    if (inIdx >= 1) {
+      serviceSlugFromUrl = slug.slice(0, inIdx);
+      locationSlug = slug.slice(inIdx + 4);
+    } else {
+      // Blueprint format: "{service}-{location}" (no "-in-" separator).
+      // Try progressively longer trailing segments as the location slug,
+      // shortest first (state-only), then longer (city-state).
+      const parts = slug.split("-");
+      let resolved: Awaited<ReturnType<typeof resolveLocation>> = null;
+      let resolvedServiceSlug = "";
+      let resolvedLocationSlug = "";
+      for (let i = parts.length - 1; i >= 1; i--) {
+        const candidateLoc = parts.slice(i).join("-");
+        const candidateSvc = parts.slice(0, i).join("-");
+        if (!candidateSvc) continue;
+        const loc = await resolveLocation(candidateLoc);
+        if (loc) {
+          // Prefer city matches over state-only matches (longer location slug wins)
+          if (!resolved || (loc.locationType === "city" && resolved.locationType === "state")) {
+            resolved = loc;
+            resolvedServiceSlug = candidateSvc;
+            resolvedLocationSlug = candidateLoc;
+          }
+          // Once we have a city match stop searching further
+          if (resolved.locationType === "city") break;
+        }
+      }
+      if (!resolved) return null;
+      serviceSlugFromUrl = resolvedServiceSlug;
+      locationSlug = resolvedLocationSlug;
+    }
+
     if (!serviceSlugFromUrl || !locationSlug) return null;
 
     // Sanitize proxyPath: admin-preview paths (starting with /sites/) must never be used for live page links
