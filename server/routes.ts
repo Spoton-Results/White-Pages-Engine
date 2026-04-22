@@ -1553,8 +1553,40 @@ Think about what customers search for when they need ${industry} services. Inclu
   });
 
   app.delete("/api/accounts/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
-    await storage.deleteAccount((req.params.id as string));
-    return res.json({ message: "Account deleted" });
+    const accountId = req.params.id as string;
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    // Safety: gather impact summary before deleting
+    const { pool } = await import("./db");
+    const impact = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM websites WHERE account_id = $1) AS websites,
+        (SELECT COUNT(*) FROM pages p JOIN websites w ON p.website_id = w.id WHERE w.account_id = $1) AS pages,
+        (SELECT COUNT(*) FROM hub_pages h JOIN websites w ON h.website_id = w.id WHERE w.account_id = $1) AS hub_pages,
+        (SELECT COUNT(*) FROM blueprints WHERE account_id = $1) AS blueprints,
+        (SELECT COUNT(*) FROM services WHERE account_id = $1) AS services,
+        (SELECT COUNT(*) FROM locations WHERE account_id = $1) AS locations
+    `, [accountId]);
+    const summary = impact.rows[0];
+
+    if (req.query.confirm !== "true") {
+      return res.status(200).json({
+        warning: "This action is irreversible. Pass ?confirm=true to proceed.",
+        account: account.name,
+        willDelete: {
+          websites: Number(summary.websites),
+          pages: Number(summary.pages),
+          hubPages: Number(summary.hub_pages),
+          blueprints: Number(summary.blueprints),
+          services: Number(summary.services),
+          locations: Number(summary.locations),
+        },
+      });
+    }
+
+    await storage.deleteAccount(accountId);
+    return res.json({ message: "Account deleted", deleted: account.name });
   });
 
   app.patch("/api/accounts/:accountId/client-status", requireAuth, async (req: Request, res: Response) => {
@@ -1995,8 +2027,35 @@ Return ONLY valid JSON (no markdown) with these exact keys:
   });
 
   app.delete("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
-    await storage.deleteWebsite((req.params.id as string));
-    return res.json({ message: "Deleted" });
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Not found" });
+
+    // Safety: gather impact summary before deleting
+    const { pool } = await import("./db");
+    const impact = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM pages WHERE website_id = $1) AS pages,
+        (SELECT COUNT(*) FROM hub_pages WHERE website_id = $1) AS hub_pages,
+        (SELECT COUNT(*) FROM blueprints WHERE website_id = $1) AS blueprints
+    `, [websiteId]);
+    const summary = impact.rows[0];
+
+    if (req.query.confirm !== "true") {
+      return res.status(200).json({
+        warning: "This action is irreversible. Pass ?confirm=true to proceed.",
+        website: website.name,
+        domain: website.domain,
+        willDelete: {
+          pages: Number(summary.pages),
+          hubPages: Number(summary.hub_pages),
+          blueprints: Number(summary.blueprints),
+        },
+      });
+    }
+
+    await storage.deleteWebsite(websiteId);
+    return res.json({ message: "Deleted", deleted: website.name });
   });
 
   // Convenience: get all locations for a website's account

@@ -26,6 +26,9 @@ export default function WebsitesPage() {
   const [searchText, setSearchText] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editWebsite, setEditWebsite] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleteImpact, setDeleteImpact] = useState<any>(null);
+  const [loadingImpact, setLoadingImpact] = useState(false);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const { register, handleSubmit, reset, setValue } = useForm<any>();
@@ -63,10 +66,23 @@ export default function WebsitesPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const openDeleteDialog = async (website: any) => {
+    setDeleteTarget(website);
+    setDeleteImpact(null);
+    setLoadingImpact(true);
+    try {
+      const impact = await api.delete<any>(`/api/websites/${website.id}`);
+      setDeleteImpact(impact.willDelete);
+    } catch (_) {}
+    setLoadingImpact(false);
+  };
+
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/websites/${id}`),
+    mutationFn: (id: string) => api.delete(`/api/websites/${id}?confirm=true`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/websites"] });
+      setDeleteTarget(null);
+      setDeleteImpact(null);
       toast({ title: "Website deleted" });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -233,7 +249,7 @@ export default function WebsitesPage() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="gap-2 text-destructive cursor-pointer"
-                          onClick={() => confirm("Delete website and all its pages? This cannot be undone.") && remove.mutate(w.id)}
+                          onClick={() => openDeleteDialog(w)}
                           data-testid={`button-delete-website-${w.id}`}
                         >
                           <Trash className="size-4" />Delete
@@ -247,6 +263,49 @@ export default function WebsitesPage() {
           </Table>
         </div>
       </div>
+
+      {/* ── Delete Confirmation Dialog ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={open => { if (!open) { setDeleteTarget(null); setDeleteImpact(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash className="size-5" />
+              Delete Website
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              You are about to permanently delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span> and all its content.
+            </p>
+            {loadingImpact ? (
+              <p className="text-sm text-muted-foreground italic">Calculating impact…</p>
+            ) : deleteImpact ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+                <p className="text-xs font-semibold text-destructive uppercase tracking-wide mb-2">What will be deleted</p>
+                {[
+                  ["Published Pages", deleteImpact.pages],
+                  ["Hub Pages", deleteImpact.hubPages],
+                  ["Blueprints", deleteImpact.blueprints],
+                ].map(([label, count]) => (
+                  <div key={label as string} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className={Number(count) > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <p className="text-sm font-medium text-destructive">This cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => { setDeleteTarget(null); setDeleteImpact(null); }} disabled={remove.isPending} data-testid="button-cancel-delete-website">
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => deleteTarget && remove.mutate(deleteTarget.id)} disabled={remove.isPending || loadingImpact} data-testid="button-confirm-delete-website">
+              {remove.isPending ? "Deleting…" : "Delete Website"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Create Dialog ── */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>

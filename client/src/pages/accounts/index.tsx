@@ -60,12 +60,27 @@ export default function AccountsPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const [deleteImpact, setDeleteImpact] = useState<any>(null);
+  const [loadingImpact, setLoadingImpact] = useState(false);
+
+  const openDeleteDialog = async (account: any) => {
+    setDeleteTarget(account);
+    setDeleteImpact(null);
+    setLoadingImpact(true);
+    try {
+      const impact = await api.delete<any>(`/api/accounts/${account.id}`);
+      setDeleteImpact(impact.willDelete);
+    } catch (_) {}
+    setLoadingImpact(false);
+  };
+
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/accounts/${id}`),
+    mutationFn: (id: string) => api.delete(`/api/accounts/${id}?confirm=true`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       setDeleteTarget(null);
+      setDeleteImpact(null);
       toast({ title: "Account deleted" });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
@@ -193,7 +208,7 @@ export default function AccountsPage() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="gap-2 text-destructive cursor-pointer"
-                          onClick={() => setDeleteTarget(account)}
+                          onClick={() => openDeleteDialog(account)}
                           data-testid={`button-delete-account-${account.id}`}
                         >
                           <Trash className="size-4" />Delete
@@ -263,15 +278,28 @@ export default function AccountsPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              You are about to permanently delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span> and everything attached to it:
+              You are about to permanently delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span> and everything attached to it.
             </p>
-            <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1 pl-1">
-              <li>All websites and published pages</li>
-              <li>All generation jobs</li>
-              <li>All services, locations, and industries</li>
-              <li>All brand profiles</li>
-              <li>All users under this account</li>
-            </ul>
+            {loadingImpact ? (
+              <p className="text-sm text-muted-foreground italic">Calculating impact…</p>
+            ) : deleteImpact ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+                <p className="text-xs font-semibold text-destructive uppercase tracking-wide mb-2">What will be deleted</p>
+                {[
+                  ["Websites", deleteImpact.websites],
+                  ["Published Pages", deleteImpact.pages],
+                  ["Hub Pages", deleteImpact.hubPages],
+                  ["Blueprints", deleteImpact.blueprints],
+                  ["Services", deleteImpact.services],
+                  ["Locations", deleteImpact.locations],
+                ].map(([label, count]) => (
+                  <div key={label as string} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className={Number(count) > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <p className="text-sm font-medium text-destructive">This cannot be undone.</p>
           </div>
           <DialogFooter>
