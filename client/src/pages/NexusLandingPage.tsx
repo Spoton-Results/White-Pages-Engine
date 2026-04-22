@@ -870,19 +870,19 @@ export default function NexusLandingPage() {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                  {billingPeriod === "annual" ? (
-                    <>
-                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-local-launch-price">$19,171</span>
-                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/yr</span>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-local-launch-price">$1,997</span>
-                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
-                    </>
-                  )}
+                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-local-launch-price">
+                    {billingPeriod === "annual" ? "$1,597" : "$1,997"}
+                  </span>
+                  <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
                 </div>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                {billingPeriod === "annual" ? (
+                  <>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Billed annually at $19,171.20</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $4,792.80 per year</p>
+                  </>
+                ) : (
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                )}
                 <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Single-service businesses testing programmatic SEO</p>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
                   {localLaunchFeatures.map((f, i) => (
@@ -892,7 +892,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label="Start Free Trial" />
+                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Save 20% Annually" : "Start Free Trial"} />
               </div>
 
               {/* Founding Agency */}
@@ -967,19 +967,19 @@ export default function NexusLandingPage() {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                  {billingPeriod === "annual" ? (
-                    <>
-                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$28,800</span>
-                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/yr</span>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$3,000</span>
-                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
-                    </>
-                  )}
+                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">
+                    {billingPeriod === "annual" ? "$2,400" : "$3,000"}
+                  </span>
+                  <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
                 </div>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                {billingPeriod === "annual" ? (
+                  <>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Billed annually at $28,800</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", marginBottom: 12 }}>Save $7,200 per year</p>
+                  </>
+                ) : (
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
+                )}
                 <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Agencies with 3 clients. Most popular.</p>
                 <div style={{ display: "flex", flexDirection: "column", marginBottom: 28, flex: 1 }}>
                   {growthBundleFeatures.map((f, i) => (
@@ -989,7 +989,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="bundle" billingPeriod={billingPeriod} label="Get Started →" featured />
+                <StripeButton tier="bundle" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Save 20% Annually" : "Get Started →"} featured />
               </div>
 
               {/* Enterprise */}

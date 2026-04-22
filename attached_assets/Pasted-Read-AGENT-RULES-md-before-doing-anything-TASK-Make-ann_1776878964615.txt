@@ -1,0 +1,113 @@
+Read AGENT_RULES.md before doing anything.
+
+TASK: Make annual pricing feel buyable by changing how annual prices are presented.
+
+PROBLEM
+The annual toggle currently shows the full yearly total as the main price, which makes the plans feel too expensive and weakens conversion.
+
+GOAL
+When Annual is selected:
+- show the monthly equivalent as the main headline price
+- show billed annually total underneath
+- show the exact dollar savings per year
+- keep Founding Agency monthly only
+- keep Enterprise as contact sales only
+
+PRICING
+- Local Launch
+  - Monthly: 1997
+  - Annual total: 19171.20
+  - Annual equivalent monthly: 1597.60
+  - Annual savings: 4792.80
+- Founding Agency
+  - Monthly only: 1497
+- Growth Bundle
+  - Monthly: 3000
+  - Annual total: 28800
+  - Annual equivalent monthly: 2400
+  - Annual savings: 7200
+
+DISPLAY RULES
+In monthly mode:
+- show normal monthly price as primary
+- example: $1,997/mo
+
+In annual mode:
+- show equivalent monthly price as primary
+- example: $1,597/mo
+- add subtext: billed annually at $19,171.20
+- add badge/text: Save $4,792.80 per year
+- do the same pattern for Growth Bundle
+
+Founding Agency:
+- always show $1,497/mo
+- show “Monthly only”
+- do not change price when annual toggle is selected
+
+Enterprise:
+- show custom / starting at price
+- no Stripe checkout
+
+IMPLEMENTATION IDEA
+Create helpers like:
+
+```ts
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
+  }).format(value);
+
+const getPlanDisplay = (plan: any, billingPeriod: 'monthly' | 'annual') => {
+  if (plan.customPricing) {
+    return {
+      headlinePrice: null,
+      suffix: null,
+      subtext: null,
+      savingsText: null,
+    };
+  }
+
+  if (billingPeriod === 'annual' && plan.annualAvailable) {
+    const annualEquivalentMonthly = plan.annualPrice / 12;
+    const annualSavings = plan.monthlyPrice * 12 - plan.annualPrice;
+
+    return {
+      headlinePrice: annualEquivalentMonthly,
+      suffix: '/mo',
+      subtext: `Billed annually at ${formatCurrency(plan.annualPrice)}`,
+      savingsText: `Save ${formatCurrency(annualSavings)} per year`,
+    };
+  }
+
+  return {
+    headlinePrice: plan.monthlyPrice,
+    suffix: '/mo',
+    subtext: plan.commitmentText || null,
+    savingsText: null,
+  };
+};
+```
+
+CARD UI
+For annual-eligible plans in annual mode:
+- primary large price should be annualPrice / 12
+- suffix should be /mo
+- below that show:
+  - billed annually at total
+  - save X per year
+- do not use /yr as the main visual anchor
+
+CTA COPY
+Change annual CTA copy to be more intentional:
+- “Choose Annual”
+or
+- “Save 20% Annually”
+
+Do not make the annual card feel identical to monthly.
+
+RETURN
+- exact files changed
+- updated pricing display logic
+- any copy changes made to improve annual conversion
