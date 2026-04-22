@@ -892,7 +892,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Choose Annual" : "Start Free Trial"} />
+                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label={billingPeriod === "annual" ? "Choose Annual" : "Get Started"} />
               </div>
 
               {/* Founding Agency */}
