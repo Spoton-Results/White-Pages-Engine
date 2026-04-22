@@ -151,6 +151,39 @@ export async function processOnboardingSubmission(submissionId: string): Promise
     } as any);
     websiteId = website.id;
     console.log(`[onboarding-autocreate] step 2: website=${websiteId} domain=${domain}`);
+
+    // Fire-and-forget: try to auto-match this new website to an accessible GSC property.
+    // Non-blocking — any failure is logged but does not affect onboarding.
+    (async () => {
+      try {
+        const { listAccessibleSites } = await import("./gsc-search-console");
+        const { pool } = await import("../db");
+        const sites = await listAccessibleSites();
+        const bareDomain = domain.replace(/^www\./, "");
+        const domainToGscUrl: Record<string, string> = {};
+        for (const siteUrl of sites) {
+          let d = "";
+          if (siteUrl.startsWith("sc-domain:")) {
+            d = siteUrl.slice("sc-domain:".length).replace(/\/$/, "").replace(/^www\./, "");
+          } else {
+            try { d = new URL(siteUrl).hostname.replace(/^www\./, ""); } catch { continue; }
+          }
+          if (d && (!domainToGscUrl[d] || siteUrl.startsWith("sc-domain:"))) domainToGscUrl[d] = siteUrl;
+        }
+        const gscUrl = domainToGscUrl[bareDomain];
+        if (gscUrl) {
+          await pool.query(
+            `UPDATE websites SET settings = COALESCE(settings,'{}')::jsonb || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ gscSiteUrl: gscUrl, gscConnectedAt: new Date().toISOString() }), website.id],
+          );
+          console.log(`[onboarding-autocreate] GSC auto-connected: ${domain} → ${gscUrl}`);
+        } else {
+          console.log(`[onboarding-autocreate] GSC auto-connect: no matching property for ${domain} among [${sites.join(", ")}]`);
+        }
+      } catch (gscErr: any) {
+        console.warn(`[onboarding-autocreate] GSC auto-connect skipped for ${domain}:`, gscErr?.message);
+      }
+    })();
   } catch (err: any) {
     const note = `Website creation failed: ${err?.message || String(err)}`;
     console.error(`[onboarding-autocreate] ${note}`, err);

@@ -1760,6 +1760,79 @@ Think about what customers search for when they need ${industry} services. Inclu
     }
   });
 
+  // POST /api/gsc/connect-all?accountId=X
+  // Auto-matches every accessible GSC property to unconfigured websites for the account by domain name.
+  app.post("/api/gsc/connect-all", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId ?? req.body.accountId) as string;
+      if (!accountId) return res.status(400).json({ error: "accountId is required" });
+
+      const { listAccessibleSites, getServiceAccountEmail } = await import("./services/gsc-search-console");
+      const saEmail = getServiceAccountEmail();
+      if (!saEmail) return res.status(503).json({ error: "Google service account not configured." });
+
+      // 1. All GSC properties the SA can access
+      const accessibleSites = await listAccessibleSites();
+      if (!accessibleSites.length) {
+        return res.json({ connected: [], skipped: [], message: "No accessible GSC properties found. Add the service account to your properties first." });
+      }
+
+      // Build a lookup: bare domain → gscSiteUrl (prefer sc-domain over https)
+      const domainToGscUrl: Record<string, string> = {};
+      for (const siteUrl of accessibleSites) {
+        let domain = "";
+        if (siteUrl.startsWith("sc-domain:")) {
+          domain = siteUrl.slice("sc-domain:".length).replace(/\/$/, "").replace(/^www\./, "");
+        } else {
+          try { domain = new URL(siteUrl).hostname.replace(/^www\./, ""); } catch { continue; }
+        }
+        if (!domain) continue;
+        // Prefer sc-domain format when both exist
+        if (!domainToGscUrl[domain] || siteUrl.startsWith("sc-domain:")) {
+          domainToGscUrl[domain] = siteUrl;
+        }
+      }
+
+      // 2. All unconfigured websites for the account
+      const { pool } = await import("./db");
+      const sitesRes = await pool.query(
+        `SELECT id, domain FROM websites WHERE account_id = $1 AND (settings->>'gscSiteUrl' IS NULL OR settings->>'gscSiteUrl' = '')`,
+        [accountId],
+      );
+      const unconfigured: Array<{ id: string; domain: string }> = sitesRes.rows;
+
+      const connected: string[] = [];
+      const skipped: string[] = [];
+
+      // 3. Match and save
+      for (const site of unconfigured) {
+        const bareDomain = site.domain.replace(/^www\./, "");
+        const gscUrl = domainToGscUrl[bareDomain];
+        if (gscUrl) {
+          await pool.query(
+            `UPDATE websites SET settings = COALESCE(settings,'{}')::jsonb || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ gscSiteUrl: gscUrl, gscConnectedAt: new Date().toISOString() }), site.id],
+          );
+          connected.push(`${site.domain} → ${gscUrl}`);
+        } else {
+          skipped.push(site.domain);
+        }
+      }
+
+      return res.json({
+        connected,
+        skipped,
+        accessibleGscSites: accessibleSites,
+        message: connected.length
+          ? `Connected ${connected.length} site${connected.length !== 1 ? "s" : ""}.${skipped.length ? ` ${skipped.length} site(s) had no matching GSC property: ${skipped.join(", ")}.` : ""}`
+          : `No matches found. Available GSC properties: ${accessibleSites.join(", ")}. Make sure the service account is added to properties matching your website domains.`,
+      });
+    } catch (err: any) {
+      console.error("[gsc/connect-all] error:", err);
+      return res.status(500).json({ error: err.message ?? "Failed to connect sites" });
+    }
+  });
+
   // DELETE /api/websites/:id/gsc-connect — disconnect GSC for a website
   app.delete("/api/websites/:id/gsc-connect", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;

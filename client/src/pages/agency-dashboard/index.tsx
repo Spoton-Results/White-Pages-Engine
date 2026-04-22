@@ -292,6 +292,22 @@ export default function AgencyDashboardPage() {
     },
   });
 
+  const gscConnectAll = useMutation({
+    mutationFn: () => api.post<any>("/api/gsc/connect-all", { accountId }),
+    onSuccess: (data: any) => {
+      const count = data.connected?.length ?? 0;
+      if (count > 0) {
+        toast({ title: `${count} site${count !== 1 ? "s" : ""} connected`, description: data.message });
+        qc.invalidateQueries({ queryKey: ["agency-dashboard", accountId, month] });
+      } else {
+        toast({ title: "No sites auto-matched", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message ?? "Could not connect sites.", variant: "destructive" });
+    },
+  });
+
   function openGscDialog() {
     const unconfigured = seo.gsc?.unconfiguredSites ?? [];
     const first = unconfigured[0];
@@ -661,12 +677,13 @@ export default function AgencyDashboardPage() {
                       ))}
                       {(seo.gsc.unconfiguredSites?.length ?? 0) > 0 && (
                         <button
-                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                          onClick={openGscDialog}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-1 disabled:opacity-50"
+                          onClick={() => gscConnectAll.mutate()}
+                          disabled={gscConnectAll.isPending}
                           data-testid="button-gsc-connect-more"
                         >
-                          <Link2 className="size-3" />
-                          Connect more sites
+                          {gscConnectAll.isPending ? <Loader2 className="size-3 animate-spin" /> : <Link2 className="size-3" />}
+                          {gscConnectAll.isPending ? "Connecting…" : `Connect ${seo.gsc.unconfiguredSites.length} more site${seo.gsc.unconfiguredSites.length !== 1 ? "s" : ""}`}
                         </button>
                       )}
                     </div>
@@ -705,14 +722,26 @@ export default function AgencyDashboardPage() {
                       )}
                     </div>
                     {(seo.gsc?.unconfiguredSites?.length ?? 0) > 0 && (
-                      <Button
-                        variant="outline" size="sm" className="w-full gap-2 mt-1"
-                        onClick={openGscDialog}
-                        data-testid="button-gsc-connect"
-                      >
-                        <Link2 className="size-3.5" />
-                        Connect Google Search Console
-                      </Button>
+                      <div className="flex flex-col gap-2 mt-1">
+                        <Button
+                          size="sm" className="w-full gap-2"
+                          onClick={() => gscConnectAll.mutate()}
+                          disabled={gscConnectAll.isPending || !accountId}
+                          data-testid="button-gsc-connect-all"
+                        >
+                          {gscConnectAll.isPending
+                            ? <Loader2 className="size-3.5 animate-spin" />
+                            : <Link2 className="size-3.5" />}
+                          {gscConnectAll.isPending ? "Connecting…" : "Auto-Connect All Sites"}
+                        </Button>
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground underline"
+                          onClick={openGscDialog}
+                          data-testid="button-gsc-connect-manual"
+                        >
+                          Connect a single site manually
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
