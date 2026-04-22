@@ -6277,14 +6277,16 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
           }
 
           // Map price ID → plan_type
-          const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
-          const PRICE_GROWTH_BUNDLE = process.env.STRIPE_PRICE_GROWTH_BUNDLE;
+          const PRICE_LOCAL = process.env.STRIPE_PRICE_LOCAL_LAUNCH_MONTHLY || process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_LOCAL || process.env.STRIPE_PRICE_PILOT;
+          const PRICE_LOCAL_ANNUAL = process.env.STRIPE_PRICE_LOCAL_LAUNCH_ANNUAL;
+          const PRICE_GROWTH_BUNDLE = process.env.STRIPE_PRICE_GROWTH_BUNDLE_MONTHLY || process.env.STRIPE_PRICE_GROWTH_BUNDLE;
           const PRICE_BUNDLE = process.env.STRIPE_PRICE_BUNDLE;
-          const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
+          const PRICE_BUNDLE_ANNUAL = process.env.STRIPE_PRICE_GROWTH_BUNDLE_ANNUAL || process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
           const PRICE_ADDON = process.env.STRIPE_PRICE_ADDON_SITE;
-          const PRICE_FOUNDING = process.env.STRIPE_PRICE_FOUNDING_AGENCY;
+          const PRICE_FOUNDING = process.env.STRIPE_PRICE_FOUNDING_AGENCY_MONTHLY || process.env.STRIPE_PRICE_FOUNDING_AGENCY;
           let planType = "custom";
           if (priceId && priceId === PRICE_LOCAL) planType = "local_launch";
+          else if (priceId && PRICE_LOCAL_ANNUAL && priceId === PRICE_LOCAL_ANNUAL) planType = "local_launch_annual";
           else if (priceId && (priceId === PRICE_GROWTH_BUNDLE || priceId === PRICE_BUNDLE)) planType = "growth_bundle";
           else if (priceId && priceId === PRICE_BUNDLE_ANNUAL) planType = "growth_bundle_annual";
           else if (priceId && priceId === PRICE_ADDON) planType = "addon_site";
@@ -7116,7 +7118,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
   });
 
   app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
-    const { tier } = req.body as { tier?: string };
+    const { tier, billingPeriod = "monthly" } = req.body as { tier?: string; billingPeriod?: string };
 
     // Founding Agency slot guard
     if (tier === "foundingAgency") {
@@ -7132,15 +7134,30 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
       } catch {}
     }
 
-    const priceIdMap: Record<string, string | undefined> = {
-      localLaunch: process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_PILOT,
-      bundle: process.env.STRIPE_PRICE_GROWTH_BUNDLE || process.env.STRIPE_PRICE_BUNDLE,
-      bundleAnnual: process.env.STRIPE_PRICE_BUNDLE_ANNUAL,
-      pilot: process.env.STRIPE_PRICE_PILOT,
-      addonSite: process.env.STRIPE_PRICE_ADDON_SITE,
-      foundingAgency: process.env.STRIPE_PRICE_FOUNDING_AGENCY,
-    };
-    const priceId = tier ? priceIdMap[tier] : undefined;
+    // Map tier + billingPeriod to Stripe price ID.
+    // Founding Agency is always monthly-only — annual billingPeriod is ignored for it.
+    function getStripePriceId(t: string, period: string): string | undefined {
+      if (t === "localLaunch") {
+        return period === "annual"
+          ? process.env.STRIPE_PRICE_LOCAL_LAUNCH_ANNUAL
+          : (process.env.STRIPE_PRICE_LOCAL_LAUNCH_MONTHLY || process.env.STRIPE_PRICE_LOCAL_LAUNCH || process.env.STRIPE_PRICE_PILOT);
+      }
+      if (t === "foundingAgency") {
+        return process.env.STRIPE_PRICE_FOUNDING_AGENCY_MONTHLY || process.env.STRIPE_PRICE_FOUNDING_AGENCY;
+      }
+      if (t === "bundle") {
+        return period === "annual"
+          ? (process.env.STRIPE_PRICE_GROWTH_BUNDLE_ANNUAL || process.env.STRIPE_PRICE_BUNDLE_ANNUAL)
+          : (process.env.STRIPE_PRICE_GROWTH_BUNDLE_MONTHLY || process.env.STRIPE_PRICE_GROWTH_BUNDLE || process.env.STRIPE_PRICE_BUNDLE);
+      }
+      // Legacy tier names — keep working
+      if (t === "bundleAnnual") return process.env.STRIPE_PRICE_BUNDLE_ANNUAL;
+      if (t === "pilot") return process.env.STRIPE_PRICE_PILOT;
+      if (t === "addonSite") return process.env.STRIPE_PRICE_ADDON_SITE;
+      return undefined;
+    }
+
+    const priceId = tier ? getStripePriceId(tier, billingPeriod) : undefined;
     if (!priceId) {
       return res.json({ error: "coming_soon" });
     }

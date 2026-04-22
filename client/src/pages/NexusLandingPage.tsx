@@ -75,18 +75,26 @@ function Accordion({ items }: { items: { q: string; a: string }[] }) {
   );
 }
 
-type Tier = "bundle" | "bundleAnnual" | "pilot" | "foundingAgency" | "localLaunch";
+type Tier = "localLaunch" | "foundingAgency" | "bundle";
 
-async function createCheckoutSession(tier: Tier): Promise<{ url?: string; error?: string }> {
+async function createCheckoutSession(
+  tier: Tier,
+  billingPeriod: "monthly" | "annual"
+): Promise<{ url?: string; error?: string }> {
   const resp = await fetch("/api/stripe/create-checkout-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tier }),
+    body: JSON.stringify({ tier, billingPeriod }),
   });
   return resp.json();
 }
 
-function StripeButton({ tier, label, featured = false }: { tier: Tier; label: string; featured?: boolean }) {
+function StripeButton({ tier, billingPeriod, label, featured = false }: {
+  tier: Tier;
+  billingPeriod: "monthly" | "annual";
+  label: string;
+  featured?: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const [comingSoon, setComingSoon] = useState(false);
   const [errored, setErrored] = useState(false);
@@ -96,7 +104,7 @@ function StripeButton({ tier, label, featured = false }: { tier: Tier; label: st
     setLoading(true);
     setErrored(false);
     try {
-      const { url, error } = await createCheckoutSession(tier);
+      const { url, error } = await createCheckoutSession(tier, billingPeriod);
       if (error === "coming_soon") { setComingSoon(true); return; }
       if (error === "slots_full") { setComingSoon(true); return; }
       if (error) { setErrored(true); return; }
@@ -855,12 +863,24 @@ export default function NexusLandingPage() {
 
               {/* Local Launch */}
               <div className="lp-pricing-card" data-testid="card-pricing-pilot" style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ marginBottom: 8 }}>
+                <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>Local Launch</span>
+                  {billingPeriod === "annual" && (
+                    <span style={{ fontSize: 11, fontWeight: 700, background: "#eff6ff", color: "#2563eb", padding: "2px 10px", borderRadius: 20 }}>Save 20%</span>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$1,997</span>
-                  <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
+                  {billingPeriod === "annual" ? (
+                    <>
+                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-local-launch-price">$19,171</span>
+                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/yr</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-local-launch-price">$1,997</span>
+                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
+                    </>
+                  )}
                 </div>
                 <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
                 <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Single-service businesses testing programmatic SEO</p>
@@ -872,7 +892,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="localLaunch" label="Start Free Trial" />
+                <StripeButton tier="localLaunch" billingPeriod={billingPeriod} label="Start Free Trial" />
               </div>
 
               {/* Founding Agency */}
@@ -891,14 +911,15 @@ export default function NexusLandingPage() {
                     position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)",
                     whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(22,163,74,0.35)",
                   }}>FIRST 9 ONLY</span>
-                  <div style={{ marginBottom: 8 }}>
+                  <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#16a34a" }}>Founding Agency</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, background: "#f0fdf4", color: "#16a34a", padding: "2px 10px", borderRadius: 20, border: "1px solid #bbf7d0" }}>Monthly only</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                    <span style={{ fontSize: "clamp(32px, 3.5vw, 44px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }}>$1,497</span>
+                    <span style={{ fontSize: "clamp(32px, 3.5vw, 44px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-founding-price">$1,497</span>
                     <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo per site</span>
                   </div>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", marginBottom: 4 }}>6-month commitment</p>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", marginBottom: 4 }}>6-month commitment — founders rate locked in forever</p>
                   <p className="lp-body-sm" style={{ marginBottom: 16 }}>Save $500/month. Lock in founding rate before price increase.</p>
                   <div style={{
                     display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
@@ -931,7 +952,7 @@ export default function NexusLandingPage() {
                       Offer Closed
                     </button>
                   ) : (
-                    <StripeButton tier="foundingAgency" label="Claim Offer →" featured />
+                    <StripeButton tier="foundingAgency" billingPeriod="monthly" label="Claim Offer →" featured />
                   )}
                 </div>
               )}
@@ -939,12 +960,24 @@ export default function NexusLandingPage() {
               {/* Growth Bundle — featured */}
               <div className="lp-pricing-card featured" data-testid="card-pricing-bundle" style={{ display: "flex", flexDirection: "column" }}>
                 <span className="lp-badge">Most Popular</span>
-                <div style={{ marginBottom: 8 }}>
+                <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#3b82f6" }}>Growth Bundle</span>
+                  {billingPeriod === "annual" && (
+                    <span style={{ fontSize: 11, fontWeight: 700, background: "rgba(59,130,246,0.12)", color: "#2563eb", padding: "2px 10px", borderRadius: 20 }}>Save 20%</span>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$3,000</span>
-                  <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
+                  {billingPeriod === "annual" ? (
+                    <>
+                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$28,800</span>
+                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/yr</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: "clamp(36px, 4vw, 48px)", fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.04em" }} data-testid="text-bundle-price">$3,000</span>
+                      <span style={{ fontSize: 14, color: "#9ca3af" }}>/mo</span>
+                    </>
+                  )}
                 </div>
                 <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 12 }}>6-month commitment</p>
                 <p className="lp-body-sm" style={{ marginBottom: 20 }}>Best for: Agencies with 3 clients. Most popular.</p>
@@ -956,7 +989,7 @@ export default function NexusLandingPage() {
                     </div>
                   ))}
                 </div>
-                <StripeButton tier="bundle" label="Get Started →" featured />
+                <StripeButton tier="bundle" billingPeriod={billingPeriod} label="Get Started →" featured />
               </div>
 
               {/* Enterprise */}

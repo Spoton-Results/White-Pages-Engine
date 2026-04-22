@@ -1,0 +1,208 @@
+Read AGENT_RULES.md before doing anything.
+
+TASK: Fix pricing toggle so Annual only affects annual-eligible plans, and keep Founding Agency as a monthly-only limited offer.
+
+CONTEXT
+- Stripe can have multiple prices on the same product.
+- We are NOT creating an annual price for Founding Agency.
+- Founding Agency is a limited founder offer and should remain monthly-only.
+- After the first 9 are sold, we can remove it from the page and archive the Stripe price later.
+
+PRICING RULES
+- Local Launch
+  - Monthly: 1997
+  - Annual: 19171.20
+- Founding Agency
+  - Monthly only: 1497
+  - No annual price
+- Growth Bundle
+  - Monthly: 3000
+  - Annual: 28800
+- Enterprise
+  - Contact sales only
+  - No checkout button / no Stripe price
+
+ENV VARS TO USE
+- STRIPE_PRICE_LOCAL_LAUNCH_MONTHLY
+- STRIPE_PRICE_LOCAL_LAUNCH_ANNUAL
+- STRIPE_PRICE_FOUNDING_AGENCY_MONTHLY
+- STRIPE_PRICE_GROWTH_BUNDLE_MONTHLY
+- STRIPE_PRICE_GROWTH_BUNDLE_ANNUAL
+
+DO NOT reference a Founding Agency annual env var, because it should not exist.
+
+STEP 1 — FIND THE PRICING COMPONENT
+Find the pricing page/component, likely:
+- client/src/pages/landing/index.tsx
+or wherever the pricing cards and billing toggle now live.
+
+STEP 2 — FIX DISPLAY LOGIC
+Create tier config instead of hardcoded display logic so each plan can define whether annual is available.
+
+Use a structure like this:
+
+```ts
+const plans = [
+  {
+    slug: 'local-launch',
+    name: 'Local Launch',
+    monthlyPrice: 1997,
+    annualPrice: 19171.20,
+    annualAvailable: true,
+  },
+  {
+    slug: 'founding-agency',
+    name: 'Founding Agency',
+    monthlyPrice: 1497,
+    annualPrice: null,
+    annualAvailable: false,
+    limitedOffer: true,
+    limitedOfferText: 'First 9 only',
+  },
+  {
+    slug: 'growth-bundle',
+    name: 'Growth Bundle',
+    monthlyPrice: 3000,
+    annualPrice: 28800,
+    annualAvailable: true,
+  },
+  {
+    slug: 'enterprise',
+    name: 'Enterprise',
+    customPricing: true,
+  },
+];
+```
+
+Then use helper logic like this:
+
+```ts
+const getDisplayedPrice = (plan: any, billingPeriod: 'monthly' | 'annual') => {
+  if (plan.customPricing) return null;
+  if (billingPeriod === 'annual' && plan.annualAvailable && plan.annualPrice) {
+    return plan.annualPrice;
+  }
+  return plan.monthlyPrice;
+};
+
+const isAnnualPlanVisible = (plan: any, billingPeriod: 'monthly' | 'annual') => {
+  if (billingPeriod === 'monthly') return true;
+  if (plan.customPricing) return true;
+  return plan.annualAvailable || plan.slug === 'founding-agency';
+};
+```
+
+IMPORTANT:
+- Founding Agency should still be visible even when Annual is selected, but it should clearly say “Monthly only” or “Founders offer — monthly only”.
+- Do not make the Founding Agency price change when Annual is selected.
+- Annual toggle should only change Local Launch and Growth Bundle.
+
+STEP 3 — UPDATE CARD UI
+For each plan card:
+- Local Launch and Growth Bundle:
+  - Monthly mode shows monthly price
+  - Annual mode shows annual total
+  - Show a badge like: “Save 20% annually”
+- Founding Agency:
+  - Always show $1,497
+  - Show helper text: “Monthly only”
+  - Show limited badge: “First 9 only”
+- Enterprise:
+  - Show “Custom”
+  - CTA should be contact sales, not checkout
+
+STEP 4 — FIX CHECKOUT PRICE MAPPING
+Find where checkout sessions are created and map Stripe price IDs by plan + billing period.
+
+Use a helper like this:
+
+```ts
+const getStripePriceId = (
+  tier: string,
+  billingPeriod: 'monthly' | 'annual'
+) => {
+  if (tier === 'local-launch') {
+    return billingPeriod === 'annual'
+      ? process.env.STRIPE_PRICE_LOCAL_LAUNCH_ANNUAL
+      : process.env.STRIPE_PRICE_LOCAL_LAUNCH_MONTHLY;
+  }
+
+  if (tier === 'founding-agency') {
+    return process.env.STRIPE_PRICE_FOUNDING_AGENCY_MONTHLY;
+  }
+
+  if (tier === 'growth-bundle') {
+    return billingPeriod === 'annual'
+      ? process.env.STRIPE_PRICE_GROWTH_BUNDLE_ANNUAL
+      : process.env.STRIPE_PRICE_GROWTH_BUNDLE_MONTHLY;
+  }
+
+  return null;
+};
+```
+
+Then checkout logic should:
+- Use the mapped price ID
+- Send billingPeriod and tier in the request
+- Prevent checkout for Enterprise if it is contact-only
+
+Example:
+
+```ts
+const createCheckout = async (tier: string) => {
+  const priceId = getStripePriceId(tier, billingPeriod);
+
+  if (!priceId) {
+    if (tier === 'enterprise') {
+      window.location.href = '/contact';
+      return;
+    }
+    throw new Error(`Missing Stripe price for tier: ${tier}`);
+  }
+
+  const response = await fetch('/api/stripe/create-checkout-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tier,
+      billingPeriod,
+      priceId,
+    }),
+  });
+
+  const session = await response.json();
+
+  if (!response.ok || !session?.url) {
+    throw new Error(session?.message || 'Failed to create checkout session');
+  }
+
+  window.location.href = session.url;
+};
+```
+
+STEP 5 — VERIFY BACKEND
+Check the Stripe checkout API route and confirm:
+- it uses the incoming priceId
+- it does not override the selection with a hardcoded monthly price
+- it handles missing priceId safely
+
+STEP 6 — TEST
+Verify all of the following:
+- Monthly toggle:
+  - Local Launch = 1997
+  - Founding Agency = 1497
+  - Growth Bundle = 3000
+- Annual toggle:
+  - Local Launch = 19171.20
+  - Founding Agency still = 1497 and labeled Monthly only
+  - Growth Bundle = 28800
+- Founding Agency does not attempt to use any annual Stripe price
+- Local Launch and Growth Bundle use the correct Stripe annual price IDs when Annual is selected
+- Enterprise does not open Stripe checkout
+- No TypeScript or build errors
+
+RETURN
+- exact files changed
+- final env var names used
+- whether the pricing file path differed from client/src/pages/landing/index.tsx
+- any mismatch between frontend tier slugs and backend tier mapping
