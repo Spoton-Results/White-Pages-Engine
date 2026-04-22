@@ -453,8 +453,8 @@ export default function NexusLandingPage() {
     "Email support",
   ];
   const foundingFeatures = [
-    "1-5 sites",
-    "50,000 pages per site",
+    "1–3 sites",
+    "15,000 pages per site",
     "Auto-scoring & tiering",
     "Weekly reports",
     "Google indexing",

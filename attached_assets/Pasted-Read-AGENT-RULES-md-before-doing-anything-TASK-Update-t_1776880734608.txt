@@ -1,0 +1,83 @@
+Read AGENT_RULES.md before doing anything.
+
+TASK: Update the Founding Agency tier to cap it at 1–3 sites with 15K pages per site, keeping the current $1,497/mo per site pricing.
+
+GOAL
+- Soften the Founding Agency offer so it’s still a strong founder deal but doesn’t overshadow the Growth Bundle.
+- Adjust the feature copy only; do NOT change the price or commitment length.
+
+CURRENT FOUNDING AGENCY (INTENT)
+- Price: $1,497/mo per site
+- Commitment: 6-month
+- Sites: 1–5 sites
+- Pages: 50,000 pages per site
+- Positioning: First 9 only, founders rate locked in
+
+NEW FOUNDING AGENCY SCOPE
+Update the card to:
+
+- Price (unchanged):
+  - `$1,497/mo per site`
+  - 6-month commitment
+- Sites:
+  - `1–3 sites`
+- Pages:
+  - `15,000 pages per site`
+- Keep all other bullets/benefits the same:
+  - Auto-scoring & tiering
+  - Weekly reports
+  - Google indexing
+  - White-label dashboard
+  - Email support
+  - Case study & testimonial rights
+- Keep “First 9 only” and “Monthly only” badges / labels
+
+SUGGESTED COPY (FOR THE CARD)
+
+Title & badges:
+- `Founding Agency`
+- Badge: `First 9 only`
+- Badge: `Monthly only`
+
+Price block:
+- `$1,497/mo per site`
+- `6-month commitment — founders rate locked in`
+
+Benefit list:
+- `Best for: Early agencies who want Nexus as their core engine`
+- `Save $500/month per site compared to standard pricing`
+- `1–3 sites`
+- `15,000 pages per site`
+- `Auto-scoring & tiering`
+- `Weekly reports`
+- `Google indexing`
+- `White-label dashboard`
+- `Email support`
+- `Case study & testimonial rights`
+
+CTA:
+- Keep existing CTA text: `Claim Offer →`
+
+IMPLEMENTATION NOTES
+1. Find the Founding Agency plan definition in the pricing config or component (where plans are defined with sites/pages text).
+2. Change:
+   - any occurrences of `1–5 sites` to `1–3 sites`
+   - any occurrences of `50,000 pages per site` to `15,000 pages per site`
+3. Do NOT touch:
+   - the $1,497/mo per site price
+   - the “First 9 only” / “Monthly only” labels
+   - the 6-month commitment language
+   - Stripe price IDs or billing logic
+
+CHECKLIST
+- [ ] Monthly view for Founding Agency shows:
+      - `$1,497/mo per site`
+      - `1–3 sites`
+      - `15,000 pages per site`
+- [ ] Annual toggle does NOT change Founding Agency price or scope
+- [ ] Growth Bundle still shows `3 sites` and `25,000 pages per site (75K total)`
+- [ ] No layout issues on desktop or mobile from shorter numbers
+
+RETURN
+- exact files changed
+- the final Founding Agency bullet list as rendered in the UI
