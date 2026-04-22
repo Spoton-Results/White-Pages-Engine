@@ -283,7 +283,12 @@ export default function AgencyDashboardPage() {
       setGscError("");
     },
     onError: (err: any) => {
-      setGscError(err.message ?? "Connection failed. Check the site URL and try again.");
+      const msg = err.message ?? "";
+      if (msg.toLowerCase().includes("unauthorized") || err.status === 401) {
+        setGscError("You must be logged in to connect Google Search Console. Please log in and try again.");
+      } else {
+        setGscError(msg || "Connection failed. Check the site URL and try again.");
+      }
     },
   });
 
@@ -662,7 +667,7 @@ export default function AgencyDashboardPage() {
                           </button>
                         </div>
                       ))}
-                      {(seo.gsc.unconfiguredSites?.length ?? 0) > 0 && (
+                      {user && (seo.gsc.unconfiguredSites?.length ?? 0) > 0 && (
                         <button
                           className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                           onClick={openGscDialog}
@@ -707,7 +712,7 @@ export default function AgencyDashboardPage() {
                         </div>
                       )}
                     </div>
-                    {(seo.gsc?.unconfiguredSites?.length ?? 0) > 0 && (
+                    {user && (seo.gsc?.unconfiguredSites?.length ?? 0) > 0 && (
                       <Button
                         variant="outline" size="sm" className="w-full gap-2 mt-1"
                         onClick={openGscDialog}
