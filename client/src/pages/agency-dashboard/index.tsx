@@ -215,6 +215,7 @@ export default function AgencyDashboardPage() {
     queryKey: ["gsc-sa-email"],
     queryFn: () => api.get("/api/gsc/sa-email"),
     enabled: !!accountId,
+    staleTime: 10 * 60_000, // service account email never changes mid-session
   });
 
   // ── Websites for the account ────────────────────────────────────────────────
@@ -222,6 +223,7 @@ export default function AgencyDashboardPage() {
     queryKey: ["all-websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
     enabled: !!accountId,
+    staleTime: 5 * 60_000, // website list changes rarely
   });
 
   const accountWebsites = useMemo(
@@ -527,21 +529,21 @@ export default function AgencyDashboardPage() {
             />
             <StatCard
               icon={FileText} label="Form Submissions"
-              value={leadsLoading ? undefined : leads.length}
-              sub={leads.length > 0 ? `${leads.length} submission${leads.length !== 1 ? "s" : ""} this month` : undefined}
-              color="text-violet-500" loading={leadsLoading && !!accountId}
+              value={summary?.forms?.thisMonth ?? (leadsLoading ? undefined : leads.length)}
+              sub={(summary?.forms?.thisMonth ?? leads.length) > 0 ? `${summary?.forms?.thisMonth ?? leads.length} submission${(summary?.forms?.thisMonth ?? leads.length) !== 1 ? "s" : ""} this month` : undefined}
+              color="text-violet-500" loading={summaryLoading && !!accountId}
             />
             <StatCard
               icon={CheckCircle} label="Booked Jobs"
-              value={jobsLoading ? undefined : (jobMetrics?.totalJobsBooked ?? 0)}
-              sub={(jobMetrics?.totalJobsBooked ?? 0) > 0 ? `${leads.length} total leads` : undefined}
-              color="text-emerald-500" loading={jobsLoading && !!accountId}
+              value={summary?.leads?.bookedJobs ?? (jobsLoading ? undefined : (jobMetrics?.totalJobsBooked ?? 0))}
+              sub={(summary?.leads?.bookedJobs ?? jobMetrics?.totalJobsBooked ?? 0) > 0 ? `${summary?.leads?.totalLeads ?? leads.length} total leads` : undefined}
+              color="text-emerald-500" loading={summaryLoading && !!accountId}
             />
             <StatCard
               icon={DollarSign} label="Revenue Attributed"
-              value={jobsLoading ? undefined : (jobMetrics?.totalJobValue != null ? fmtCurrency(jobMetrics.totalJobValue) : "—")}
-              sub={(jobMetrics?.totalJobsBooked ?? 0) > 0 ? `Avg ${fmtCurrency(jobMetrics?.avgJobValue ?? 0)} / job` : undefined}
-              color="text-amber-500" loading={jobsLoading && !!accountId}
+              value={summary?.roi?.totalJobValue != null ? fmtCurrency(summary.roi.totalJobValue) : (jobsLoading ? undefined : (jobMetrics?.totalJobValue != null ? fmtCurrency(jobMetrics.totalJobValue) : "—"))}
+              sub={(summary?.leads?.bookedJobs ?? jobMetrics?.totalJobsBooked ?? 0) > 0 ? `Avg ${fmtCurrency(summary?.roi?.totalJobValue && summary?.leads?.bookedJobs ? summary.roi.totalJobValue / summary.leads.bookedJobs : (jobMetrics?.avgJobValue ?? 0))} / job` : undefined}
+              color="text-amber-500" loading={summaryLoading && !!accountId}
             />
           </div>
         </div>

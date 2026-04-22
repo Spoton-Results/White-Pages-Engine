@@ -6,6 +6,17 @@ import { requireAuth } from "../auth";
 
 const router = Router();
 
+// 30-second in-memory cache for metrics (keyed by accountId:month)
+const metricsCache = new Map<string, { data: unknown; exp: number }>();
+function getCachedMetrics(key: string) {
+  const e = metricsCache.get(key);
+  if (!e || Date.now() > e.exp) { metricsCache.delete(key); return null; }
+  return e.data;
+}
+function setCachedMetrics(key: string, data: unknown) {
+  metricsCache.set(key, { data, exp: Date.now() + 30_000 });
+}
+
 // POST /api/leads/update-status
 router.post("/update-status", requireAuth, async (req, res) => {
   try {
@@ -96,6 +107,10 @@ router.get("/metrics/:accountId", requireAuth, async (req, res) => {
     const { accountId } = req.params;
     const { month } = req.query as { month?: string };
 
+    const cacheKey = `${accountId}:${month ?? "cur"}`;
+    const cached = getCachedMetrics(cacheKey);
+    if (cached) return res.json(cached);
+
     const conditions = [eq(bookedJobs.accountId, accountId)];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
@@ -104,16 +119,16 @@ router.get("/metrics/:accountId", requireAuth, async (req, res) => {
     }
 
     const jobs = await db.select().from(bookedJobs).where(and(...conditions));
-
     const totalJobValue = jobs.reduce((sum, job) => sum + parseFloat(job.jobValue ?? "0"), 0);
 
-    return res.json({
+    const payload = {
       totalJobsBooked: jobs.length,
       totalJobValue: Math.round(totalJobValue * 100) / 100,
-      avgJobValue:
-        jobs.length > 0 ? Math.round((totalJobValue / jobs.length) * 100) / 100 : 0,
+      avgJobValue: jobs.length > 0 ? Math.round((totalJobValue / jobs.length) * 100) / 100 : 0,
       jobs,
-    });
+    };
+    setCachedMetrics(cacheKey, payload);
+    return res.json(payload);
   } catch (error) {
     console.error("Error fetching metrics:", error);
     return res.status(500).json({ error: "Failed to fetch metrics" });

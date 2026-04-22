@@ -6,6 +6,17 @@ import { requireAuth } from "../auth";
 
 const router = Router();
 
+// 30-second cache for account-level leads (keyed by accountId:month)
+const leadsCache = new Map<string, { data: unknown; exp: number }>();
+function getCachedLeads(key: string) {
+  const e = leadsCache.get(key);
+  if (!e || Date.now() > e.exp) { leadsCache.delete(key); return null; }
+  return e.data;
+}
+function setCachedLeads(key: string, data: unknown) {
+  leadsCache.set(key, { data, exp: Date.now() + 30_000 });
+}
+
 // POST /api/form-tracking/submit  (public — called from public-facing page forms)
 router.post("/submit", async (req, res) => {
   try {
@@ -104,6 +115,10 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const { accountId, month } = req.query as { accountId?: string; month?: string };
     if (!accountId) return res.status(400).json({ error: "accountId is required" });
 
+    const cacheKey = `${accountId}:${month ?? "cur"}`;
+    const cached = getCachedLeads(cacheKey);
+    if (cached) return res.json(cached);
+
     // 1. Resolve website IDs for this account in one query
     const siteRows = await db
       .select({ id: websites.id })
@@ -140,10 +155,12 @@ router.get("/account-leads", requireAuth, async (req, res) => {
       if (job.leadId) jobsByLeadId[job.leadId] = job;
     }
 
-    return res.json({
+    const payload = {
       totalForms: leads.length,
       leads: leads.map((l) => ({ ...l, bookedJob: jobsByLeadId[l.id] ?? null })),
-    });
+    };
+    setCachedLeads(cacheKey, payload);
+    return res.json(payload);
   } catch (error) {
     console.error("Error fetching account leads:", error);
     return res.status(500).json({ error: "Failed to fetch leads" });
