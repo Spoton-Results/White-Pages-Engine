@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 60,
+  max: 15,                         // right-sized for 2 vCPU; too many connections = contention
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 8000,   // fail fast — don't queue forever
+  connectionTimeoutMillis: 5000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });

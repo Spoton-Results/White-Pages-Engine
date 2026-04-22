@@ -64,173 +64,156 @@ app.use((req, res, next) => {
 });
 
 async function runBackgroundStartup() {
-  // Run safe schema migrations (idempotent ADD COLUMN IF NOT EXISTS)
+  // Run safe schema migrations (idempotent). Parallelised for speed:
+  //   • Batch ALTER TABLE per table (one round-trip per table instead of one per column)
+  //   • Run CREATE TABLE + CREATE INDEX groups in parallel
   try {
-    const { db } = await import("./db");
+    const { pool: pgPool, db } = await import("./db");
     const { sql } = await import("drizzle-orm");
-    await db.execute(sql`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`);
-    console.log("[startup] Schema migration: sitemaps.xml_content ensured.");
-    // Phase 7 — Launch Governors columns
-    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS gsc_submitted_at TIMESTAMP`);
-    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS governor_results JSONB`);
-    console.log("[startup] Schema migration: Phase 7 governor columns ensured.");
-    // Phase 8 — Safety Rails columns
-    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_flag BOOLEAN DEFAULT false`);
-    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_of_slug VARCHAR(500)`);
-    await db.execute(sql`ALTER TABLE pages ADD COLUMN IF NOT EXISTS duplicate_similarity DECIMAL(5,4)`);
-    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_mode BOOLEAN DEFAULT false`);
-    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_expires_at TIMESTAMP`);
-    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS warmup_day INTEGER DEFAULT 0`);
-    await db.execute(sql`ALTER TABLE websites ADD COLUMN IF NOT EXISTS warmup_page_cap_override INTEGER`);
-    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS brand_input_score INTEGER`);
-    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS brand_input_result JSONB`);
-    await db.execute(sql`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS gap_report JSONB`);
-    console.log("[startup] Schema migration: Phase 8 safety-rails columns ensured.");
-    // Phase 9 — Health Score + Client Digest tables
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS launch_health_scores (
-      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      score integer DEFAULT 0,
-      max_score integer DEFAULT 100,
-      breakdown jsonb,
-      calculated_at timestamp DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS client_weekly_digests (
-      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      account_id varchar NOT NULL,
-      recipient_email varchar(255) NOT NULL,
-      subject varchar(500),
-      body_html text,
-      body_text text,
-      sent_at timestamp,
-      created_at timestamp DEFAULT NOW(),
-      status varchar(20) DEFAULT 'pending'
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag ON pages(website_id, duplicate_flag)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_launch_health_website ON launch_health_scores(website_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_launch_health_date ON launch_health_scores(calculated_at)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_website ON client_weekly_digests(website_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_client_digest_status ON client_weekly_digests(status)`);
-    console.log("[startup] Schema migration: Phase 9 health/digest tables ensured.");
-    // Phase 10 — Call Tracking Numbers
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS call_tracking_numbers (
-      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-      service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-      location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
-      dynamic_number VARCHAR(20) NOT NULL UNIQUE,
-      forward_to_number VARCHAR(20) NOT NULL,
-      is_active BOOLEAN DEFAULT true,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_call_tracking_page ON call_tracking_numbers(page_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_call_tracking_website ON call_tracking_numbers(website_id)`);
-    console.log("[startup] Schema migration: Phase 10 call_tracking_numbers table ensured.");
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS tracked_calls (
-      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-      service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-      location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
-      dynamic_number VARCHAR(20) NOT NULL,
-      caller_phone_hash VARCHAR(255),
-      call_duration_seconds INT,
-      call_timestamp TIMESTAMP NOT NULL,
-      call_status VARCHAR(50),
-      call_provider_id VARCHAR(255),
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_calls_page ON tracked_calls(page_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_calls_timestamp ON tracked_calls(call_timestamp)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_calls_website ON tracked_calls(website_id)`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS tracked_leads (
-      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-      service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-      location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
-      form_name VARCHAR(255),
-      submitter_name VARCHAR(255),
-      submitter_email VARCHAR(255),
-      submitter_phone VARCHAR(20),
-      message TEXT,
-      source_page_url TEXT,
-      source_page_title VARCHAR(255),
-      form_timestamp TIMESTAMP NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_leads_page ON tracked_leads(page_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_leads_website ON tracked_leads(website_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_tracked_leads_timestamp ON tracked_leads(form_timestamp)`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS booked_jobs (
-      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      lead_id VARCHAR REFERENCES tracked_leads(id) ON DELETE SET NULL,
-      website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-      account_id VARCHAR NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-      job_value DECIMAL(10,2),
-      booked_date TIMESTAMP NOT NULL,
-      status VARCHAR(50) DEFAULT 'pending',
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_booked_jobs_account ON booked_jobs(account_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_booked_jobs_page ON booked_jobs(page_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_booked_jobs_date ON booked_jobs(booked_date)`);
-    console.log("[startup] Schema migration: Phase 10 tracked_calls / tracked_leads / booked_jobs ensured.");
-    // Phase 11 — ROI tracking field on accounts
-    await db.execute(sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`);
-    console.log("[startup] Schema migration: Phase 11 accounts.monthly_seo_spend ensured.");
-    // Core page indexes + FK indexes — each wrapped independently so one failure can't skip the rest
-    const idxStatements = [
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug ON pages(website_id, slug)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_status ON pages(website_id, status)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_id ON pages(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id ON page_versions(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_page_versions_active ON page_versions(page_id, is_active)`,
-      `CREATE INDEX IF NOT EXISTS idx_websites_account_id ON websites(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_locations_account_id ON locations(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_services_account_id ON services(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_blueprints_account_id ON blueprints(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_blueprints_website_id ON blueprints(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_hub_pages_account_id ON hub_pages(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_hub_pages_website_id ON hub_pages(website_id)`,
+    const exec = (stmt: string) => pgPool.query(stmt).catch(() => {});
+
+    // ── Batch 1: ALTER TABLE — one statement per table (parallel across tables) ──
+    await Promise.all([
+      exec(`ALTER TABLE sitemaps
+              ADD COLUMN IF NOT EXISTS xml_content TEXT`),
+      exec(`ALTER TABLE pages
+              ADD COLUMN IF NOT EXISTS gsc_submitted_at    TIMESTAMP,
+              ADD COLUMN IF NOT EXISTS duplicate_flag      BOOLEAN     DEFAULT false,
+              ADD COLUMN IF NOT EXISTS duplicate_of_slug   VARCHAR(500),
+              ADD COLUMN IF NOT EXISTS duplicate_similarity DECIMAL(5,4)`),
+      exec(`ALTER TABLE websites
+              ADD COLUMN IF NOT EXISTS protection_mode        BOOLEAN DEFAULT false,
+              ADD COLUMN IF NOT EXISTS protection_expires_at  TIMESTAMP,
+              ADD COLUMN IF NOT EXISTS warmup_day             INTEGER DEFAULT 0,
+              ADD COLUMN IF NOT EXISTS warmup_page_cap_override INTEGER`),
+      exec(`ALTER TABLE onboarding_submissions
+              ADD COLUMN IF NOT EXISTS governor_results   JSONB,
+              ADD COLUMN IF NOT EXISTS brand_input_score  INTEGER,
+              ADD COLUMN IF NOT EXISTS brand_input_result JSONB,
+              ADD COLUMN IF NOT EXISTS gap_report         JSONB`),
+      exec(`ALTER TABLE accounts
+              ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`),
+    ]);
+    console.log("[startup] Schema migrations: ALTER TABLE columns ensured.");
+
+    // ── Batch 2: CREATE TABLE — all in parallel ────────────────────────────────
+    await Promise.all([
+      exec(`CREATE TABLE IF NOT EXISTS launch_health_scores (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        score integer DEFAULT 0, max_score integer DEFAULT 100,
+        breakdown jsonb, calculated_at timestamp DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS client_weekly_digests (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        account_id varchar NOT NULL, recipient_email varchar(255) NOT NULL,
+        subject varchar(500), body_html text, body_text text,
+        sent_at timestamp, created_at timestamp DEFAULT NOW(), status varchar(20) DEFAULT 'pending'
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS call_tracking_numbers (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
+        dynamic_number VARCHAR(20) NOT NULL UNIQUE,
+        forward_to_number VARCHAR(20) NOT NULL,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS tracked_calls (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
+        dynamic_number VARCHAR(20) NOT NULL, caller_phone_hash VARCHAR(255),
+        call_duration_seconds INT, call_timestamp TIMESTAMP NOT NULL,
+        call_status VARCHAR(50), call_provider_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS tracked_leads (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
+        form_name VARCHAR(255), submitter_name VARCHAR(255),
+        submitter_email VARCHAR(255), submitter_phone VARCHAR(20),
+        message TEXT, source_page_url TEXT, source_page_title VARCHAR(255),
+        form_timestamp TIMESTAMP NOT NULL, created_at TIMESTAMP DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS booked_jobs (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        lead_id VARCHAR REFERENCES tracked_leads(id) ON DELETE SET NULL,
+        website_id VARCHAR NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        account_id VARCHAR NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        job_value DECIMAL(10,2), booked_date TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS admin_notifications (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        type text NOT NULL, title text NOT NULL, message text NOT NULL,
+        metadata jsonb, read_at timestamp, created_at timestamp NOT NULL DEFAULT NOW()
+      )`),
+      exec(`CREATE TABLE IF NOT EXISTS demotion_logs (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+        page_id varchar NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        from_tier integer NOT NULL, to_tier integer NOT NULL,
+        reason text NOT NULL, created_at timestamp NOT NULL DEFAULT NOW()
+      )`),
+    ]);
+    console.log("[startup] Schema migrations: CREATE TABLE ensured.");
+
+    // ── Batch 3: CREATE INDEX — all in parallel ────────────────────────────────
+    await Promise.all([
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug       ON pages(website_id, slug)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_status             ON pages(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_id         ON pages(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag     ON pages(website_id, duplicate_flag)`,
+      `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_page_versions_active     ON page_versions(page_id, is_active)`,
+      `CREATE INDEX IF NOT EXISTS idx_websites_account_id      ON websites(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_account_id         ON users(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_locations_account_id     ON locations(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_services_account_id      ON services(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_blueprints_account_id    ON blueprints(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_blueprints_website_id    ON blueprints(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_hub_pages_account_id     ON hub_pages(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_hub_pages_website_id     ON hub_pages(website_id)`,
       `CREATE INDEX IF NOT EXISTS idx_generation_jobs_account_id ON generation_jobs(account_id)`,
       `CREATE INDEX IF NOT EXISTS idx_generation_jobs_website_id ON generation_jobs(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_sitemaps_website_id ON sitemaps(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemaps_website_id      ON sitemaps(website_id)`,
       `CREATE INDEX IF NOT EXISTS idx_query_clusters_account_id ON query_clusters(account_id)`,
       `CREATE INDEX IF NOT EXISTS idx_internal_links_website_id ON internal_links(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_accounts_agency_id ON accounts(agency_id)`,
-    ];
-    for (const stmt of idxStatements) {
-      try { await db.execute(sql.raw(stmt)); } catch (_) { /* already exists or column absent — skip */ }
-    }
+      `CREATE INDEX IF NOT EXISTS idx_accounts_agency_id       ON accounts(agency_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_launch_health_website    ON launch_health_scores(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_launch_health_date       ON launch_health_scores(calculated_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_client_digest_website    ON client_weekly_digests(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_client_digest_status     ON client_weekly_digests(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_call_tracking_page       ON call_tracking_numbers(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_call_tracking_website    ON call_tracking_numbers(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_page       ON tracked_calls(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_timestamp  ON tracked_calls(call_timestamp)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_website    ON tracked_calls(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_page       ON tracked_leads(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_website    ON tracked_leads(website_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_timestamp  ON tracked_leads(form_timestamp)`,
+      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_account      ON booked_jobs(account_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_page         ON booked_jobs(page_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
+      `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at DESC)`,
+    ].map(exec));
     console.log("[startup] Database indexes ensured.");
-
-    // Automation tables (added in automation phase)
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS admin_notifications (
-      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      type text NOT NULL, title text NOT NULL, message text NOT NULL,
-      metadata jsonb, read_at timestamp, created_at timestamp NOT NULL DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS demotion_logs (
-      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-      website_id varchar NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-      page_id varchar NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-      from_tier integer NOT NULL, to_tier integer NOT NULL,
-      reason text NOT NULL, created_at timestamp NOT NULL DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_admin_notif_website ON admin_notifications(website_id, created_at DESC)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_demotion_logs_website ON demotion_logs(website_id, created_at DESC)`);
-    console.log("[startup] Automation tables ensured.");
 
     // Domain migration: update old subdomain-based domains to root domain + /pages proxyPath
     await db.execute(sql`
