@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, MapPin, Trash2, Search, Download, Sparkles, Loader2, CheckSquare, Square, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, MapPin, Trash2, Search, Download, Sparkles, Loader2, CheckSquare, Square, ChevronLeft, ChevronRight, Upload, FileText, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -566,6 +566,28 @@ function BulkImportDialog({
   const [selectedStates, setSelectedStates] = useState<Set<string>>(new Set());
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
   const [csvText, setCsvText] = useState("");
+  const [csvFileName, setCsvFileName] = useState("");
+  const [csvMode, setCsvMode] = useState<"simple" | "structured">("simple");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      // Auto-detect structured CSV by checking if first non-blank line looks like a header
+      const firstLine = text.split(/\r?\n/).find(l => l.trim());
+      const lc = firstLine?.toLowerCase() ?? "";
+      const isStructured = lc.includes("name") && (lc.includes("type") || lc.includes("state"));
+      setCsvMode(isStructured ? "structured" : "simple");
+      setCsvText(text);
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-uploaded
+    e.target.value = "";
+  };
 
   // Build state lookup maps once
   const stateByCode = useMemo(() => new Map(US_STATES.map(s => [s.code.toUpperCase(), s])), []);
@@ -576,17 +598,54 @@ function BulkImportDialog({
     const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const results: LocationImportItem[] = [];
-    for (const line of lines) {
-      // Support: "City, ST" or "City, State Name" or tab-separated
-      const parts = line.split(/\t|,(?=[^,]*$)/).map(p => p.trim());
-      if (parts.length < 2) continue;
-      const cityName = parts[0].trim();
-      const stateRaw = parts[parts.length - 1].trim();
-      const state = stateByCode.get(stateRaw.toUpperCase()) || stateByName.get(stateRaw.toLowerCase());
-      if (!cityName || !state) continue;
-      const slug = `${slugify(cityName)}-${state.code.toLowerCase()}`;
-      results.push({ type: "city", name: cityName, slug, stateCode: state.code, stateName: state.name, population: 0 });
+
+    // Check if first non-blank line is a structured header
+    const headerLine = lines[0]?.toLowerCase() ?? "";
+    const isStructured = headerLine.includes("name") && (headerLine.includes("type") || headerLine.includes("state"));
+
+    if (isStructured) {
+      // Parse structured CSV with headers: name,type,stateCode,stateName,population,slug
+      const parseRow = (line: string) => line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+      const headers = parseRow(lines[0]);
+      const idx = (col: string) => headers.findIndex(h => h.toLowerCase() === col.toLowerCase());
+      const iName = idx("name"), iType = idx("type"), iSlug = idx("slug");
+      const iStateCode = Math.max(idx("stateCode"), idx("state_code"), idx("statecode"));
+      const iStateName = Math.max(idx("stateName"), idx("state_name"), idx("statename"), idx("state"));
+      const iPop = Math.max(idx("population"), idx("pop"));
+
+      for (let i = 1; i < lines.length; i++) {
+        const row = parseRow(lines[i]);
+        if (row.length < 2) continue;
+        const name = iName >= 0 ? row[iName] : row[0];
+        const type = (iType >= 0 ? row[iType] : "city") as LocationImportItem["type"];
+        const stateCodeRaw = iStateCode >= 0 ? row[iStateCode] : "";
+        const stateNameRaw = iStateName >= 0 ? row[iStateName] : "";
+        const population = iPop >= 0 ? parseInt(row[iPop]) || 0 : 0;
+        const state = stateByCode.get(stateCodeRaw.toUpperCase()) || stateByName.get(stateNameRaw.toLowerCase());
+        const stateCode = state?.code ?? stateCodeRaw.toUpperCase();
+        const stateName = state?.name ?? stateNameRaw;
+        const slug = iSlug >= 0 && row[iSlug]
+          ? row[iSlug]
+          : type === "state" ? slugify(name) : `${slugify(name)}${stateCode ? `-${stateCode.toLowerCase()}` : ""}`;
+        if (!name) continue;
+        results.push({ type: type || "city", name, slug, stateCode, stateName, population });
+      }
+    } else {
+      // Simple format: "City, ST" or "City, State Name" or tab-separated
+      for (const line of lines) {
+        // Skip header-like lines
+        if (line.toLowerCase().startsWith("city") || line.toLowerCase().startsWith("name")) continue;
+        const parts = line.split(/\t|,(?=[^,]*$)/).map(p => p.trim());
+        if (parts.length < 2) continue;
+        const cityName = parts[0].trim();
+        const stateRaw = parts[parts.length - 1].trim();
+        const state = stateByCode.get(stateRaw.toUpperCase()) || stateByName.get(stateRaw.toLowerCase());
+        if (!cityName || !state) continue;
+        const slug = `${slugify(cityName)}-${state.code.toLowerCase()}`;
+        results.push({ type: "city", name: cityName, slug, stateCode: state.code, stateName: state.name, population: 0 });
+      }
     }
+
     // deduplicate by slug
     const seen = new Set<string>();
     return results.filter(r => { if (seen.has(r.slug)) return false; seen.add(r.slug); return true; });
@@ -872,36 +931,111 @@ function BulkImportDialog({
             <p className="text-xs text-muted-foreground">{metroCounts.length} metro areas</p>
           </TabsContent>
 
-          {/* ── Paste CSV Tab ── */}
+          {/* ── CSV / File Upload Tab ── */}
           <TabsContent value="csv" className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">
-                Paste a list of cities — one per line. Accepted formats:
-              </p>
-              <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
-                <li><code>Austin, TX</code> — city name + 2-letter state code</li>
-                <li><code>Austin, Texas</code> — city name + full state name</li>
-                <li>Tab-separated columns also work</li>
-                <li>Header rows and blank lines are skipped automatically</li>
-              </ul>
+            {/* File upload row */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={handleFileUpload}
+              data-testid="input-csv-file"
+            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => fileInputRef.current?.click()}
+                data-testid="button-upload-csv"
+              >
+                <Upload className="size-4" />Upload CSV File
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-muted-foreground text-xs"
+                onClick={() => {
+                  const template = "name,type,stateCode,stateName,population,slug\nAustin,city,TX,Texas,961855,austin-tx\nDallas,city,TX,Texas,1304000,dallas-tx\nTexas,state,TX,Texas,30000000,texas\n";
+                  const blob = new Blob([template], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "locations-template.csv";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                data-testid="button-download-template"
+              >
+                <Download className="size-3.5" />Download Template
+              </Button>
+              {csvFileName && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <FileText className="size-3.5" />
+                  <span>{csvFileName}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1 text-xs"
+                    onClick={() => { setCsvText(""); setCsvFileName(""); }}
+                  >✕</Button>
+                </div>
+              )}
             </div>
+
+            {/* Format info */}
+            {!csvText.trim() && (
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Upload a CSV or paste locations below. Two supported formats:</p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded border p-2 space-y-1">
+                    <p className="font-medium text-foreground">Simple (City list)</p>
+                    <pre className="text-muted-foreground leading-relaxed">Austin, TX{"\n"}Dallas, Texas{"\n"}Chicago, IL</pre>
+                  </div>
+                  <div className="rounded border p-2 space-y-1">
+                    <p className="font-medium text-foreground">Structured (with headers)</p>
+                    <pre className="text-muted-foreground leading-relaxed">name,type,stateCode{"\n"}Austin,city,TX{"\n"}Texas,state,TX</pre>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <Textarea
-              className="flex-1 min-h-[220px] font-mono text-xs resize-none"
-              placeholder={"Austin, TX\nDallas, TX\nHouston, TX\nDenver, CO\nPhoenix, AZ\n..."}
+              className="flex-1 min-h-[180px] font-mono text-xs resize-none"
+              placeholder={"Austin, TX\nDallas, TX\nHouston, TX\nDenver, CO\nPhoenix, AZ\n\nOR upload a CSV file above"}
               value={csvText}
-              onChange={e => setCsvText(e.target.value)}
+              onChange={e => { setCsvText(e.target.value); setCsvFileName(""); }}
               data-testid="textarea-csv-cities"
             />
+
+            {/* Parse result status */}
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {csvText.trim()
-                  ? csvParsed.length > 0
-                    ? `✓ ${csvParsed.length} cities parsed successfully`
-                    : "⚠ No valid cities found — check format (City, ST)"
-                  : "Paste city data above"}
-              </p>
+              {csvText.trim() ? (
+                csvParsed.length > 0 ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                    <CheckCircle2 className="size-3.5" />
+                    <span>
+                      {csvParsed.length} location{csvParsed.length !== 1 ? "s" : ""} parsed
+                      {csvMode === "structured" ? " (structured format)" : " (simple format)"}
+                      {csvParsed.filter(c => c.type === "state").length > 0 && ` · ${csvParsed.filter(c => c.type === "state").length} states`}
+                      {csvParsed.filter(c => c.type === "city").length > 0 && ` · ${csvParsed.filter(c => c.type === "city").length} cities`}
+                      {csvParsed.filter(c => c.type !== "state" && c.type !== "city").length > 0 && ` · ${csvParsed.filter(c => c.type !== "state" && c.type !== "city").length} other`}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-600">
+                    <AlertCircle className="size-3.5" />
+                    <span>No valid locations found — check format</span>
+                  </div>
+                )
+              ) : (
+                <p className="text-xs text-muted-foreground">Paste data above or upload a file</p>
+              )}
               {csvText.trim() && (
-                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => setCsvText("")}>Clear</Button>
+                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => { setCsvText(""); setCsvFileName(""); }}>Clear</Button>
               )}
             </div>
           </TabsContent>
