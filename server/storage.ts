@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, pool } from "./db";
 import { randomBytes } from "crypto";
 import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte, isNull, lt, lte } from "drizzle-orm";
 import {
@@ -58,7 +58,20 @@ export async function deleteAgency(id: string): Promise<void> {
 }
 
 export async function getAgencyAccounts(agencyId: string): Promise<Account[]> {
-  return db.select().from(accounts).where(eq(accounts.agencyId, agencyId)).orderBy(asc(accounts.name));
+  // Use raw SQL to avoid Drizzle compiled-schema issues in production
+  const res = await pool.query(
+    `SELECT * FROM accounts WHERE agency_id = $1 ORDER BY name ASC`,
+    [agencyId]
+  );
+  // Map snake_case columns back to camelCase to match Account type
+  return res.rows.map((r: any) => ({
+    ...r,
+    agencyId: r.agency_id,
+    clientStatus: r.client_status,
+    reportToken: r.report_token,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Account[];
 }
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
