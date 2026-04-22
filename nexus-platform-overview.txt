@@ -1,0 +1,288 @@
+NEXUS BY SPOTON RESULTS
+Platform Overview & Full Feature Canonical
+============================================================
+
+
+WHAT IS NEXUS?
+--------------
+Nexus is a white-label programmatic SEO platform built exclusively for
+marketing agencies. It automates the creation, hosting, scoring, and
+management of thousands of location-specific service pages — pages like
+"Credit Card Processing in Austin, TX" — so agencies can scale local SEO
+for their clients without scaling headcount.
+
+Agencies manage all their clients from one dashboard. Each client gets
+their own branded presence, served on their own domain, with no Nexus
+branding visible to the public.
+
+
+THE CORE PROMISE
+----------------
+"Scale Local SEO Without Scaling Headcount."
+
+Nexus lets agencies deliver human-quality, AI-speed content — turning
+one service + one location list into tens of thousands of unique,
+indexable pages that rank in local searches.
+
+
+HOW IT WORKS (CORE WORKFLOW)
+-----------------------------
+1. Agency connects a client website and sets up their brand profile,
+   services, and target locations.
+2. Nexus AI generates unique content variations for 8 key page sections
+   (Hero, Intro, Why Choose Us, Process, FAQ, Trust Signals, CTA, Footer).
+3. The Bulk Generator combines services × locations to produce thousands
+   of unique pages instantly.
+4. Every page is automatically scored 0–100 for quality and assigned a tier.
+5. Only Tier 1 and Tier 2 pages make it into the sitemap.
+6. Top Tier 1 pages are submitted directly to the Google Indexing API.
+7. Underperforming pages are automatically demoted. Digests go to clients
+   every Monday at 8 AM.
+
+
+KEY FEATURES
+============
+
+
+1. WHITE-LABEL MULTI-TENANT DASHBOARD
+--------------------------------------
+- Manage unlimited client websites from one admin panel
+- Each client has their own brand profile, voice, tone, and color settings
+- No Nexus branding exposed to end clients or the public
+- Role-based access: agency admin and client views
+
+
+2. CLOUDFLARE WORKER PROXY
+---------------------------
+- Client pages are served directly on the client's own domain
+  (e.g., client.com/pages/plumbing-in-austin-tx)
+- Sub-100ms response times globally via Cloudflare's edge network
+- No separate hosting setup required for the client
+
+
+3. AI CONTENT ENGINE
+---------------------
+- Multi-provider AI failover (OpenAI → Anthropic → Perplexity)
+- Generates 8 unique content sections per page:
+    • Hero / headline
+    • Intro / overview
+    • Why Choose Us
+    • Our Process
+    • FAQ (with schema markup)
+    • Trust Signals / Social Proof
+    • Call-to-Action
+    • Footer copy
+- Content is stored in Variation Banks — a library of AI-written snippets
+  that are mixed and rotated to ensure no two pages are identical
+
+
+4. BULK PAGE GENERATOR
+-----------------------
+- Select services + locations → click Generate → get thousands of pages
+- Blueprint templates (HTML) can be customized per industry
+- Background job processing with real-time progress tracking
+- "Run in Background" option — leave the dialog and check back later
+- Pages auto-save and auto-publish based on quality score
+
+
+5. QUALITY SCORING SYSTEM
+--------------------------
+- Every page is scored 0–100 automatically on generation
+- Scoring criteria: content depth, uniqueness, keyword relevance,
+  internal link density, FAQ presence, schema markup
+- Tier assignment:
+    • Tier 1 (score 80+): included in sitemap + Google Indexing API
+    • Tier 2 (score 50–79): included in sitemap, crawlable
+    • Tier 3 (score <50): excluded from sitemap, no-indexed
+- Threshold is adjustable per website
+
+
+6. DYNAMIC PAGE GENERATION
+---------------------------
+- Pages that haven't been explicitly generated are served on-the-fly
+  from variation banks when a visitor or bot hits the URL
+- Location intelligence: supports city, state, and city+state formats
+- Canonical redirect: abbreviated URLs redirect to full canonical slugs
+- On-the-fly pages are cached in memory (10-min TTL) for performance
+
+
+7. SITEMAP MANAGER
+-------------------
+- Automatically builds and maintains XML sitemaps
+- Only Tier 1 and Tier 2 pages are included
+- Sitemaps regenerate automatically after tier changes
+- Ping to Google on sitemap update
+
+
+8. GOOGLE INDEXING API INTEGRATION
+------------------------------------
+- Direct integration with Google's Indexing API via service account
+- New Tier 1 pages are submitted for indexing automatically
+- Manual "Request Indexing" available per page
+- Google Search Console (GSC) connection for impression/click data
+
+
+9. GOOGLE SEARCH CONSOLE INTEGRATION
+--------------------------------------
+- Connect GSC per website via service account
+- View impressions, clicks, CTR, and average position per page
+- Data pulled directly into the Nexus dashboard
+- Works even when a site has zero impressions yet (connection verified
+  via permissions check, not data presence)
+
+
+10. INTERNAL LINK ENGINE
+--------------------------
+- Automatically identifies and inserts contextual internal links
+  between related pages (e.g., service hub → city pages)
+- Distributes PageRank across the page graph
+- Configurable link density per page
+
+
+11. AUTOMATION PIPELINE (8 AUTOMATED WORKFLOWS)
+-------------------------------------------------
+Auto 1: Score pages immediately after generation
+Auto 2: Assign tiers based on score thresholds
+Auto 3: Regenerate sitemap after tier changes
+Auto 4: Submit new Tier 1 pages to Google Indexing API
+Auto 5: Promote high-traffic dynamic pages to permanent pages
+Auto 6: Auto-demote Tier 1 pages with zero impressions over threshold
+Auto 7: Weekly SEO health digest emailed to clients every Monday 8 AM
+Auto 8: Launch health scoring — flags sites that aren't ready to launch
+
+
+12. LEAD TRACKING & ROI DASHBOARD
+-----------------------------------
+- Built-in contact form tracking on every published page
+- Leads appear in the Leads & ROI dashboard in real time
+- AI-powered lead qualification: Hot / Warm / Cold scoring
+- AI drafts an email reply for each lead automatically
+- "Book Job" button links leads to a booking calendar
+- "Booked ✓" badge prevents double-booking
+- Lead source tracking: which page and which service drove the lead
+- Revenue attribution: link booked jobs to dollar value for ROI reporting
+
+
+13. CALL TRACKING
+------------------
+- Unique tracking phone numbers per campaign
+- Calls logged and attributed to the source page
+- Call duration and outcome tracking
+
+
+14. HUB PAGES
+--------------
+- State-level and service-level hub pages that aggregate city pages
+- Auto-generated navigation linking hub → city pages
+- Bulk generate hub pages across all states in one click
+- Background processing with auto-refresh on completion
+
+
+15. LAUNCH GOVERNOR & SAFETY RAILS
+------------------------------------
+- Pre-launch checklist: domain connected, brand profile complete,
+  variation banks ready, minimum page count met
+- Launch Health Score per website (0–100)
+- Prevents publishing if critical requirements aren't met
+- Churn reduction alerts: flags at-risk accounts based on activity
+
+
+16. ONBOARDING AUTOMATION
+--------------------------
+- Post-payment onboarding funnel tied to Stripe
+- When a customer pays, Nexus auto-creates their account, website,
+  and brand profile
+- Onboarding form collects brand details, services, and target locations
+- Admin Onboarding Test Tool to simulate the full flow
+
+
+17. ANALYTICS DASHBOARD
+------------------------
+- Dual-mode: aggregate (all pages) and per-page views
+- Impressions, clicks, CTR, average position (from GSC)
+- Page-level performance breakdown
+- Fallback hit tracking (which dynamic slugs are being requested)
+- Promotion threshold tracking (which dynamic pages should become permanent)
+
+
+18. ADMIN PANEL
+----------------
+- Full platform admin at /admin
+- Manage all agencies, websites, users, and accounts
+- Override-publish individual pages
+- Bulk operations: score, tier, publish, generate
+- Notification center for system events
+- API usage log across AI providers
+
+
+============================================================
+PRICING
+============================================================
+
+All plans include a 6-month minimum commitment.
+Annual billing saves 20%.
+
+LOCAL LAUNCH
+  $1,997/month  |  $1,597/month (annual)
+  - 1 client website
+  - Up to 5,000 pages
+  - Auto-scoring, Google Indexing, White-label dashboard
+  - Full automation pipeline
+  - Lead tracking & ROI dashboard
+
+FOUNDING AGENCY  ★ Limited — First 9 Slots Only
+  $1,497/month  |  Lifetime rate lock
+  - 1–3 client websites
+  - Up to 15,000 pages per site
+  - Everything in Local Launch
+  - Lifetime pricing guarantee
+  - Case study participation rights
+
+GROWTH BUNDLE  ★ Most Popular
+  $3,000/month  |  $2,400/month (annual)
+  - 3 client websites
+  - Up to 25,000 pages per site (75,000 pages total)
+  - Everything in Local Launch
+  - Priority support
+
+ENTERPRISE
+  From $5,000/month  |  Custom annual pricing
+  - 4+ client websites
+  - 100,000+ pages
+  - Dedicated account manager
+  - Custom integrations
+  - SLA guarantee
+  - White-glove onboarding
+
+============================================================
+TECH STACK (AGENCY-FACING)
+============================================================
+
+- Pages served via Cloudflare Workers (edge, global CDN)
+- AI content: OpenAI GPT-4o / Anthropic Claude / Perplexity (failover)
+- Google Indexing API + Google Search Console integration
+- Stripe for billing and subscription management
+- PostgreSQL database with full audit trail
+- XML sitemap auto-management
+- In-memory caching for sub-5ms page delivery after first load
+
+============================================================
+WHO IT'S FOR
+============================================================
+
+Nexus is purpose-built for:
+- Digital marketing agencies managing multiple local business clients
+- SEO agencies that want to offer programmatic local SEO as a service
+- Agencies tired of manually writing location pages one by one
+- Shops that want to add a high-margin, recurring SEO product to their stack
+
+It is NOT a consumer product. There is no self-serve signup.
+Every account is onboarded through SpotOn Results.
+
+============================================================
+CONTACT / LEARN MORE
+============================================================
+
+Website:  https://spotonnexus.com
+Platform: Nexus by SpotOn Results
+

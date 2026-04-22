@@ -12,3 +12,9 @@ id = "nCRu7HLEh9mgIfZa0Nsbm"
 uri = "file://nexus-canonicals.txt"
 type = "text"
 title = "Nexus Canonical URLs (480)"
+
+[[outputs]]
+id = "O7YP6B5tPytDifL-pO5fL"
+uri = "file://nexus-platform-overview.txt"
+type = "text"
+title = "Nexus Platform — Full Feature Canonical"
