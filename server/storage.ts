@@ -229,8 +229,18 @@ export async function getWebsite(id: string): Promise<Website | undefined> {
   return row;
 }
 
+// 5-minute cache for domain → website lookups (biggest perf win for crawler traffic)
+const websiteByDomainCache = new Map<string, { website: Website | undefined; exp: number }>();
+export function invalidateWebsiteDomainCache(domain: string) {
+  const stripped = domain.toLowerCase().replace(/^www\./, "");
+  websiteByDomainCache.delete(stripped);
+}
+
 export async function getWebsiteByDomain(domain: string): Promise<Website | undefined> {
   const stripped = domain.toLowerCase().replace(/^www\./, "");
+  const cached = websiteByDomainCache.get(stripped);
+  if (cached && Date.now() < cached.exp) return cached.website;
+
   const withWww = `www.${stripped}`;
   const [row] = await db.select().from(websites).where(
     or(
@@ -238,6 +248,7 @@ export async function getWebsiteByDomain(domain: string): Promise<Website | unde
       eq(sql`lower(${websites.domain})`, withWww),
     )
   );
+  websiteByDomainCache.set(stripped, { website: row, exp: Date.now() + 5 * 60_000 });
   return row;
 }
 

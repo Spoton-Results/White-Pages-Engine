@@ -10,7 +10,7 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 15,                         // right-sized for 2 vCPU; too many connections = contention
+  max: 25,                         // increased from 15 — domain cache reduces churn but crawler peaks need headroom
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   keepAlive: true,

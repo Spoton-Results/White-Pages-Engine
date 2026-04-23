@@ -85,6 +85,9 @@ export function invalidateSitemapCache(websiteId: string) {
 const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
 const PAGE_HTML_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAGE_HTML_CACHE_MAX = 300;
+
+// Rate-limit fallback promotion checks to once per minute per website (avoids DB flood under crawler traffic)
+const fallbackPromotionLastRun = new Map<string, number>();
 const PAGE_HTML_CACHE_EVICT = 60; // evict this many when full
 
 function pageHtmlCacheSet(key: string, value: { html: string; expiresAt: number }) {
@@ -434,13 +437,19 @@ async function tryGenerateDynamicPage(
     storage.logFallbackHit(website.id, slug).catch(() => {});
 
     // Auto 5: Check if this fallback URL has crossed the promotion threshold
-    setImmediate(async () => {
-      try {
-        const { checkFallbackPromotion, getAutomationSettings } = await import("./services/automation");
-        const autoSettings = getAutomationSettings(website);
-        await checkFallbackPromotion(website.id, slug, autoSettings);
-      } catch { /* never block */ }
-    });
+    // Rate-limited to once per minute per website to avoid DB saturation under crawler traffic
+    const now = Date.now();
+    const lastCheck = fallbackPromotionLastRun.get(website.id) ?? 0;
+    if (now - lastCheck > 60_000) {
+      fallbackPromotionLastRun.set(website.id, now);
+      setImmediate(async () => {
+        try {
+          const { checkFallbackPromotion, getAutomationSettings } = await import("./services/automation");
+          const autoSettings = getAutomationSettings(website);
+          await checkFallbackPromotion(website.id, slug, autoSettings);
+        } catch { /* never block */ }
+      });
+    }
 
     const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(syntheticPage, website.id);
     const html = renderPageHtml(syntheticPage, { contentHtml }, website, brand, { statePages, cityPages, stateDisplayName, siblingServices }, proxyPath || undefined);
