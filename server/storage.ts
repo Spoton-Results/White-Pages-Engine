@@ -170,7 +170,15 @@ export async function updateUser(id: string, data: Partial<InsertUser>): Promise
 // ─── Brand Profiles ───────────────────────────────────────────────────────────
 
 export async function getBrandProfiles(accountId: string): Promise<BrandProfile[]> {
-  return db.select().from(brandProfiles).where(eq(brandProfiles.accountId, accountId));
+  const cached = brandProfilesCache.get(accountId);
+  if (cached && Date.now() < cached.exp) return cached.data;
+  const data = await db.select().from(brandProfiles).where(eq(brandProfiles.accountId, accountId));
+  brandProfilesCache.set(accountId, { data, exp: Date.now() + NAV_CACHE_TTL });
+  return data;
+}
+
+export function invalidateBrandProfilesCache(accountId: string) {
+  brandProfilesCache.delete(accountId);
 }
 
 export async function getBrandProfile(id: string): Promise<BrandProfile | undefined> {
@@ -185,13 +193,15 @@ export async function createBrandProfile(data: InsertBrandProfile): Promise<Bran
 
 export async function updateBrandProfile(id: string, data: Partial<InsertBrandProfile>): Promise<BrandProfile | undefined> {
   const [row] = await db.update(brandProfiles).set({ ...data, updatedAt: new Date() }).where(eq(brandProfiles.id, id)).returning();
+  if (row) brandProfilesCache.delete(row.accountId);
   return row;
 }
 
 export async function deleteBrandProfile(id: string): Promise<void> {
   // websites.brandProfileId has no cascade — null out before deleting
   await db.update(websites).set({ brandProfileId: null }).where(eq(websites.brandProfileId, id));
-  await db.delete(brandProfiles).where(eq(brandProfiles.id, id));
+  const [deleted] = await db.delete(brandProfiles).where(eq(brandProfiles.id, id)).returning();
+  if (deleted) brandProfilesCache.delete(deleted.accountId);
 }
 
 // ─── Websites ─────────────────────────────────────────────────────────────────
@@ -838,6 +848,16 @@ const stateNavPagesCache = new Map<string, { data: {displayName: string, slug: s
 const cityPagesCache = new Map<string, { data: {displayName: string, slug: string}[]; exp: number }>();
 const NAV_CACHE_TTL = 5 * 60_000;
 
+// Sibling service pages cache — uncached LIKE query, 5-min TTL, key = websiteId:locationSuffix
+const siblingServiceCache = new Map<string, { data: {title: string, slug: string, serviceName: string | null}[]; exp: number }>();
+
+// Outbound links cache — queried on every page render, 10-min TTL (matches HTML cache TTL), key = pageId
+const outboundLinksCache = new Map<string, { data: {slug: string; anchorText: string; linkType: string}[]; exp: number }>();
+const OUTBOUND_LINKS_CACHE_TTL = 10 * 60_000;
+
+// Brand profiles cache — queried on every page render, 5-min TTL, key = accountId
+const brandProfilesCache = new Map<string, { data: BrandProfile[]; exp: number }>();
+
 export async function getStateNavPages(websiteId: string, serviceSlug?: string): Promise<{displayName: string, slug: string}[]> {
   const cacheKey = `${websiteId}:${serviceSlug ?? ""}`;
   const cached = stateNavPagesCache.get(cacheKey);
@@ -889,6 +909,14 @@ export async function getSiblingServicePages(websiteId: string, currentSlug: str
   const inIdx = currentSlug.lastIndexOf("-in-");
   if (inIdx === -1) return [];
   const locationSuffix = currentSlug.slice(inIdx); // e.g. "-in-dallas-tx"
+
+  const cacheKey = `${websiteId}:${locationSuffix}`;
+  const cached = siblingServiceCache.get(cacheKey);
+  if (cached && Date.now() < cached.exp) {
+    // Filter out the current page from the cached result
+    return cached.data.filter(r => r.slug !== currentSlug);
+  }
+
   const rows = await db.select({ title: pages.title, slug: pages.slug, serviceName: services.name })
     .from(pages)
     .leftJoin(services, eq(pages.serviceId, services.id))
@@ -896,11 +924,12 @@ export async function getSiblingServicePages(websiteId: string, currentSlug: str
       eq(pages.websiteId, websiteId),
       eq(pages.status, "published"),
       sql`${pages.slug} LIKE ${"%" + locationSuffix}`,
-      sql`${pages.id} != ${currentPageId}`,
     ))
     .orderBy(asc(services.name), asc(pages.title))
-    .limit(20);
-  return rows.map(r => ({ title: r.title, slug: r.slug, serviceName: r.serviceName ?? null }));
+    .limit(21); // fetch one extra so we have room to exclude current
+  const result = rows.map(r => ({ title: r.title, slug: r.slug, serviceName: r.serviceName ?? null }));
+  siblingServiceCache.set(cacheKey, { data: result, exp: Date.now() + NAV_CACHE_TTL });
+  return result.filter(r => r.slug !== currentSlug);
 }
 
 export async function getCityPagesForState(websiteId: string, stateCode: string): Promise<{displayName: string, slug: string}[]> {
@@ -1331,6 +1360,9 @@ export async function saveInternalLinks(
 export async function getOutboundLinksForPage(pageId: string): Promise<Array<{
   slug: string; anchorText: string; linkType: string;
 }>> {
+  const cached = outboundLinksCache.get(pageId);
+  if (cached && Date.now() < cached.exp) return cached.data;
+
   const rows = await db.execute(sql`
     SELECT p.slug, il.anchor_text AS "anchorText", il.link_type AS "linkType"
     FROM internal_links il
@@ -1339,7 +1371,13 @@ export async function getOutboundLinksForPage(pageId: string): Promise<Array<{
       AND p.status = 'published'
     ORDER BY il.link_type
   `);
-  return (rows as any).rows ?? [];
+  const data = (rows as any).rows ?? [];
+  outboundLinksCache.set(pageId, { data, exp: Date.now() + OUTBOUND_LINKS_CACHE_TTL });
+  return data;
+}
+
+export function invalidateOutboundLinksCache(pageId: string) {
+  outboundLinksCache.delete(pageId);
 }
 
 // Get pages eligible for internal linking (has both serviceId + locationId)
