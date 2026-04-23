@@ -24,7 +24,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { db } from "./db";
-import { eq as dEq, desc, like } from "drizzle-orm";
+import { eq as dEq, and as dAnd, desc, like } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
@@ -6965,7 +6965,7 @@ healthScore is 0-100. priority must be "critical", "important", or "nice-to-have
     try {
       if (phase === 4) {
         // Advance pending → submitted then run auto-create
-        await db.update(onboardingSubmissions).set({ status: "submitted", submittedAt: new Date() } as any).where(sql`id=${submissionId} AND status='pending'`);
+        await db.update(onboardingSubmissions).set({ status: "submitted", submittedAt: new Date() } as any).where(dAnd(dEq(onboardingSubmissions.id, submissionId), dEq(onboardingSubmissions.status as any, "pending")));
         const { processOnboardingSubmission } = await import("./services/onboarding");
         const result = await processOnboardingSubmission(submissionId);
         return res.json(result);
