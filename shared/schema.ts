@@ -241,6 +241,9 @@ export const pages = pgTable("pages", {
   duplicateFlag: boolean("duplicate_flag").default(false),
   duplicateOfSlug: varchar("duplicate_of_slug", { length: 500 }),
   duplicateSimilarity: decimal("duplicate_similarity", { precision: 5, scale: 4 }),
+  trustScore: integer("trust_score"),
+  evidenceScore: integer("evidence_score"),
+  contentQualityScore: integer("content_quality_score"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

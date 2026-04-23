@@ -77,10 +77,13 @@ async function runBackgroundStartup() {
       exec(`ALTER TABLE sitemaps
               ADD COLUMN IF NOT EXISTS xml_content TEXT`),
       exec(`ALTER TABLE pages
-              ADD COLUMN IF NOT EXISTS gsc_submitted_at    TIMESTAMP,
-              ADD COLUMN IF NOT EXISTS duplicate_flag      BOOLEAN     DEFAULT false,
-              ADD COLUMN IF NOT EXISTS duplicate_of_slug   VARCHAR(500),
-              ADD COLUMN IF NOT EXISTS duplicate_similarity DECIMAL(5,4)`),
+              ADD COLUMN IF NOT EXISTS gsc_submitted_at       TIMESTAMP,
+              ADD COLUMN IF NOT EXISTS duplicate_flag          BOOLEAN     DEFAULT false,
+              ADD COLUMN IF NOT EXISTS duplicate_of_slug       VARCHAR(500),
+              ADD COLUMN IF NOT EXISTS duplicate_similarity     DECIMAL(5,4),
+              ADD COLUMN IF NOT EXISTS trust_score             INTEGER,
+              ADD COLUMN IF NOT EXISTS evidence_score          INTEGER,
+              ADD COLUMN IF NOT EXISTS content_quality_score   INTEGER`),
       exec(`ALTER TABLE websites
               ADD COLUMN IF NOT EXISTS protection_mode        BOOLEAN DEFAULT false,
               ADD COLUMN IF NOT EXISTS protection_expires_at  TIMESTAMP,

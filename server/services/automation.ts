@@ -109,11 +109,32 @@ export async function triggerPostGenerationScoring(
 
   console.log(`[auto1] Starting post-generation scoring for ${website.domain}`);
   try {
-    const { scorePageContent } = await import("./scoring");
+    const { scorePageContent, buildTrustInputs, buildEvidenceInputs, computeTrustScore, computeEvidenceScore } = await import("./scoring");
     const blueprint = (website.settings as any)?.defaultBlueprintId
       ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
       : null;
     const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? settings.tier1Threshold;
+
+    // Pre-load brand profile once for the entire scoring run
+    const websiteFull = await storage.getWebsite(websiteId);
+    const brandProfile = websiteFull?.brandProfileId
+      ? await storage.getBrandProfile(websiteFull.brandProfileId).catch(() => null) ?? null
+      : null;
+
+    // Per-run caches to avoid duplicate DB lookups for shared services/locations
+    const serviceCache = new Map<string, any>();
+    const locationCache = new Map<string, any>();
+
+    const resolveService = async (sid: string | null) => {
+      if (!sid) return null;
+      if (!serviceCache.has(sid)) serviceCache.set(sid, await storage.getService(sid).catch(() => null));
+      return serviceCache.get(sid) ?? null;
+    };
+    const resolveLocation = async (lid: string | null) => {
+      if (!lid) return null;
+      if (!locationCache.has(lid)) locationCache.set(lid, await storage.getLocation(lid).catch(() => null));
+      return locationCache.get(lid) ?? null;
+    };
 
     // Score all unscored pages in batches
     let scored = 0;
@@ -124,10 +145,24 @@ export async function triggerPostGenerationScoring(
         try {
           const version = await storage.getActivePageVersion(p.id);
           const banks = await storage.getVariationBanks(websiteId, p.title.split(" in ")[0] || "");
+          const html = version?.contentHtml || "";
           const scoreResult = scorePageContent(
-            version?.contentHtml || "", p.metaDescription || "", p.title, p.wordCount || 0, banks, minScoreForTier1,
+            html, p.metaDescription || "", p.title, p.wordCount || 0, banks, minScoreForTier1,
           );
           await storage.updatePageScore(p.id, scoreResult.total, scoreResult as any, scoreResult.recommendedTier);
+
+          // E-E-A-T scoring (additive — runs on same pass as quality scoring)
+          try {
+            const [service, location] = await Promise.all([
+              resolveService(p.serviceId),
+              resolveLocation(p.locationId),
+            ]);
+            const trustScore = computeTrustScore(buildTrustInputs(brandProfile, html));
+            const evidenceScore = computeEvidenceScore(buildEvidenceInputs(service, location, brandProfile, html));
+            const contentQualityScore = scoreResult.total;
+            await storage.updatePageEEATScores(p.id, { trustScore, evidenceScore, contentQualityScore });
+          } catch { /* E-E-A-T scoring is non-fatal — legacy score is already saved */ }
+
           scored++;
         } catch { /* skip — never block */ }
       }
@@ -168,6 +203,63 @@ export async function triggerPostGenerationScoring(
     }
   } catch (err) {
     console.error(`[auto1] Post-generation scoring failed for ${website.domain}:`, err);
+  }
+}
+
+// ─── E-E-A-T Batch Rescore (Rollout) ─────────────────────────────────────────
+// Scores existing published pages that already have qualityScore but are missing
+// the new E-E-A-T columns. Processes up to `batchSize` pages per call so it can
+// be run incrementally without blowing up memory or runtime.
+
+export async function batchRescoreEEAT(
+  websiteId: string,
+  website: { id: string; domain: string; settings?: any },
+  batchSize = 200,
+): Promise<{ rescored: number }> {
+  console.log(`[eeat-rescore] Starting batch E-E-A-T rescore for ${website.domain} (batch=${batchSize})`);
+  try {
+    const { buildTrustInputs, buildEvidenceInputs, computeTrustScore, computeEvidenceScore } = await import("./scoring");
+
+    const websiteFull = await storage.getWebsite(websiteId);
+    const brandProfile = websiteFull?.brandProfileId
+      ? await storage.getBrandProfile(websiteFull.brandProfileId).catch(() => null) ?? null
+      : null;
+
+    const serviceCache = new Map<string, any>();
+    const locationCache = new Map<string, any>();
+    const resolveService = async (sid: string | null) => {
+      if (!sid) return null;
+      if (!serviceCache.has(sid)) serviceCache.set(sid, await storage.getService(sid).catch(() => null));
+      return serviceCache.get(sid) ?? null;
+    };
+    const resolveLocation = async (lid: string | null) => {
+      if (!lid) return null;
+      if (!locationCache.has(lid)) locationCache.set(lid, await storage.getLocation(lid).catch(() => null));
+      return locationCache.get(lid) ?? null;
+    };
+
+    const pages = await storage.getUnEEATScoredPages(websiteId, batchSize);
+    let rescored = 0;
+    for (const p of pages) {
+      try {
+        const version = await storage.getActivePageVersion(p.id);
+        const html = version?.contentHtml || "";
+        const [service, location] = await Promise.all([
+          resolveService(p.serviceId),
+          resolveLocation(p.locationId),
+        ]);
+        const trustScore = computeTrustScore(buildTrustInputs(brandProfile, html));
+        const evidenceScore = computeEvidenceScore(buildEvidenceInputs(service, location, brandProfile, html));
+        const contentQualityScore = (p as any).qualityScore ?? 0;
+        await storage.updatePageEEATScores(p.id, { trustScore, evidenceScore, contentQualityScore });
+        rescored++;
+      } catch { /* skip — never block */ }
+    }
+    console.log(`[eeat-rescore] Rescored ${rescored} pages for ${website.domain}`);
+    return { rescored };
+  } catch (err) {
+    console.error(`[eeat-rescore] Batch rescore failed for ${website.domain}:`, err);
+    return { rescored: 0 };
   }
 }
 

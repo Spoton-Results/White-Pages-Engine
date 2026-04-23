@@ -961,6 +961,18 @@ export async function getAllLeads(limit = 100, offset = 0): Promise<Lead[]> {
 
 // ─── Tier & Score Management ──────────────────────────────────────────────────
 
+export async function updatePageEEATScores(
+  pageId: string,
+  scores: { trustScore: number; evidenceScore: number; contentQualityScore: number },
+): Promise<void> {
+  await db.update(pages).set({
+    trustScore: scores.trustScore,
+    evidenceScore: scores.evidenceScore,
+    contentQualityScore: scores.contentQualityScore,
+    updatedAt: new Date(),
+  } as any).where(eq(pages.id, pageId));
+}
+
 export async function updatePageScore(
   pageId: string,
   qualityScore: number,
@@ -1025,11 +1037,24 @@ export async function getPagesByTier(websiteId: string, tier: number, limit: num
     .offset(offset);
 }
 
-export async function getUnscoredPages(websiteId: string, limit = 500): Promise<Array<{id: string; wordCount: number | null; metaDescription: string | null; title: string; tier: number}>> {
+export async function getUnscoredPages(websiteId: string, limit = 500): Promise<Array<{id: string; wordCount: number | null; metaDescription: string | null; title: string; tier: number; serviceId: string | null; locationId: string | null}>> {
   return db
-    .select({ id: pages.id, wordCount: pages.wordCount, metaDescription: pages.metaDescription, title: pages.title, tier: pages.tier as any })
+    .select({ id: pages.id, wordCount: pages.wordCount, metaDescription: pages.metaDescription, title: pages.title, tier: pages.tier as any, serviceId: pages.serviceId as any, locationId: pages.locationId as any })
     .from(pages)
     .where(and(eq(pages.websiteId, websiteId), eq(pages.status, "published"), isNull(pages.qualityScore)))
+    .limit(limit) as any;
+}
+
+export async function getUnEEATScoredPages(websiteId: string, limit = 200): Promise<Array<{id: string; wordCount: number | null; metaDescription: string | null; title: string; tier: number; serviceId: string | null; locationId: string | null}>> {
+  return db
+    .select({ id: pages.id, wordCount: pages.wordCount, metaDescription: pages.metaDescription, title: pages.title, tier: pages.tier as any, serviceId: pages.serviceId as any, locationId: pages.locationId as any })
+    .from(pages)
+    .where(and(
+      eq(pages.websiteId, websiteId),
+      eq(pages.status, "published" as any),
+      sql`${pages.qualityScore} IS NOT NULL`,
+      sql`trust_score IS NULL`,
+    ))
     .limit(limit) as any;
 }
 
@@ -1080,13 +1105,21 @@ export async function bulkSetPageTier(websiteId: string, tier: number, filters: 
 }
 
 export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number; promotedSlugs: string[] }> {
+  // Dual-gate: E-E-A-T gate for pages that have all 3 new scores; legacy qualityScore gate for the rest.
   const result = await db.execute(sql`
     UPDATE pages
     SET tier = 1, updated_at = NOW()
     WHERE website_id = ${websiteId}
       AND status = 'published'
-      AND quality_score >= ${tierThreshold}
       AND tier != 1
+      AND (
+        -- E-E-A-T path: all three new scores present and meeting thresholds
+        (trust_score IS NOT NULL AND evidence_score IS NOT NULL AND content_quality_score IS NOT NULL
+         AND trust_score >= 75 AND evidence_score >= 70 AND content_quality_score >= 65)
+        OR
+        -- Legacy path: no new scores yet, use qualityScore gate
+        (trust_score IS NULL AND quality_score IS NOT NULL AND quality_score >= ${tierThreshold})
+      )
     RETURNING slug
   `);
   const rows = (result as any).rows ?? [];
@@ -1094,14 +1127,21 @@ export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: numb
 }
 
 export async function bulkSetTier3(websiteId: string, scoreThreshold: number): Promise<{ demoted: number }> {
+  // Dual-gate: E-E-A-T gate for pages with new scores; legacy qualityScore gate for the rest.
   const result = await db.execute(sql`
     UPDATE pages
     SET tier = 3, updated_at = NOW()
     WHERE website_id = ${websiteId}
       AND status = 'published'
-      AND quality_score IS NOT NULL
-      AND quality_score < ${scoreThreshold}
       AND tier != 3
+      AND (
+        -- E-E-A-T path: new scores present but fail Tier 2 thresholds
+        (trust_score IS NOT NULL AND evidence_score IS NOT NULL AND content_quality_score IS NOT NULL
+         AND (trust_score < 55 OR evidence_score < 50 OR content_quality_score < 50))
+        OR
+        -- Legacy path: no new scores, use qualityScore gate
+        (trust_score IS NULL AND quality_score IS NOT NULL AND quality_score < ${scoreThreshold})
+      )
     RETURNING id
   `);
   return { demoted: (result as any).rowCount ?? 0 };

@@ -5270,6 +5270,20 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
     });
   });
 
+  // E-E-A-T batch rescore — runs on existing published pages missing trust/evidence scores.
+  // Safe to call repeatedly; processes up to batchSize pages per request.
+  app.post("/api/websites/:id/eeat-rescore", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+    const batchSize = Math.min(Number(req.body?.batchSize ?? 200), 500);
+    res.json({ ok: true, message: `E-E-A-T rescore started (batch=${batchSize})` });
+    setImmediate(async () => {
+      const { batchRescoreEEAT } = await import("./services/automation");
+      await batchRescoreEEAT(websiteId, website, batchSize).catch(() => {});
+    });
+  });
+
   // Bulk apply tier assignments based on scores
   app.post("/api/websites/:id/apply-tiers", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;

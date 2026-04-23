@@ -205,6 +205,170 @@ export function scorePageContent(
   };
 }
 
+// ── E-E-A-T Scoring ───────────────────────────────────────────────────────────
+
+export interface TrustScoreInputs {
+  hasLegalName:       boolean;
+  hasPhone:           boolean;
+  hasEmail:           boolean;
+  hasAddress:         boolean;
+  hasSocialLinks:     boolean;
+  hasYearsInBusiness: boolean;
+  hasLicenses:        boolean;
+  hasReviewSummary:   boolean;
+  contentHasTrust:    boolean;
+  contentHasFaq:      boolean;
+}
+
+export interface EvidenceScoreInputs {
+  hasNeighborhoods:    boolean;
+  hasNotableAreas:     boolean;
+  hasServiceAreas:     boolean;
+  hasProcessSteps:     boolean;
+  hasPricingNotes:     boolean;
+  hasCommonQuestions:  boolean;
+  hasTypicalTimeline:  boolean;
+  contentHasNextSteps: boolean;
+}
+
+const NEXT_STEP_SIGNALS = [
+  "contact us", "call us", "get a quote", "schedule", "book", "request",
+  "next step", "what happens", "after you contact", "we will", "our team will",
+  "within 24", "within 48", "same day", "free estimate", "free consultation",
+];
+
+function contentHasNextSteps(html: string): boolean {
+  const lower = html.toLowerCase();
+  return NEXT_STEP_SIGNALS.some(s => lower.includes(s));
+}
+
+/**
+ * TrustScore (0–100): business identity clarity + proof assets + content trust signals.
+ * Inputs are derived from brand profile customFields and page content.
+ */
+export function computeTrustScore(inputs: TrustScoreInputs): number {
+  let score = 0;
+
+  // Business identity (50 pts)
+  if (inputs.hasLegalName)   score += 15;
+  if (inputs.hasPhone)       score += 10;
+  if (inputs.hasEmail)       score += 10;
+  if (inputs.hasAddress)     score += 10;
+  if (inputs.hasSocialLinks) score += 5;
+
+  // Proof assets (30 pts)
+  if (inputs.hasYearsInBusiness) score += 10;
+  if (inputs.hasLicenses)        score += 10;
+  if (inputs.hasReviewSummary)   score += 10;
+
+  // Content trust signals (20 pts)
+  if (inputs.contentHasTrust) score += 15;
+  if (inputs.contentHasFaq)   score += 5;
+
+  return Math.min(score, 100);
+}
+
+/**
+ * EvidenceScore (0–100): local specificity + service specificity + expectation clarity.
+ * Inputs are derived from location/service metadata and page content.
+ */
+export function computeEvidenceScore(inputs: EvidenceScoreInputs): number {
+  let score = 0;
+
+  // Local specificity (35 pts)
+  if (inputs.hasNeighborhoods) score += 15;
+  if (inputs.hasNotableAreas)  score += 10;
+  if (inputs.hasServiceAreas)  score += 10;
+
+  // Service specificity (35 pts)
+  if (inputs.hasProcessSteps)    score += 15;
+  if (inputs.hasPricingNotes)    score += 10;
+  if (inputs.hasCommonQuestions) score += 10;
+
+  // Expectation clarity (30 pts)
+  if (inputs.hasTypicalTimeline)  score += 15;
+  if (inputs.contentHasNextSteps) score += 15;
+
+  return Math.min(score, 100);
+}
+
+/**
+ * Build TrustScoreInputs from a brand profile record and page content HTML.
+ * brandProfile may be null (e.g. website has no linked profile yet).
+ */
+export function buildTrustInputs(
+  brandProfile: { phone?: string | null; email?: string | null; address?: string | null; socialLinks?: any; customFields?: any } | null,
+  contentHtml: string,
+): TrustScoreInputs {
+  const cf = (brandProfile?.customFields as any) ?? {};
+  const sl = (brandProfile?.socialLinks as any) ?? {};
+  return {
+    hasLegalName:       Boolean(cf.legalBusinessName),
+    hasPhone:           Boolean(brandProfile?.phone),
+    hasEmail:           Boolean(brandProfile?.email),
+    hasAddress:         Boolean(brandProfile?.address),
+    hasSocialLinks:     Object.keys(sl).length > 0,
+    hasYearsInBusiness: Boolean(cf.yearsInBusiness),
+    hasLicenses:        Array.isArray(cf.licensesCerts) ? cf.licensesCerts.length > 0 : Boolean(cf.licensesCerts),
+    hasReviewSummary:   Boolean(cf.reviewSummary),
+    contentHasTrust:    hasProofTrust(contentHtml),
+    contentHasFaq:      hasFaq(contentHtml),
+  };
+}
+
+/**
+ * Build EvidenceScoreInputs from service and location records plus page content.
+ * service/location may be null when page is a hub or non-city page.
+ */
+export function buildEvidenceInputs(
+  service:  { metadata?: any } | null,
+  location: { metadata?: any } | null,
+  brand:    { customFields?: any } | null,
+  contentHtml: string,
+): EvidenceScoreInputs {
+  const sm = (service?.metadata  as any) ?? {};
+  const lm = (location?.metadata as any) ?? {};
+  const cf = (brand?.customFields as any) ?? {};
+  return {
+    hasNeighborhoods:   Array.isArray(lm.neighborhoods) ? lm.neighborhoods.length > 0 : Boolean(lm.neighborhoods),
+    hasNotableAreas:    Array.isArray(lm.notableAreas)  ? lm.notableAreas.length  > 0 : Boolean(lm.notableAreas),
+    hasServiceAreas:    Array.isArray(cf.serviceAreas)  ? cf.serviceAreas.length  > 0 : Boolean(cf.serviceAreas),
+    hasProcessSteps:    Array.isArray(sm.processSteps)  ? sm.processSteps.length  > 0 : Boolean(sm.processSteps),
+    hasPricingNotes:    Boolean(sm.pricingNotes),
+    hasCommonQuestions: Array.isArray(sm.commonQuestions) ? sm.commonQuestions.length > 0 : Boolean(sm.commonQuestions),
+    hasTypicalTimeline: Boolean(sm.typicalTimeline),
+    contentHasNextSteps: contentHasNextSteps(contentHtml),
+  };
+}
+
+/**
+ * Assign an E-E-A-T tier given the three new scores plus an optional check of
+ * whether the variation bank has the key section types (process / businessProof / localProof).
+ *
+ * Falls back to legacy qualityScore-based tiering when any new score is missing.
+ */
+export function assignEEATTier(
+  trustScore: number | null | undefined,
+  evidenceScore: number | null | undefined,
+  contentQualityScore: number | null | undefined,
+  bankFlags?: { hasProcess: boolean; hasBusinessProof: boolean; hasLocalProof: boolean },
+  legacyQualityScore?: number | null,
+  legacyTier1Threshold = 80,
+): 1 | 2 | 3 {
+  if (trustScore == null || evidenceScore == null || contentQualityScore == null) {
+    // Legacy path — no new scores yet
+    if (legacyQualityScore == null) return 3;
+    return legacyQualityScore >= legacyTier1Threshold ? 1 : legacyQualityScore >= 55 ? 2 : 3;
+  }
+
+  const blueprintOk1 = !bankFlags || (bankFlags.hasProcess && bankFlags.hasBusinessProof && bankFlags.hasLocalProof);
+  const blueprintOk2 = !bankFlags || bankFlags.hasProcess;
+
+  if (trustScore >= 75 && evidenceScore >= 70 && contentQualityScore >= 65 && blueprintOk1) return 1;
+  if (trustScore >= 55 && evidenceScore >= 50 && contentQualityScore >= 50 && blueprintOk2) return 2;
+  return 3;
+}
+
 // ── Bank completeness helper ──────────────────────────────────────────────────
 
 export function computeBankCompleteness(
