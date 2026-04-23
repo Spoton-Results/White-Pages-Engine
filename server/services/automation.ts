@@ -200,9 +200,34 @@ export async function triggerPostGenerationScoring(
         const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
         scheduleSitemapRegen(websiteId, website.domain, canonBase, settings.sitemapRegenDebounceMinutes * 60 * 1000);
       }
+
+      // Auto 9: Rebuild internal link graph whenever pages are published (fire-and-forget)
+      if (promoted > 0) {
+        rebuildInternalLinks(websiteId, website.domain).catch(() => {});
+      }
     }
   } catch (err) {
     console.error(`[auto1] Post-generation scoring failed for ${website.domain}:`, err);
+  }
+}
+
+// ─── Auto 9: Internal link graph rebuild ─────────────────────────────────────
+// Called automatically after any tier promotion — rebuilds the full link graph
+// for the website. Non-blocking; safe to fire-and-forget.
+
+async function rebuildInternalLinks(websiteId: string, domain: string): Promise<void> {
+  console.log(`[auto9] Rebuilding internal link graph for ${domain}`);
+  try {
+    const { buildInternalLinks } = await import("./internal-links");
+    const allPages = await storage.getPagesForLinking(websiteId, 100000);
+    const links = buildInternalLinks(websiteId, allPages as any);
+    await storage.clearInternalLinks(websiteId);
+    const saved = await storage.saveInternalLinks(links);
+    // Clear per-page outbound-link caches so rendered pages pick up new links
+    storage.clearAllOutboundLinksCache();
+    console.log(`[auto9] Internal links rebuilt — ${saved} links for ${domain}`);
+  } catch (err) {
+    console.error(`[auto9] Internal link rebuild failed for ${domain}:`, err);
   }
 }
 
@@ -530,6 +555,10 @@ export async function runAutoScoringJob(
           const pPath = (website.settings as any)?.proxyPath || "";
           const canonBase = pDomain ? `https://${pDomain}${pPath}` : undefined;
           scheduleSitemapRegen(website.id, website.domain, canonBase, settings.sitemapRegenDebounceMinutes * 60 * 1000);
+        }
+        // Auto 9: Rebuild internal link graph whenever pages are published (fire-and-forget)
+        if (promoted > 0) {
+          rebuildInternalLinks(website.id, website.domain).catch(() => {});
         }
       } else {
         console.log(`[auto1] Draft mode — Auto 3 (sitemap regen) and Auto 4 (Google indexing) suppressed for ${website.domain}`);

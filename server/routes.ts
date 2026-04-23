@@ -186,7 +186,7 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
 
   // Kick off all independent queries in parallel
   const stateNavPromise = storage.getStateNavPages(websiteId, pageServiceSlug);
-  const siblingPromise = (page.pageType === "service_city" && page.slug)
+  const siblingPromise = ((page.pageType === "service_city" || page.pageType === "industry_city") && page.slug)
     ? storage.getSiblingServicePages(websiteId, page.slug, page.id)
     : Promise.resolve([] as NavData["siblingServices"]);
 
@@ -829,20 +829,38 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
     });
   </script>
 
-  ${(navData.siblingServices ?? []).length > 0 ? `
+  ${(() => {
+    // Split stored internal links by type so each section is purpose-built
+    const allLinks = navData.internalLinks ?? [];
+    const crossServiceLinks = allLinks.filter(l => l.linkType === "cross-service");
+    const hubToCityLinks    = allLinks.filter(l => l.linkType === "hub-to-city");
+    // state-nav links are deliberately omitted — "Explore All Locations" already covers them
+
+    // "More Services" — prefer live sibling query; fall back to stored cross-service links
+    const siblings = navData.siblingServices ?? [];
+    const moreServicesItems: { label: string; slug: string }[] = siblings.length > 0
+      ? siblings.map(p => ({
+          label: p.serviceName ?? p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim(),
+          slug: p.slug,
+        }))
+      : crossServiceLinks.map(l => ({ label: l.anchorText, slug: l.slug }));
+
+    const sections: string[] = [];
+
+    if (moreServicesItems.length > 0) {
+      sections.push(`
   <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
     <div class="loc-nav">
       <div class="loc-nav-title">More Services${locationFromTitle ? ` in ${locationFromTitle}` : ""}</div>
       <div class="loc-grid">
-        ${(navData.siblingServices ?? []).map(p => {
-          const svcName = p.serviceName ?? p.title.replace(/\s+in\s+.+$/i, "").replace(/\s*\|.*$/, "").trim();
-          return `<a href="${proxyPath}/${p.slug}">${svcName}</a>`;
-        }).join("\n        ")}
+        ${moreServicesItems.map(p => `<a href="${proxyPath}/${p.slug}">${p.label}</a>`).join("\n        ")}
       </div>
     </div>
-  </div>` : ""}
+  </div>`);
+    }
 
-  ${navData.cityPages.length > 0 ? `
+    if (navData.cityPages.length > 0) {
+      sections.push(`
   <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
     <div class="loc-nav">
       <div class="loc-nav-title">Cities in ${navData.stateDisplayName || "this state"}</div>
@@ -850,9 +868,22 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
         ${navData.cityPages.map(p => `<a href="${proxyPath}/${p.slug}">${p.displayName}</a>`).join("\n        ")}
       </div>
     </div>
-  </div>` : ""}
+  </div>`);
+    } else if (hubToCityLinks.length > 0) {
+      // On state_hub pages with no live cityPages yet — use stored hub-to-city links
+      sections.push(`
+  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
+    <div class="loc-nav">
+      <div class="loc-nav-title">Cities We Serve</div>
+      <div class="loc-grid">
+        ${hubToCityLinks.map(l => `<a href="${proxyPath}/${l.slug}">${l.anchorText}</a>`).join("\n        ")}
+      </div>
+    </div>
+  </div>`);
+    }
 
-  ${navData.statePages.length > 0 ? `
+    if (navData.statePages.length > 0) {
+      sections.push(`
   <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
     <div class="loc-nav">
       <div class="loc-nav-title">Explore All Locations</div>
@@ -860,17 +891,11 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
         ${navData.statePages.map(p => `<a href="${proxyPath}/${p.slug}">${p.displayName}</a>`).join("\n        ")}
       </div>
     </div>
-  </div>` : ""}
+  </div>`);
+    }
 
-  ${(navData.internalLinks ?? []).length > 0 ? `
-  <div style="max-width:900px;margin:0 auto;padding:0 1.5rem">
-    <div class="loc-nav">
-      <div class="loc-nav-title">Related Pages</div>
-      <div class="loc-grid">
-        ${(navData.internalLinks ?? []).map(l => `<a href="${proxyPath}/${l.slug}">${l.anchorText}</a>`).join("\n        ")}
-      </div>
-    </div>
-  </div>` : ""}
+    return sections.join("\n");
+  })()}
 
   <footer>
     &copy; ${new Date().getFullYear()} ${mainWebsiteUrl

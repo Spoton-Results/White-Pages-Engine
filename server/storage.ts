@@ -1380,6 +1380,10 @@ export function invalidateOutboundLinksCache(pageId: string) {
   outboundLinksCache.delete(pageId);
 }
 
+export function clearAllOutboundLinksCache(): void {
+  outboundLinksCache.clear();
+}
+
 // Get pages eligible for internal linking (has both serviceId + locationId)
 export async function getPagesForLinking(websiteId: string, limit = 5000): Promise<Array<{
   id: string; title: string; slug: string; pageType: string | null;
