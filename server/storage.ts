@@ -799,13 +799,25 @@ export async function getStaleRunningJobs(): Promise<typeof generationJobs.$infe
   );
 }
 
+// State data is a static reference table (~50 rows, never changes at runtime) — cache permanently
+const stateDataByAbbrCache = new Map<string, StateData | undefined>();
+const stateDataByNameCache = new Map<string, StateData | undefined>();
+
 export async function getStateDataByAbbr(abbr: string): Promise<StateData | undefined> {
-  const [row] = await db.select().from(stateData).where(eq(stateData.stateAbbr, abbr.toUpperCase()));
+  const key = abbr.toUpperCase();
+  if (stateDataByAbbrCache.has(key)) return stateDataByAbbrCache.get(key);
+  const [row] = await db.select().from(stateData).where(eq(stateData.stateAbbr, key));
+  stateDataByAbbrCache.set(key, row);
+  if (row) stateDataByNameCache.set(row.stateName.toLowerCase(), row);
   return row;
 }
 
 export async function getStateDataByName(name: string): Promise<StateData | undefined> {
+  const key = name.toLowerCase();
+  if (stateDataByNameCache.has(key)) return stateDataByNameCache.get(key);
   const [row] = await db.select().from(stateData).where(ilike(stateData.stateName, name));
+  stateDataByNameCache.set(key, row);
+  if (row) stateDataByAbbrCache.set(row.stateAbbr.toUpperCase(), row);
   return row;
 }
 
@@ -821,7 +833,16 @@ export async function insertStateData(data: InsertStateData): Promise<StateData>
 
 // ─── Page Navigation (states/cities footer grid) ─────────────────────────────
 
+// 5-minute caches for nav data — called on every public page render (crawler traffic)
+const stateNavPagesCache = new Map<string, { data: {displayName: string, slug: string}[]; exp: number }>();
+const cityPagesCache = new Map<string, { data: {displayName: string, slug: string}[]; exp: number }>();
+const NAV_CACHE_TTL = 5 * 60_000;
+
 export async function getStateNavPages(websiteId: string, serviceSlug?: string): Promise<{displayName: string, slug: string}[]> {
+  const cacheKey = `${websiteId}:${serviceSlug ?? ""}`;
+  const cached = stateNavPagesCache.get(cacheKey);
+  if (cached && Date.now() < cached.exp) return cached.data;
+
   const [hubPages, states] = await Promise.all([
     db.select({ title: pages.title, slug: pages.slug })
       .from(pages)
@@ -860,6 +881,7 @@ export async function getStateNavPages(websiteId: string, serviceSlug?: string):
       }
     }
   }
+  stateNavPagesCache.set(cacheKey, { data: result, exp: Date.now() + NAV_CACHE_TTL });
   return result;
 }
 
@@ -882,6 +904,10 @@ export async function getSiblingServicePages(websiteId: string, currentSlug: str
 }
 
 export async function getCityPagesForState(websiteId: string, stateCode: string): Promise<{displayName: string, slug: string}[]> {
+  const cacheKey = `${websiteId}:${stateCode}`;
+  const cached = cityPagesCache.get(cacheKey);
+  if (cached && Date.now() < cached.exp) return cached.data;
+
   const rows = await db.select({ title: pages.title, slug: pages.slug })
     .from(pages)
     .innerJoin(locations, eq(pages.locationId, locations.id))
@@ -892,10 +918,12 @@ export async function getCityPagesForState(websiteId: string, stateCode: string)
       sql`${pages.pageType} != 'state_hub'`,
     ))
     .orderBy(asc(pages.title));
-  return rows.map(r => {
+  const result = rows.map(r => {
     const afterIn = r.title.match(/\bin\s+(.+?)(?:,|\s*\|)/i);
     return { displayName: afterIn ? afterIn[1].trim() : r.title, slug: r.slug };
   });
+  cityPagesCache.set(cacheKey, { data: result, exp: Date.now() + NAV_CACHE_TTL });
+  return result;
 }
 
 // ─── Leads ────────────────────────────────────────────────────────────────────

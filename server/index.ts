@@ -309,7 +309,23 @@ async function runBackgroundStartup() {
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
       for (const j of bulkJobs) {
-        await updateGenerationJob(j.id, { status: "pending", startedAt: null });
+        // Death-spiral guard: if this job has been interrupted many times or crashed very recently,
+        // it is likely causing OOM on every restart. Cancel it rather than re-entering the loop.
+        const settings = j.settings as any;
+        const interruptCount = (settings._interruptCount ?? 0) + 1;
+        const newSettings = { ...settings, _interruptCount: interruptCount };
+
+        const startedAt = j.startedAt ? new Date(j.startedAt).getTime() : 0;
+        const minutesSinceStart = startedAt ? (Date.now() - startedAt) / 60_000 : Infinity;
+        const isCrashLoop = interruptCount > 4 || minutesSinceStart < 5;
+
+        if (isCrashLoop) {
+          console.warn(`[startup] Job ${j.id} is in a crash loop (restarted ${interruptCount}x, last crash ${minutesSinceStart.toFixed(1)} min ago) — auto-cancelling to prevent OOM`);
+          await updateGenerationJob(j.id, { status: "cancelled", completedAt: new Date(), settings: newSettings as any });
+          continue;
+        }
+
+        await updateGenerationJob(j.id, { status: "pending", startedAt: null, settings: newSettings as any });
         setImmediate(() => {
           runBulkBackgroundJob(j.id).catch(err => {
             console.error("[startup] Failed to resume bulk job", j.id, err);

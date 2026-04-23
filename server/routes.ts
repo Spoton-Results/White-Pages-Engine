@@ -84,11 +84,11 @@ export function invalidateSitemapCache(websiteId: string) {
 // SIZE-CAPPED: max 300 entries (~30 MB). When full, oldest 60 entries are evicted.
 const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
 const PAGE_HTML_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const PAGE_HTML_CACHE_MAX = 300;
+const PAGE_HTML_CACHE_MAX = 150;  // reduced from 300 — each entry is ~100KB HTML, 150 ≈ 15MB max
 
 // Rate-limit fallback promotion checks to once per minute per website (avoids DB flood under crawler traffic)
 const fallbackPromotionLastRun = new Map<string, number>();
-const PAGE_HTML_CACHE_EVICT = 60; // evict this many when full
+const PAGE_HTML_CACHE_EVICT = 30; // evict this many when full (reduced proportionally)
 
 function pageHtmlCacheSet(key: string, value: { html: string; expiresAt: number }) {
   if (pageHtmlCache.size >= PAGE_HTML_CACHE_MAX) {
@@ -4407,10 +4407,7 @@ Return ONLY valid JSON (no markdown):
       const xfh = ((req.headers["x-forwarded-host"] as string) || "").split(",")[0].trim();
       const host = (nexusHost || cfCustomHostname || xfh || req.hostname || (req.headers.host || "").split(":")[0]).toLowerCase().trim();
 
-      // Log custom domain requests for non-asset, non-API paths
-      if (host && !PLATFORM_SUFFIXES.some(s => host.endsWith(s)) && host !== "localhost" && host !== "0.0.0.0" && !req.path.startsWith("/api/") && !req.path.startsWith("/src/") && !req.path.startsWith("/@") && !req.path.startsWith("/__") && !req.path.match(/\.(js|css|png|ico|svg|woff2?)$/)) {
-        console.log(`[domain-mw] host=${host} path=${req.path}`);
-      }
+      // (verbose per-request domain logging removed — too noisy under crawler traffic)
 
       // Skip Replit platform domains, localhost, landing page root, and internal asset paths
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
@@ -4470,7 +4467,6 @@ Return ONLY valid JSON (no markdown):
         }
       }
       const rawSlug = effectivePath.replace(/^\//, "").replace(/\/$/, "");
-      console.log(`[domain-mw] storedProxy=${JSON.stringify(storedProxyPath)} effectiveLinkBase=${JSON.stringify(effectiveLinkBase)} rawSlug=${rawSlug}`);
 
       // Sitemap — serve inline (Google does not follow redirects for sitemaps)
       if (rawSlug === "sitemap.xml" || rawSlug === "sitemap_index.xml" || rawSlug === "sitemap") {
