@@ -21,7 +21,10 @@ function buildPageContext(
   location?: Location,
   service?: Service,
   industry?: Industry,
+  bankSnippets?: Array<{ section: string; snippet: string }>,
 ): PageContext {
+  const cf = (brand?.customFields as any) ?? {};
+  const sm = (service?.metadata as any) ?? {};
   return {
     blueprintName: blueprint.name,
     pageType: blueprint.pageType,
@@ -40,9 +43,18 @@ function buildPageContext(
     serviceSlug: service?.slug,
     industryName: industry?.name,
     brandName: brand?.name || website.name,
+    brandLegalName: cf.legalBusinessName || undefined,
     brandDescription: brand?.description || undefined,
     brandPhone: brand?.phone || undefined,
     brandTagline: brand?.tagline || undefined,
+    brandVoiceAndTone: brand?.voiceAndTone || undefined,
+    brandYearsInBusiness: cf.yearsInBusiness || undefined,
+    brandLicenses: Array.isArray(cf.licensesCerts) && cf.licensesCerts.length ? cf.licensesCerts : undefined,
+    brandReviewSummary: cf.reviewSummary || undefined,
+    serviceDescription: service?.description || undefined,
+    serviceProcessSteps: Array.isArray(sm.processSteps) && sm.processSteps.length ? sm.processSteps : undefined,
+    serviceTimeline: sm.typicalTimeline || undefined,
+    bankSnippets: bankSnippets?.length ? bankSnippets : undefined,
     primaryKeyword: service?.keywords?.[0] || service?.name,
     secondaryKeywords: service?.keywords?.slice(1) || [],
   };
@@ -176,7 +188,26 @@ export async function runGenerationJob(
     // Process one page combination, returns true if passed
     const processCombo = async (combo: typeof combinations[number]): Promise<void> => {
       try {
-        const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry);
+        // Load variation bank snippets for this service — inject 1 random variation per section
+        // as style anchors so the AI generates content consistent with approved copy
+        let bankSnippets: Array<{ section: string; snippet: string }> | undefined;
+        if (combo.service) {
+          try {
+            const banks = await db.getVariationBanks(task.websiteId, combo.service.name);
+            if (banks.length > 0) {
+              bankSnippets = banks
+                .filter(b => Array.isArray(b.variations) && (b.variations as string[]).length > 0)
+                .map(b => {
+                  const vars = b.variations as string[];
+                  const snippet = vars[Math.floor(Math.random() * vars.length)];
+                  return { section: b.sectionName, snippet };
+                })
+                .slice(0, 6); // cap at 6 sections to keep prompt size reasonable
+            }
+          } catch { /* bank load failure is non-fatal */ }
+        }
+
+        const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry, bankSnippets);
 
         log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
 
