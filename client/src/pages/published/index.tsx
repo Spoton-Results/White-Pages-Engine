@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp, Pencil, Layers, Send, Filter } from "lucide-react";
+import { Search, ExternalLink, Eye, Trash2, RefreshCw, Globe, Copy, Info, ChevronDown, ChevronUp, Pencil, Layers, Send, Filter, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
@@ -40,6 +40,7 @@ export default function PublishedPagesPage() {
   const [tierPreviewing, setTierPreviewing] = useState(false);
   const [tierSaving, setTierSaving] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [eeaRescoring, setEeaRescoring] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<{ tier: number; minScore: number | null; maxScore: number | null; reason: string } | null>(null);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [showDrafts, setShowDrafts] = useState(false);
@@ -208,12 +209,28 @@ export default function PublishedPagesPage() {
     } finally { setGoogleSubmitting(false); }
   };
 
+  const rescoreEEAT = async () => {
+    if (!selectedWebsite) return;
+    setEeaRescoring(true);
+    try {
+      await api.post<any>(`/api/websites/${selectedWebsite}/eeat-rescore`, { batchSize: 500 });
+      toast({ title: "E-E-A-T rescore started", description: "Trust, Evidence, and Quality scores are being updated in the background. Refresh in ~30 seconds." });
+    } catch (e: any) {
+      toast({ title: "Rescore failed", description: e.message, variant: "destructive" });
+    } finally { setEeaRescoring(false); }
+  };
+
+  const eeaScoreColor = (n: number | null | undefined) =>
+    n == null ? "text-muted-foreground" :
+    n >= 70 ? "text-emerald-600" :
+    n >= 50 ? "text-amber-600" : "text-red-500";
+
   const activeFilterCount = [typeFilter, scoreMinFilter, scoreMaxFilter, tierFilter].filter(Boolean).length;
   const pages = (pagesData?.pages || []).filter((p: any) => {
     if (searchText && !p.title.toLowerCase().includes(searchText.toLowerCase()) && !p.slug.includes(searchText.toLowerCase())) return false;
     if (typeFilter && p.pageType !== typeFilter) return false;
     if (tierFilter && String(p.tier ?? "") !== tierFilter) return false;
-    const score = p.publishScore != null ? parseFloat(p.publishScore) * 100 : null;
+    const score = p.qualityScore ?? null;
     if (scoreMinFilter && (score == null || score < parseFloat(scoreMinFilter))) return false;
     if (scoreMaxFilter && (score == null || score > parseFloat(scoreMaxFilter))) return false;
     return true;
@@ -262,6 +279,9 @@ export default function PublishedPagesPage() {
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setShowBulkTier(true)} data-testid="button-bulk-set-tier">
                   <Layers className="size-4 mr-2" />Bulk Set Tier
+                </Button>
+                <Button variant="outline" size="sm" onClick={rescoreEEAT} disabled={eeaRescoring} data-testid="button-eeat-rescore" title="Recompute Trust, Evidence & Quality scores for all pages">
+                  <Zap className="size-4 mr-2" />{eeaRescoring ? "Rescoring…" : "E-E-A-T Rescore"}
                 </Button>
                 <Button variant="outline" size="sm" onClick={submitToGoogle} disabled={googleSubmitting} data-testid="button-submit-google">
                   <Send className="size-4 mr-2" />{googleSubmitting ? "Submitting…" : "Submit T1 to Google"}
@@ -443,7 +463,7 @@ export default function PublishedPagesPage() {
                   <TableHead>Title / Slug</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Tier</TableHead>
-                  <TableHead className="text-right">Score</TableHead>
+                  <TableHead className="text-right" title="Quality · Trust · Evidence (0–100 each)">E-E-A-T</TableHead>
                   <TableHead className="text-right">Words</TableHead>
                   <TableHead>Published</TableHead>
                   <TableHead className="w-[140px]"></TableHead>
@@ -517,12 +537,20 @@ export default function PublishedPagesPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {page.publishScore != null
-                        ? <span className={`text-sm font-medium ${parseFloat(page.publishScore) >= 0.7 ? "text-emerald-600" : "text-amber-600"}`}>
-                            {(parseFloat(page.publishScore) * 100).toFixed(0)}%
-                          </span>
-                        : <span className="text-sm text-muted-foreground">—</span>
-                      }
+                      {page.qualityScore == null && page.trustScore == null ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <div className="inline-flex items-center gap-1.5 text-[11px] font-mono" data-testid={`eeat-scores-${page.id}`}>
+                          <span className="text-muted-foreground/60">Q</span>
+                          <span className={`font-bold ${eeaScoreColor(page.qualityScore)}`} title="Quality Score">{page.qualityScore ?? "—"}</span>
+                          <span className="text-muted-foreground/40">·</span>
+                          <span className="text-muted-foreground/60">T</span>
+                          <span className={`font-bold ${eeaScoreColor(page.trustScore)}`} title="Trust Score">{page.trustScore ?? "—"}</span>
+                          <span className="text-muted-foreground/40">·</span>
+                          <span className="text-muted-foreground/60">E</span>
+                          <span className={`font-bold ${eeaScoreColor(page.evidenceScore)}`} title="Evidence Score">{page.evidenceScore ?? "—"}</span>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right text-sm">{page.wordCount?.toLocaleString()}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
