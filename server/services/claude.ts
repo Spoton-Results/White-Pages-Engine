@@ -42,9 +42,18 @@ export interface PageContext {
   serviceSlug?: string;
   industryName?: string;
   brandName?: string;
+  brandLegalName?: string;
   brandDescription?: string;
   brandPhone?: string;
   brandTagline?: string;
+  brandVoiceAndTone?: string;
+  brandYearsInBusiness?: string | number;
+  brandLicenses?: string[];
+  brandReviewSummary?: string;
+  serviceDescription?: string;
+  serviceProcessSteps?: string[];
+  serviceTimeline?: string;
+  bankSnippets?: Array<{ section: string; snippet: string }>;
   primaryKeyword?: string;
   secondaryKeywords?: string[];
   intentType?: string;
@@ -134,6 +143,18 @@ function extractJson(raw: string): string | null {
 // bugs (unescaped quotes in href/class attributes, etc.).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Phrases that signal generic AI output — explicitly forbidden
+const FORBIDDEN_PHRASES = [
+  "serving the community", "committed to excellence", "your trusted partner",
+  "look no further", "second to none", "top-notch", "state-of-the-art",
+  "cutting-edge", "industry-leading", "world-class", "comprehensive solutions",
+  "tailored to your needs", "we pride ourselves", "we are proud to",
+  "our dedicated team", "seamless experience", "delighted to serve",
+  "customer satisfaction is our priority", "going above and beyond",
+  "one-stop shop", "best-in-class", "unparalleled service",
+  "we are here to help", "don't hesitate to contact",
+];
+
 function buildFirstPassPrompt(ctx: PageContext): string {
   const title = interpolate(ctx.titleTemplate, ctx);
   const h1 = interpolate(ctx.h1Template, ctx);
@@ -147,7 +168,35 @@ function buildFirstPassPrompt(ctx: PageContext): string {
     .map((s: any) => `- ${s.name}: ${s.description || s.name}`)
     .join("\n");
 
-  return `You are an expert local SEO content writer. Generate a high-quality, locally-specific white-pages article.
+  // Build business facts block — only include lines with actual data
+  const businessFacts: string[] = [];
+  if (ctx.brandLegalName) businessFacts.push(`Legal business name: ${ctx.brandLegalName}`);
+  if (ctx.brandYearsInBusiness) businessFacts.push(`Years in business: ${ctx.brandYearsInBusiness}`);
+  if (ctx.brandLicenses?.length) businessFacts.push(`Licenses / credentials: ${ctx.brandLicenses.join(", ")}`);
+  if (ctx.brandReviewSummary) businessFacts.push(`Customer review summary: ${ctx.brandReviewSummary}`);
+  if (ctx.brandPhone) businessFacts.push(`Contact phone: ${ctx.brandPhone}`);
+  if (ctx.brandDescription) businessFacts.push(`Brand description: ${ctx.brandDescription}`);
+  if (ctx.brandTagline) businessFacts.push(`Brand tagline: "${ctx.brandTagline}"`);
+
+  // Build service facts block
+  const serviceFacts: string[] = [];
+  if (ctx.serviceDescription) serviceFacts.push(`Service overview: ${ctx.serviceDescription}`);
+  if (ctx.serviceProcessSteps?.length) {
+    serviceFacts.push(`How it works:\n${ctx.serviceProcessSteps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
+  }
+  if (ctx.serviceTimeline) serviceFacts.push(`Typical timeline: ${ctx.serviceTimeline}`);
+
+  // Build bank snippets block — inject 1 variation per section as a style anchor
+  const snippetBlock = ctx.bankSnippets?.length
+    ? `APPROVED CONTENT SNIPPETS (use these as style anchors — paraphrase and expand, do not copy verbatim):
+${ctx.bankSnippets.map(s => `[${s.section}]: ${s.snippet}`).join("\n\n")}`
+    : "";
+
+  const voiceDirective = ctx.brandVoiceAndTone
+    ? `BRAND VOICE: ${ctx.brandVoiceAndTone}`
+    : "BRAND VOICE: Direct, helpful, specific. Avoid corporate filler.";
+
+  return `You are a specialist content writer creating a locally-targeted service page. Your job is to write content that reads like it was written by someone who actually knows this business and this area — NOT like generic SEO filler.
 
 PAGE DETAILS:
 - Title: ${title}
@@ -155,26 +204,36 @@ PAGE DETAILS:
 - Meta Description: ${metaDesc}
 - Slug: ${slug}
 - Page Type: ${ctx.pageType}
-- Target Word Count: ${ctx.requiredWordCount}+
-${ctx.locationName ? `- Location: ${ctx.locationName}, ${ctx.locationState || ""}` : ""}
+- Target Word Count: ${ctx.requiredWordCount}+ words
+${ctx.locationName ? `- Location: ${ctx.locationName}${ctx.locationState ? `, ${ctx.locationState}` : ""}` : ""}
 ${ctx.serviceName ? `- Service: ${ctx.serviceName}` : ""}
 ${ctx.industryName ? `- Industry: ${ctx.industryName}` : ""}
-${ctx.brandName ? `- Brand: ${ctx.brandName}` : ""}
-${ctx.brandTagline ? `- Tagline: ${ctx.brandTagline}` : ""}
 ${ctx.primaryKeyword ? `- Primary Keyword: ${ctx.primaryKeyword}` : ""}
 ${ctx.secondaryKeywords?.length ? `- Secondary Keywords: ${ctx.secondaryKeywords.join(", ")}` : ""}
 
-REQUIRED SECTIONS:
-${sections || "- Introduction\n- Service Overview\n- Why Choose Us\n- Service Area\n- FAQ\n- Call to Action"}
+${businessFacts.length ? `BUSINESS FACTS (weave these naturally into the content — do not list them as bullet points):\n${businessFacts.map(f => `• ${f}`).join("\n")}` : ""}
 
-INSTRUCTIONS:
-1. Write at least ${ctx.requiredWordCount} words of unique, informative content
-2. Include specific local details about ${ctx.locationName || "the area"} — neighborhoods, landmarks, local context
-3. Use the primary keyword naturally 3-5 times
-4. Each section must be distinct and add real value — no thin filler content
-5. Write in a helpful, professional tone${ctx.brandTagline ? ` aligned with "${ctx.brandTagline}"` : ""}
-6. Include specific local signals: street references, local landmarks, community context
-${ctx.faqEnabled ? "7. Include a FAQ section with 4-6 relevant questions and detailed answers" : ""}
+${serviceFacts.length ? `SERVICE SPECIFICS (use these to explain the actual process and set expectations):\n${serviceFacts.map(f => `• ${f}`).join("\n")}` : ""}
+
+${snippetBlock}
+
+${voiceDirective}
+
+REQUIRED SECTIONS:
+${sections || "- Introduction\n- How It Works\n- Why Choose This Business\n- Local Service Area\n- FAQ\n- Call to Action"}
+
+WRITING RULES — READ CAREFULLY:
+1. Write at least ${ctx.requiredWordCount} words. Every section must be substantive — no padding.
+2. Be specific about ${ctx.locationName || "the area"}: reference actual neighborhoods, cross-streets, landmarks, or local context that people there would recognize.
+3. Use the primary keyword naturally 3-5 times. Do not keyword-stuff.
+4. Every claim must feel grounded in this specific business. Use the business facts above.
+5. Explain the actual service process step by step — what happens after the customer contacts them, what the timeline looks like, what they should expect.
+6. Set clear expectations: timeframes, what is included, what happens next.
+${ctx.faqEnabled ? "7. Include a FAQ section with 4-6 questions that real customers actually ask — answer each one specifically, not generically." : ""}
+
+ABSOLUTELY FORBIDDEN — do not use any of these phrases or their variants:
+${FORBIDDEN_PHRASES.map(p => `"${p}"`).join(", ")}
+Also forbidden: any phrase that could apply to any business in any city. Every sentence must be specific to ${ctx.brandName || "this business"} in ${ctx.locationName || "this location"}.
 
 IMPORTANT — OUTPUT FORMAT:
 Use EXACTLY these delimiters (four equals signs, name, four equals signs). Output nothing outside them.
