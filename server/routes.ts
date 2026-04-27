@@ -4564,8 +4564,6 @@ Return ONLY valid JSON (no markdown):
       ];
       const isLandingSpaPath = isLandingDomain && (
         isStaticAsset ||
-        req.path === "/" ||
-        req.path === "" ||
         req.path === "/welcome" ||
         req.path.startsWith("/onboard/") ||
         req.path.startsWith("/dashboard/") ||
