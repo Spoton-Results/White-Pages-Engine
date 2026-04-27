@@ -45,6 +45,7 @@ export const accounts = pgTable("accounts", {
   status: accountStatusEnum("status").notNull().default("active"),
   clientStatus: varchar("client_status", { length: 20 }).notNull().default("active"),
   reportToken: varchar("report_token", { length: 64 }),
+  monthlySeoSpend: decimal("monthly_seo_spend", { precision: 10, scale: 2 }).default("0"),
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -252,7 +253,7 @@ export const pages = pgTable("pages", {
 
 export const onboardingSubmissions = pgTable("onboarding_submissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  token: varchar("token", { length: 64 }).notNull().unique(),
+  token: varchar("token", { length: 64 }).notNull(),
   stripeSessionId: varchar("stripe_session_id", { length: 255 }),
   stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
   planType: varchar("plan_type", { length: 50 }),
@@ -368,7 +369,7 @@ export const contentVariationBanks = pgTable("content_variation_banks", {
 export const stateData = pgTable("state_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   stateName: text("state_name").notNull(),
-  stateAbbr: text("state_abbr").notNull().unique(),
+  stateAbbr: text("state_abbr").notNull(),
   population: integer("population").notNull(),
   businessCount: integer("business_count").notNull(),
   majorCities: jsonb("major_cities").notNull().default([]),
@@ -592,7 +593,7 @@ export const callTrackingNumbers = pgTable("call_tracking_numbers", {
   pageId: varchar("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
   serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
   locationId: varchar("location_id").references(() => locations.id, { onDelete: "set null" }),
-  dynamicNumber: varchar("dynamic_number", { length: 20 }).notNull().unique(),
+  dynamicNumber: varchar("dynamic_number", { length: 20 }).notNull(),
   forwardToNumber: varchar("forward_to_number", { length: 20 }).notNull(),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),

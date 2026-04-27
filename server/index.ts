@@ -215,6 +215,11 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
       `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at DESC)`,
+      // Unique constraints moved out of Drizzle schema to avoid interactive db:push prompts
+      // during deployment (DB had _key suffix, Drizzle expects _unique — name mismatch).
+      `CREATE UNIQUE INDEX IF NOT EXISTS state_data_state_abbr_unique              ON state_data(state_abbr)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS call_tracking_numbers_dynamic_number_unique ON call_tracking_numbers(dynamic_number)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS onboarding_submissions_token_unique        ON onboarding_submissions(token)`,
       // ── Partial indexes for published pages (billions-scale) ──────────────────
       // Partial indexes skip non-published rows entirely — ~10-100x smaller than full indexes.
       // Critical for COUNT, tier-filtering, scoring, and sitemap queries on large datasets.
