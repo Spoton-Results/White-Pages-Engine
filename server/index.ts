@@ -258,10 +258,17 @@ async function runBackgroundStartup() {
         'subdraw.com',
         'Subdraw',
         '70ec4b1c-80b2-4c17-9d22-f63275d21310',
-        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af"}'::jsonb,
+        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af","mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb,
         NOW(), NOW()
       )
       ON CONFLICT (domain) DO NOTHING
+    `);
+    // Always ensure subdraw.com root redirects to the real SubDraw marketing site.
+    await db.execute(sql`
+      UPDATE websites
+      SET settings = settings || '{"mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb
+      WHERE domain = 'subdraw.com'
+        AND (settings->>'mainWebsiteUrl') IS DISTINCT FROM 'https://subtrackers.spotonresults.com'
     `);
     console.log("[startup] subdraw.com website record ensured (idempotent).");
 

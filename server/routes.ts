@@ -4699,8 +4699,13 @@ Return ONLY valid JSON (no markdown):
         return res.send(robotsContent);
       }
 
-      // Root — serve a proper server-rendered landing page for the domain
+      // Root — if the website has a mainWebsiteUrl, redirect there (e.g. subdraw.com → subtrackers.spotonresults.com)
       if (!rawSlug) {
+        const mainWebsiteUrl = (website.settings as any)?.mainWebsiteUrl as string | undefined;
+        if (mainWebsiteUrl) {
+          res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400");
+          return res.redirect(301, mainWebsiteUrl);
+        }
         const [pages, brandProfiles, total] = await Promise.all([
           storage.getPages(website.id, { status: "published", limit: 60 }),
           storage.getBrandProfiles(website.accountId),
