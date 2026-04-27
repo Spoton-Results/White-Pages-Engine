@@ -251,6 +251,8 @@ async function runBackgroundStartup() {
 
     // Ensure subdraw.com has a website record (fallback if no subtrackers record existed to rename).
     // Placed under SpotOn Results account.
+    // No mainWebsiteUrl — subdraw.com only serves Nexus-generated SEO pages; landing/purchase
+    // is handled by a separate project.
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
@@ -258,17 +260,18 @@ async function runBackgroundStartup() {
         'subdraw.com',
         'Subdraw',
         '70ec4b1c-80b2-4c17-9d22-f63275d21310',
-        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af","mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb,
+        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af"}'::jsonb,
         NOW(), NOW()
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always ensure subdraw.com has correct settings — reset proxyPath to "" and set mainWebsiteUrl.
-    // Using unconditional merge so any stale value (e.g. proxyPath:"subdraw.com") is always fixed.
+    // Always fix subdraw.com settings: normalize proxyPath, remove stale mainWebsiteUrl redirect.
+    // The unconditional merge + key removal ensures the production DB is corrected on every boot.
     await db.execute(sql`
       UPDATE websites
-      SET settings = settings
-        || '{"proxyPath":"","parentDomain":"subdraw.com","mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb
+      SET settings = (settings
+        || '{"proxyPath":"","parentDomain":"subdraw.com"}'::jsonb)
+        - 'mainWebsiteUrl'
       WHERE domain = 'subdraw.com'
     `);
     console.log("[startup] subdraw.com website record ensured (idempotent).");
