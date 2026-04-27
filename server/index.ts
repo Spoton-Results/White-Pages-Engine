@@ -265,13 +265,13 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always fix subdraw.com settings: normalize proxyPath, remove stale mainWebsiteUrl redirect.
-    // The unconditional merge + key removal ensures the production DB is corrected on every boot.
+    // Always fix subdraw.com settings: normalize proxyPath and set mainWebsiteUrl to the
+    // SubDraw landing page (subtrackers.replit.app). Root requests redirect there; all
+    // SEO slugs (subdraw.com/<slug>) are served directly by Nexus.
     await db.execute(sql`
       UPDATE websites
-      SET settings = (settings
-        || '{"proxyPath":"","parentDomain":"subdraw.com"}'::jsonb)
-        - 'mainWebsiteUrl'
+      SET settings = settings
+        || '{"proxyPath":"","parentDomain":"subdraw.com","mainWebsiteUrl":"https://subtrackers.replit.app"}'::jsonb
       WHERE domain = 'subdraw.com'
     `);
     console.log("[startup] subdraw.com website record ensured (idempotent).");
