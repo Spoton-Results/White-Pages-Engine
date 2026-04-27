@@ -263,12 +263,13 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always ensure subdraw.com root redirects to the real SubDraw marketing site.
+    // Always ensure subdraw.com has correct settings — reset proxyPath to "" and set mainWebsiteUrl.
+    // Using unconditional merge so any stale value (e.g. proxyPath:"subdraw.com") is always fixed.
     await db.execute(sql`
       UPDATE websites
-      SET settings = settings || '{"mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb
+      SET settings = settings
+        || '{"proxyPath":"","parentDomain":"subdraw.com","mainWebsiteUrl":"https://subtrackers.spotonresults.com"}'::jsonb
       WHERE domain = 'subdraw.com'
-        AND (settings->>'mainWebsiteUrl') IS DISTINCT FROM 'https://subtrackers.spotonresults.com'
     `);
     console.log("[startup] subdraw.com website record ensured (idempotent).");
 

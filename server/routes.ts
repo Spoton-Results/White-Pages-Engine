@@ -4601,7 +4601,11 @@ Return ONLY valid JSON (no markdown):
       // If the stored proxyPath is an admin-preview-style path (starts with /sites/), ignore
       // it for slug extraction and fall back to detecting the prefix from the URL directly.
       const storedProxyPath = ((website.settings as any)?.proxyPath || "").replace(/\/$/, "");
-      const rawProxyPath = storedProxyPath.startsWith("/sites/") ? "" : storedProxyPath;
+      // Must start with "/" or be empty — bare domain-like values (e.g. "subdraw.com") are
+      // invalid and produce href="subdraw.com/slug" relative links that break navigation.
+      const rawProxyPath = (storedProxyPath.startsWith("/sites/") || (storedProxyPath && !storedProxyPath.startsWith("/")))
+        ? ""
+        : storedProxyPath;
       let effectivePath = req.path;
       let effectiveLinkBase = rawProxyPath; // used later as linkBaseOverride for renderPageHtml
       if (rawProxyPath && req.path.startsWith(rawProxyPath + "/")) {
