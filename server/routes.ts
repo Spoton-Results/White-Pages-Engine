@@ -908,6 +908,98 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 </html>`;
 }
 
+function renderDomainLandingHtml(opts: {
+  domain: string;
+  brandName: string;
+  tagline?: string | null;
+  description?: string | null;
+  primaryColor: string;
+  logoUrl?: string | null;
+  pages: { slug: string; title: string; metaDescription?: string | null }[];
+  totalPages: number;
+  proxyPath?: string;
+}): string {
+  const { domain, brandName, tagline, description, primaryColor, logoUrl, pages, totalPages, proxyPath = "" } = opts;
+  const canonical = `https://${domain}/`;
+  const metaDesc = description || tagline || `${brandName} — browse our full list of service pages.`;
+  const pageLinks = pages.slice(0, 60).map(p =>
+    `<li><a href="${proxyPath}/${p.slug}">${p.title}</a></li>`
+  ).join("\n          ");
+  const moreNote = totalPages > 60
+    ? `<p class="more-note">Showing 60 of ${totalPages} pages. <a href="${proxyPath}/sitemap.xml">View full sitemap</a>.</p>`
+    : "";
+  const schema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": brandName,
+    "url": canonical,
+    ...(description ? { "description": description } : {}),
+  });
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${brandName}${tagline ? ` | ${tagline}` : ""}</title>
+  <meta name="description" content="${metaDesc.replace(/"/g, "&quot;")}"/>
+  <link rel="canonical" href="${canonical}"/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="${canonical}"/>
+  <meta property="og:title" content="${brandName}${tagline ? ` | ${tagline}` : ""}"/>
+  <meta property="og:description" content="${metaDesc.replace(/"/g, "&quot;")}"/>
+  <script type="application/ld+json">${schema}</script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,-apple-system,sans-serif;color:#1f2937;background:#fff;line-height:1.6}
+    a{color:${primaryColor};text-decoration:none}
+    a:hover{text-decoration:underline}
+    .site-header{background:${primaryColor};color:#fff;padding:1.25rem 1.5rem;display:flex;align-items:center;gap:1rem}
+    .site-header h1{font-size:1.5rem;font-weight:700;color:#fff}
+    .site-header .tagline{font-size:.95rem;opacity:.85}
+    .logo{height:48px;width:auto;border-radius:4px}
+    .hero{background:#f9fafb;border-bottom:1px solid #e5e7eb;padding:3rem 1.5rem}
+    .hero-inner{max-width:900px;margin:0 auto}
+    .hero h2{font-size:1.75rem;font-weight:700;color:#111827;margin-bottom:.75rem}
+    .hero p{font-size:1.1rem;color:#4b5563;max-width:680px}
+    .content{max-width:900px;margin:0 auto;padding:2.5rem 1.5rem}
+    .content h3{font-size:1.2rem;font-weight:600;color:#111827;margin-bottom:1.25rem;padding-bottom:.5rem;border-bottom:2px solid ${primaryColor}}
+    .page-grid{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.5rem .75rem}
+    .page-grid li a{display:block;padding:.5rem .75rem;border-radius:6px;background:#f3f4f6;font-size:.95rem;transition:background .15s}
+    .page-grid li a:hover{background:#e5e7eb;text-decoration:none}
+    .more-note{margin-top:1.25rem;font-size:.875rem;color:#6b7280}
+    .more-note a{color:${primaryColor}}
+    .site-footer{margin-top:4rem;padding:1.5rem;text-align:center;font-size:.85rem;color:#9ca3af;border-top:1px solid #e5e7eb}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    ${logoUrl ? `<img src="${logoUrl}" alt="${brandName} logo" class="logo"/>` : ""}
+    <div>
+      <h1>${brandName}</h1>
+      ${tagline ? `<div class="tagline">${tagline}</div>` : ""}
+    </div>
+  </header>
+  ${description ? `
+  <section class="hero">
+    <div class="hero-inner">
+      <h2>${tagline || brandName}</h2>
+      <p>${description}</p>
+    </div>
+  </section>` : ""}
+  <div class="content">
+    <h3>Our Services</h3>
+    <ul class="page-grid">
+          ${pageLinks}
+    </ul>
+    ${moreNote}
+  </div>
+  <footer class="site-footer">
+    &copy; ${new Date().getFullYear()} ${brandName}. All rights reserved.
+  </footer>
+</body>
+</html>`;
+}
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // Session middleware runs ONLY on API routes — prevents it from:
   //   1. Hitting the Postgres session table on every public page request
@@ -4425,7 +4517,8 @@ Return ONLY valid JSON (no markdown):
     if (host === "subtrackers.spotonresults.com") {
       return res.redirect(301, "https://subtrackers.spotonresults.com/pages/");
     }
-    // spotonnexus.com — fall through to Vite/static so React landing page renders
+    // All other domains: fall through to domain middleware which serves the
+    // proper server-rendered landing page (or Vite admin SPA if no website record).
     return next();
   });
 
@@ -4458,8 +4551,6 @@ Return ONLY valid JSON (no markdown):
         "/onboarding-test", "/report/",
       ];
       const isLandingSpaPath = isLandingDomain && (
-        req.path === "/" ||
-        req.path === "" ||
         isStaticAsset ||
         req.path === "/welcome" ||
         req.path.startsWith("/onboard/") ||
@@ -4593,23 +4684,28 @@ Return ONLY valid JSON (no markdown):
         return res.send(robotsContent);
       }
 
-      // Root — show a simple page index for the domain
+      // Root — serve a proper server-rendered landing page for the domain
       if (!rawSlug) {
-        const pages = await storage.getPages(website.id, { status: "published", limit: 50 });
-        const total = await storage.getPageCount(website.id, "published");
-        const brand = (await storage.getBrandProfiles(website.accountId))[0];
-        const brandName = brand?.name || website.domain;
-        const primaryColor = brand?.primaryColor || "#2563eb";
-        const listHtml = (pages as any[]).map((p: any) =>
-          `<li><a href="/${p.slug}">${p.title}</a></li>`
-        ).join("\n");
-        const moreNote = total > 50 ? `<p style="color:#6b7280;font-size:.85rem">${total - 50} more pages available.</p>` : "";
-        return res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
-<title>${brandName}</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1.5rem;color:#1f2937}
-h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head>
-<body><h1>${brandName}</h1><p>Published pages on this domain:</p><ul>${listHtml}</ul>${moreNote}</body></html>`);
+        const [pages, brandProfiles, total] = await Promise.all([
+          storage.getPages(website.id, { status: "published", limit: 60 }),
+          storage.getBrandProfiles(website.accountId),
+          storage.getPageCount(website.id, "published"),
+        ]);
+        const brand = brandProfiles[0];
+        const html = renderDomainLandingHtml({
+          domain: website.domain,
+          brandName: brand?.name || website.domain,
+          tagline: brand?.tagline,
+          description: brand?.description,
+          primaryColor: brand?.primaryColor || "#2563eb",
+          logoUrl: brand?.logoUrl,
+          pages,
+          totalPages: total,
+          proxyPath: effectiveLinkBase || "",
+        });
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
+        return res.send(html);
       }
 
       // Serve a specific page by slug
