@@ -191,6 +191,10 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_status             ON pages(status)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at DESC)`,
+      // Covering index so ORDER BY updated_at LIMIT 20 is a true index-only scan (no heap fetches)
+      `CREATE INDEX IF NOT EXISTS idx_pages_recent_activity
+         ON pages(updated_at DESC)
+         INCLUDE (id, website_id, slug, title, status)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_website_id         ON pages(website_id)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag     ON pages(website_id, duplicate_flag)`,
       `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,

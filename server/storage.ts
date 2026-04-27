@@ -758,13 +758,28 @@ export async function getDashboardStats() {
   };
 }
 
+let _recentActivityCache: { data: { recentJobs: any[]; recentPages: any[] }; exp: number } | null = null;
+const RECENT_ACTIVITY_TTL = 60_000; // 60 seconds
+
 export async function getRecentActivity(limit = 20) {
+  if (_recentActivityCache && Date.now() < _recentActivityCache.exp) {
+    return _recentActivityCache.data;
+  }
   const [recentJobs, recentPages] = await Promise.all([
     db.select().from(generationJobs).orderBy(desc(generationJobs.createdAt)).limit(limit),
-    db.select({ id: pages.id, websiteId: pages.websiteId, slug: pages.slug, title: pages.title, status: pages.status, updatedAt: pages.updatedAt })
-      .from(pages).orderBy(desc(pages.updatedAt)).limit(limit),
+    db.execute(sql`
+      SELECT id, website_id AS "websiteId", slug, title, status, updated_at AS "updatedAt"
+      FROM pages
+      ORDER BY updated_at DESC
+      LIMIT ${limit}
+    `),
   ]);
-  return { recentJobs, recentPages };
+  const data = {
+    recentJobs,
+    recentPages: (recentPages as any).rows ?? [],
+  };
+  _recentActivityCache = { data, exp: Date.now() + RECENT_ACTIVITY_TTL };
+  return data;
 }
 
 // ─── Variation Banks ──────────────────────────────────────────────────────────
@@ -1337,10 +1352,12 @@ export async function getInternalLinkStats(websiteId: string): Promise<{
   totalLinks: number; pagesWithLinks: number; totalPublished: number;
   topLinkedPages: Array<{ title: string; slug: string; inboundCount: number }>;
 }> {
-  const [totalRes, withLinksRes, publishedRes] = await Promise.all([
+  // Use pre-computed publishedPages from websites table (maintained by DB trigger)
+  // instead of COUNT(*) FROM pages — avoids full table scan on millions of rows.
+  const [totalRes, withLinksRes, websiteRes] = await Promise.all([
     db.execute(sql`SELECT COUNT(*)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
     db.execute(sql`SELECT COUNT(DISTINCT from_page_id)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
-    db.execute(sql`SELECT COUNT(*)::int AS count FROM pages WHERE website_id = ${websiteId} AND status = 'published'`),
+    db.execute(sql`SELECT published_pages FROM websites WHERE id = ${websiteId}`),
   ]);
   const topRes = await db.execute(sql`
     SELECT p.title, p.slug, COUNT(*)::int AS "inboundCount"
@@ -1351,7 +1368,7 @@ export async function getInternalLinkStats(websiteId: string): Promise<{
   return {
     totalLinks: (totalRes as any).rows?.[0]?.count ?? 0,
     pagesWithLinks: (withLinksRes as any).rows?.[0]?.count ?? 0,
-    totalPublished: (publishedRes as any).rows?.[0]?.count ?? 0,
+    totalPublished: (websiteRes as any).rows?.[0]?.published_pages ?? 0,
     topLinkedPages: (topRes as any).rows ?? [],
   };
 }
