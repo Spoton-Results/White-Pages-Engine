@@ -923,8 +923,9 @@ function renderDomainLandingHtml(opts: {
   const { domain, brandName, tagline, description, primaryColor, logoUrl, pages, totalPages, proxyPath = "" } = opts;
   const canonical = `https://${domain}/`;
   const metaDesc = description || tagline || `${brandName} — browse our full list of service pages.`;
+  const hasPages = pages.length > 0;
   const pageLinks = pages.slice(0, 60).map(p =>
-    `<li><a href="${proxyPath}/${p.slug}">${p.title}</a></li>`
+    `<li><a href="${proxyPath}/${p.slug}">${p.title || p.slug}</a></li>`
   ).join("\n          ");
   const moreNote = totalPages > 60
     ? `<p class="more-note">Showing 60 of ${totalPages} pages. <a href="${proxyPath}/sitemap.xml">View full sitemap</a>.</p>`
@@ -969,6 +970,10 @@ function renderDomainLandingHtml(opts: {
     .page-grid li a:hover{background:#e5e7eb;text-decoration:none}
     .more-note{margin-top:1.25rem;font-size:.875rem;color:#6b7280}
     .more-note a{color:${primaryColor}}
+    .coming-soon{text-align:center;padding:4rem 1.5rem}
+    .coming-soon .cs-icon{font-size:3rem;margin-bottom:1rem}
+    .coming-soon h2{font-size:1.75rem;font-weight:700;color:#111827;margin-bottom:.75rem}
+    .coming-soon p{font-size:1.1rem;color:#6b7280;max-width:480px;margin:0 auto}
     .site-footer{margin-top:4rem;padding:1.5rem;text-align:center;font-size:.85rem;color:#9ca3af;border-top:1px solid #e5e7eb}
   </style>
 </head>
@@ -987,13 +992,19 @@ function renderDomainLandingHtml(opts: {
       <p>${description}</p>
     </div>
   </section>` : ""}
+  ${hasPages ? `
   <div class="content">
     <h3>Our Services</h3>
     <ul class="page-grid">
           ${pageLinks}
     </ul>
     ${moreNote}
-  </div>
+  </div>` : `
+  <div class="coming-soon">
+    <div class="cs-icon">🚀</div>
+    <h2>Coming Soon</h2>
+    <p>We're working on something great. Check back soon for our full range of service pages.</p>
+  </div>`}
   <footer class="site-footer">
     &copy; ${new Date().getFullYear()} ${brandName}. All rights reserved.
   </footer>
@@ -4558,6 +4569,9 @@ Return ONLY valid JSON (no markdown):
         req.path.startsWith("/dashboard/") ||
         ADMIN_SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + "/"))
       );
+      // Static assets are always bypassed for every host — no DB lookup needed.
+      if (isStaticAsset) return next();
+
       if (!host
         || host === "localhost"
         || host === "127.0.0.1"

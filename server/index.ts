@@ -239,6 +239,22 @@ async function runBackgroundStartup() {
     `);
     console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
 
+    // Ensure subdraw.com has a website record so the domain middleware can serve
+    // its landing page and future SEO pages. Placed under SpotOn Results account.
+    await db.execute(sql`
+      INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
+      VALUES (
+        gen_random_uuid(),
+        'subdraw.com',
+        'Subdraw',
+        '70ec4b1c-80b2-4c17-9d22-f63275d21310',
+        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af"}'::jsonb,
+        NOW(), NOW()
+      )
+      ON CONFLICT (domain) DO NOTHING
+    `);
+    console.log("[startup] subdraw.com website record ensured (idempotent).");
+
     // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
     // Caused by blueprint templates using {city}, {state} applied to state-level targets
     // where location === state name (e.g. "New Mexico, New Mexico" → "New Mexico").
