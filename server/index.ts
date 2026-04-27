@@ -299,38 +299,28 @@ async function runBackgroundStartup() {
     console.error("Seeding failed (non-fatal):", err);
   }
 
-  // Sync ALL website published-page counters
-  try {
-    const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
-    const allWebsites = await getWebsites();
-    if (allWebsites.length > 0) {
-      console.log(`[startup] Syncing published-page counts for ${allWebsites.length} website(s)...`);
-      await Promise.all(allWebsites.map(w => syncWebsitePublishedCount(w.id).catch(() => {})));
-      console.log("[startup] Page count sync complete.");
+  // Sync ALL website published-page counters — runs 5 min after boot so page serving
+  // gets all DB connections first. COUNT(*) on 3.8M rows is slow; don't block startup.
+  setTimeout(async () => {
+    try {
+      const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
+      const allWebsites = await getWebsites();
+      if (allWebsites.length > 0) {
+        console.log(`[startup] Syncing published-page counts for ${allWebsites.length} website(s)...`);
+        // Serialize to avoid stacking heavy COUNT queries on the pool simultaneously
+        for (const w of allWebsites) {
+          await syncWebsitePublishedCount(w.id).catch(() => {});
+        }
+        console.log("[startup] Page count sync complete.");
+      }
+    } catch (err) {
+      console.error("[startup] Page count sync failed (non-fatal):", err);
     }
-  } catch (err) {
-    console.error("[startup] Page count sync failed (non-fatal):", err);
-  }
+  }, 5 * 60 * 1000); // 5 minutes
 
-  // Re-tier all scored pages with current Tier 1 threshold
-  try {
-    const { getWebsites, bulkUpdatePageTiers } = await import("./storage");
-    const allWebsites = await getWebsites();
-    if (allWebsites.length > 0) {
-      console.log(`[startup] Applying Tier 1 threshold (80) to all scored pages...`);
-      let totalPromoted = 0;
-      await Promise.all(allWebsites.map(async w => {
-        try {
-          const { promoted } = await bulkUpdatePageTiers(w.id, 80);
-          totalPromoted += promoted;
-        } catch { /* non-fatal */ }
-      }));
-      if (totalPromoted > 0) console.log(`[startup] Promoted ${totalPromoted} pages to Tier 1.`);
-      console.log("[startup] Tier assignment complete.");
-    }
-  } catch (err) {
-    console.error("[startup] Tier assignment failed (non-fatal):", err);
-  }
+  // NOTE: startup tier assignment removed — running bulkUpdatePageTiers on 3.8M rows
+  // at boot holds DB connections for 3+ minutes and causes page serving timeouts.
+  // Tier assignment runs via the normal scoring/automation pipeline instead.
 
   // Resume any background jobs that were interrupted by a server restart
   try {

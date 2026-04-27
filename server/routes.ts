@@ -4534,6 +4534,22 @@ Return ONLY valid JSON (no markdown):
     return next();
   });
 
+  // ── Domain cache ──────────────────────────────────────────────────────────
+  // Caches website records by domain for 2 minutes to avoid a DB query on every
+  // page request under high crawler traffic. Cache is evicted on website updates.
+  const domainCache = new Map<string, { website: any; expiresAt: number }>();
+  const DOMAIN_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+  async function getWebsiteCached(domain: string) {
+    const now = Date.now();
+    const hit = domainCache.get(domain);
+    if (hit && hit.expiresAt > now) return hit.website;
+    const website = await storage.getWebsiteByDomain(domain);
+    domainCache.set(domain, { website, expiresAt: now + DOMAIN_CACHE_TTL_MS });
+    return website;
+  }
+  // Expose cache-busting so update routes can evict stale entries
+  (app as any)._bustDomainCache = (domain: string) => domainCache.delete(domain);
+
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Resolve the actual client-facing hostname.
@@ -4590,8 +4606,8 @@ Return ONLY valid JSON (no markdown):
         return next();
       }
 
-      // Look up website by the incoming domain
-      const website = await storage.getWebsiteByDomain(host);
+      // Look up website by the incoming domain (cached — avoids DB hit per request)
+      const website = await getWebsiteCached(host);
       if (!website) {
         console.log(`[domain-mw] no website found for host=${host}`);
         return next(); // unknown domain — fall through to admin app

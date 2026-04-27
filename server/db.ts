@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 25,                         // increased from 15 — domain cache reduces churn but crawler peaks need headroom
+  max: 40,                          // raised: domain cache cuts per-request queries; headroom for crawler peaks
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,   // 10s — enough for pool to free a slot under burst load
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
