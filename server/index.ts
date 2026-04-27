@@ -227,26 +227,10 @@ async function runBackgroundStartup() {
       WHERE domain = 'pages.spotonresults.com'
     `);
     // ── pages.subdraw.com — SEO white-label pages only ─────────────────────────
-    // subdraw.com is NOT in this project. Only pages.subdraw.com serves Nexus pages.
-    // Rename any old subtrackers/subdraw.com records → pages.subdraw.com
-    await db.execute(sql`
-      DELETE FROM websites
-      WHERE domain = 'pages.subdraw.com'
-        AND NOT EXISTS (SELECT 1 FROM pages WHERE website_id = websites.id)
-        AND EXISTS (
-          SELECT 1 FROM websites w2
-          WHERE w2.domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
-        )
-    `);
-    await db.execute(sql`
-      UPDATE websites
-      SET domain   = 'pages.subdraw.com',
-          name     = 'Subdraw',
-          settings = (settings - 'proxyPath' - 'parentDomain' - 'mainWebsiteUrl')
-            || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb
-      WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
-    `);
-    // Ensure record exists (fallback for fresh installs)
+    // Moves all pages from any old subdraw.com / subtrackers records → pages.subdraw.com
+    // This is idempotent: safe to run on every boot.
+
+    // Step A: Ensure pages.subdraw.com record exists first
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
@@ -259,15 +243,32 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always ensure correct settings (fixes any stale values on every boot)
+
+    // Step B: Reassign all pages from old domain records → pages.subdraw.com
+    await db.execute(sql`
+      UPDATE pages
+      SET website_id = (SELECT id FROM websites WHERE domain = 'pages.subdraw.com')
+      WHERE website_id IN (
+        SELECT id FROM websites
+        WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+      )
+    `);
+
+    // Step C: Delete the now-empty old domain records
+    await db.execute(sql`
+      DELETE FROM websites
+      WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+    `);
+
+    // Step D: Always ensure correct settings on pages.subdraw.com
     await db.execute(sql`
       UPDATE websites
       SET settings = (settings
-        || '{"proxyPath":"","parentDomain":"pages.subdraw.com"}'::jsonb)
+        || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb)
         - 'mainWebsiteUrl'
       WHERE domain = 'pages.subdraw.com'
     `);
-    console.log("[startup] pages.subdraw.com website record ensured (idempotent).");
+    console.log("[startup] pages.subdraw.com: all pages migrated, old subdraw.com records removed (idempotent).");
 
     // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
     // Caused by blueprint templates using {city}, {state} applied to state-level targets
