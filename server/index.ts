@@ -226,9 +226,9 @@ async function runBackgroundStartup() {
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
     `);
-    // ── subdraw → pages.subdraw.com migration ──────────────────────────────────
-    // SEO pages live at pages.subdraw.com/<slug>. subdraw.com root stays in GHL.
-    // Step 1: Remove empty pages.subdraw.com placeholder if an old-name record exists
+    // ── pages.subdraw.com — SEO white-label pages only ─────────────────────────
+    // subdraw.com is NOT in this project. Only pages.subdraw.com serves Nexus pages.
+    // Rename any old subtrackers/subdraw.com records → pages.subdraw.com
     await db.execute(sql`
       DELETE FROM websites
       WHERE domain = 'pages.subdraw.com'
@@ -238,7 +238,6 @@ async function runBackgroundStartup() {
           WHERE w2.domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
         )
     `);
-    // Step 2: Rename any old subtrackers/subdraw records → pages.subdraw.com
     await db.execute(sql`
       UPDATE websites
       SET domain   = 'pages.subdraw.com',
@@ -247,8 +246,7 @@ async function runBackgroundStartup() {
             || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb
       WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
     `);
-    console.log("[startup] Domain migration: subdraw records consolidated to pages.subdraw.com.");
-    // Step 3: Ensure pages.subdraw.com record exists (fallback for fresh installs)
+    // Ensure record exists (fallback for fresh installs)
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
@@ -261,11 +259,12 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Step 4: Always ensure correct settings — root redirects to SubDraw landing page
+    // Always ensure correct settings (fixes any stale values on every boot)
     await db.execute(sql`
       UPDATE websites
-      SET settings = settings
-        || '{"proxyPath":"","parentDomain":"pages.subdraw.com","mainWebsiteUrl":"https://subtrackers.replit.app"}'::jsonb
+      SET settings = (settings
+        || '{"proxyPath":"","parentDomain":"pages.subdraw.com"}'::jsonb)
+        - 'mainWebsiteUrl'
       WHERE domain = 'pages.subdraw.com'
     `);
     console.log("[startup] pages.subdraw.com website record ensured (idempotent).");
