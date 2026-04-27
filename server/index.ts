@@ -226,21 +226,31 @@ async function runBackgroundStartup() {
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
     `);
+    // Rename any old subtrackers subdomain records → subdraw.com (the correct production domain).
+    // First remove any empty subdraw.com placeholder so the rename doesn't hit a unique conflict.
+    await db.execute(sql`
+      DELETE FROM websites
+      WHERE domain = 'subdraw.com'
+        AND NOT EXISTS (SELECT 1 FROM pages WHERE website_id = websites.id)
+        AND EXISTS (
+          SELECT 1 FROM websites w2
+          WHERE w2.domain IN ('subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+        )
+    `);
     await db.execute(sql`
       UPDATE websites
-      SET domain = 'pagessubtrackers.spotonresults.com',
-          name   = CASE WHEN name = 'Subtracker pages' OR name = 'SubTrackers' THEN 'SubTrackers' ELSE name END,
+      SET domain   = 'subdraw.com',
+          name     = 'Subdraw',
           settings = settings
             - 'proxyPath'
             - 'parentDomain'
-            || '{"proxyPath":"","parentDomain":"pagessubtrackers.spotonresults.com"}'::jsonb
-      WHERE domain IN ('subtrackers.spotonresults.com', 'pagessubtrackers.spotonresults.com')
-        AND id = (SELECT id FROM websites WHERE name = 'SubTrackers' OR name = 'Subtracker pages' LIMIT 1)
+            || '{"proxyPath":"","parentDomain":"subdraw.com"}'::jsonb
+      WHERE domain IN ('subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
     `);
     console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
 
-    // Ensure subdraw.com has a website record so the domain middleware can serve
-    // its landing page and future SEO pages. Placed under SpotOn Results account.
+    // Ensure subdraw.com has a website record (fallback if no subtrackers record existed to rename).
+    // Placed under SpotOn Results account.
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
