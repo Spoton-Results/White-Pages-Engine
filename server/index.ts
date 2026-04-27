@@ -226,54 +226,49 @@ async function runBackgroundStartup() {
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
     `);
-    // Rename any old subtrackers subdomain records → subdraw.com (the correct production domain).
-    // First remove any empty subdraw.com placeholder so the rename doesn't hit a unique conflict.
+    // ── subdraw → pages.subdraw.com migration ──────────────────────────────────
+    // SEO pages live at pages.subdraw.com/<slug>. subdraw.com root stays in GHL.
+    // Step 1: Remove empty pages.subdraw.com placeholder if an old-name record exists
     await db.execute(sql`
       DELETE FROM websites
-      WHERE domain = 'subdraw.com'
+      WHERE domain = 'pages.subdraw.com'
         AND NOT EXISTS (SELECT 1 FROM pages WHERE website_id = websites.id)
         AND EXISTS (
           SELECT 1 FROM websites w2
-          WHERE w2.domain IN ('subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+          WHERE w2.domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
         )
     `);
+    // Step 2: Rename any old subtrackers/subdraw records → pages.subdraw.com
     await db.execute(sql`
       UPDATE websites
-      SET domain   = 'subdraw.com',
+      SET domain   = 'pages.subdraw.com',
           name     = 'Subdraw',
-          settings = settings
-            - 'proxyPath'
-            - 'parentDomain'
-            || '{"proxyPath":"","parentDomain":"subdraw.com"}'::jsonb
-      WHERE domain IN ('subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+          settings = (settings - 'proxyPath' - 'parentDomain' - 'mainWebsiteUrl')
+            || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb
+      WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
     `);
-    console.log("[startup] Domain migration: old subdomain URLs updated to root domain + /pages (idempotent).");
-
-    // Ensure subdraw.com has a website record (fallback if no subtrackers record existed to rename).
-    // Placed under SpotOn Results account.
-    // No mainWebsiteUrl — subdraw.com only serves Nexus-generated SEO pages; landing/purchase
-    // is handled by a separate project.
+    console.log("[startup] Domain migration: subdraw records consolidated to pages.subdraw.com.");
+    // Step 3: Ensure pages.subdraw.com record exists (fallback for fresh installs)
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
         gen_random_uuid(),
-        'subdraw.com',
+        'pages.subdraw.com',
         'Subdraw',
         '70ec4b1c-80b2-4c17-9d22-f63275d21310',
-        '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af"}'::jsonb,
+        '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb,
         NOW(), NOW()
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always fix subdraw.com settings: normalize proxyPath, set root redirect to landing page.
-    // subdraw.com/<slug> → Nexus SEO pages; subdraw.com/ → redirect to SubDraw landing page.
+    // Step 4: Always ensure correct settings (fixes any stale values)
     await db.execute(sql`
       UPDATE websites
-      SET settings = settings
-        || '{"proxyPath":"","parentDomain":"subdraw.com","mainWebsiteUrl":"https://subtrackers.replit.app"}'::jsonb
-      WHERE domain = 'subdraw.com'
+      SET settings = (settings || '{"proxyPath":"","parentDomain":"pages.subdraw.com"}'::jsonb)
+        - 'mainWebsiteUrl'
+      WHERE domain = 'pages.subdraw.com'
     `);
-    console.log("[startup] subdraw.com website record ensured (idempotent).");
+    console.log("[startup] pages.subdraw.com website record ensured (idempotent).");
 
     // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
     // Caused by blueprint templates using {city}, {state} applied to state-level targets
