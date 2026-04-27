@@ -215,8 +215,74 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
       `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at DESC)`,
+      // ── Partial indexes for published pages (billions-scale) ──────────────────
+      // Partial indexes skip non-published rows entirely — ~10-100x smaller than full indexes.
+      // Critical for COUNT, tier-filtering, scoring, and sitemap queries on large datasets.
+      `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier
+         ON pages(website_id, tier)
+         WHERE status = 'published'`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_pub_quality
+         ON pages(website_id, quality_score)
+         WHERE status = 'published' AND quality_score IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_pub_updated
+         ON pages(website_id, updated_at DESC)
+         WHERE status = 'published'`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_pub_slug
+         ON pages(website_id, slug)
+         WHERE status = 'published'`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug      ON pages(website_id, slug)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_updated   ON pages(website_id, updated_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_gsc_submitted     ON pages(website_id, gsc_submitted_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_publish_wave      ON pages(website_id, publish_wave)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_website_created   ON pages(website_id, created_at)`,
     ].map(exec));
     console.log("[startup] Database indexes ensured.");
+
+    // ── Incremental publishedPages counter trigger ─────────────────────────────
+    // Maintains websites.published_pages automatically on page INSERT/UPDATE/DELETE.
+    // Eliminates full COUNT(*) scans which become painfully slow at billions of rows.
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION fn_sync_published_pages_count()
+      RETURNS trigger AS $$
+      BEGIN
+        IF TG_OP = 'INSERT' THEN
+          IF NEW.status = 'published' THEN
+            UPDATE websites
+              SET published_pages = GREATEST(0, COALESCE(published_pages, 0) + 1)
+              WHERE id = NEW.website_id;
+          END IF;
+        ELSIF TG_OP = 'UPDATE' THEN
+          IF OLD.status IS DISTINCT FROM NEW.status THEN
+            IF NEW.status = 'published' THEN
+              UPDATE websites
+                SET published_pages = GREATEST(0, COALESCE(published_pages, 0) + 1)
+                WHERE id = NEW.website_id;
+            ELSIF OLD.status = 'published' THEN
+              UPDATE websites
+                SET published_pages = GREATEST(0, COALESCE(published_pages, 0) - 1)
+                WHERE id = OLD.website_id;
+            END IF;
+          END IF;
+        ELSIF TG_OP = 'DELETE' THEN
+          IF OLD.status = 'published' THEN
+            UPDATE websites
+              SET published_pages = GREATEST(0, COALESCE(published_pages, 0) - 1)
+              WHERE id = OLD.website_id;
+          END IF;
+        END IF;
+        RETURN COALESCE(NEW, OLD);
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+    await db.execute(sql`
+      DROP TRIGGER IF EXISTS trg_sync_published_pages ON pages;
+    `);
+    await db.execute(sql`
+      CREATE TRIGGER trg_sync_published_pages
+        AFTER INSERT OR UPDATE OF status OR DELETE ON pages
+        FOR EACH ROW EXECUTE FUNCTION fn_sync_published_pages_count();
+    `);
+    console.log("[startup] Published-pages counter trigger installed.");
 
     // Domain migration: update old subdomain-based domains to root domain + /pages proxyPath
     await db.execute(sql`

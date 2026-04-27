@@ -1134,25 +1134,42 @@ export async function bulkSetPageTier(websiteId: string, tier: number, filters: 
 }
 
 export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number; promotedSlugs: string[] }> {
-  // Dual-gate: E-E-A-T gate for pages that have all 3 new scores; legacy qualityScore gate for the rest.
-  const result = await db.execute(sql`
-    UPDATE pages
-    SET tier = 1, updated_at = NOW()
-    WHERE website_id = ${websiteId}
-      AND status = 'published'
-      AND tier != 1
-      AND (
-        -- E-E-A-T path: all three new scores present and meeting thresholds
-        (trust_score IS NOT NULL AND evidence_score IS NOT NULL AND content_quality_score IS NOT NULL
-         AND trust_score >= 75 AND evidence_score >= 70 AND content_quality_score >= 65)
-        OR
-        -- Legacy path: no new scores yet, use qualityScore gate
-        (trust_score IS NULL AND quality_score IS NOT NULL AND quality_score >= ${tierThreshold})
+  // Batched UPDATE — processes BATCH_SIZE rows per round-trip so we never hold a
+  // table-spanning row lock for minutes on multi-million-row sites.
+  // Uses partial index idx_pages_pub_tier (WHERE status='published') for speed.
+  const BATCH_SIZE = 10_000;
+  let totalPromoted = 0;
+  const allSlugs: string[] = [];
+  while (true) {
+    const result = await db.execute(sql`
+      WITH candidates AS (
+        SELECT id FROM pages
+        WHERE website_id = ${websiteId}
+          AND status = 'published'
+          AND tier != 1
+          AND (
+            (trust_score IS NOT NULL AND evidence_score IS NOT NULL AND content_quality_score IS NOT NULL
+             AND trust_score >= 75 AND evidence_score >= 70 AND content_quality_score >= 65)
+            OR
+            (trust_score IS NULL AND quality_score IS NOT NULL AND quality_score >= ${tierThreshold})
+          )
+        LIMIT ${BATCH_SIZE}
       )
-    RETURNING slug
-  `);
-  const rows = (result as any).rows ?? [];
-  return { promoted: (result as any).rowCount ?? 0, promotedSlugs: rows.map((r: any) => r.slug) };
+      UPDATE pages
+      SET tier = 1, updated_at = NOW()
+      WHERE id IN (SELECT id FROM candidates)
+      RETURNING slug
+    `);
+    const rows = (result as any).rows ?? [];
+    const batchCount = (result as any).rowCount ?? 0;
+    if (batchCount === 0) break;
+    totalPromoted += batchCount;
+    allSlugs.push(...rows.map((r: any) => r.slug));
+    if (batchCount < BATCH_SIZE) break; // last batch
+    // Brief yield between batches to let other queries breathe
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return { promoted: totalPromoted, promotedSlugs: allSlugs };
 }
 
 export async function bulkSetTier3(websiteId: string, scoreThreshold: number): Promise<{ demoted: number }> {
