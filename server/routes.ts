@@ -4709,7 +4709,7 @@ Return ONLY valid JSON (no markdown):
         const brand = brandProfiles[0];
         const html = renderDomainLandingHtml({
           domain: website.domain,
-          brandName: brand?.name || website.domain,
+          brandName: brand?.name || website.name || website.domain,
           tagline: brand?.tagline,
           description: brand?.description,
           primaryColor: brand?.primaryColor || "#2563eb",
