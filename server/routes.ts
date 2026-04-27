@@ -4446,13 +4446,25 @@ Return ONLY valid JSON (no markdown):
       const landingDomain = (process.env.LANDING_DOMAIN || "spotonnexus.com").toLowerCase();
       const isLandingDomain = host === landingDomain || host === `www.${landingDomain}`;
       const isStaticAsset = req.path.startsWith("/assets/") || !!req.path.match(/\.(js|css|png|ico|svg|woff2?|json|txt|webmanifest)$/);
+      // All top-level admin SPA routes for the landing domain — keeps the admin dashboard
+      // working on spotonnexus.com while allowing SEO page slugs to be served by the
+      // domain middleware for any path that doesn't match an admin route.
+      const ADMIN_SPA_PREFIXES = [
+        "/login", "/agencies", "/accounts", "/websites", "/brand-profiles",
+        "/locations", "/services", "/industries", "/query-clusters", "/blueprints",
+        "/drafts", "/publish-queue", "/published", "/jobs", "/sitemaps", "/users",
+        "/guide", "/bulk-generator", "/leads", "/agency-dashboard", "/search-control",
+        "/hub-pages", "/internal-links", "/automation", "/bank-health",
+        "/onboarding-test", "/report/",
+      ];
       const isLandingSpaPath = isLandingDomain && (
         req.path === "/" ||
         req.path === "" ||
         isStaticAsset ||
         req.path === "/welcome" ||
         req.path.startsWith("/onboard/") ||
-        req.path.startsWith("/dashboard/")
+        req.path.startsWith("/dashboard/") ||
+        ADMIN_SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + "/"))
       );
       if (!host
         || host === "localhost"
