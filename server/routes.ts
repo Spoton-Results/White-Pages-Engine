@@ -4265,7 +4265,8 @@ Return ONLY valid JSON (no markdown):
   // ── Public Page Serving ──────────────────────────────────────────────────
   // Serves sitemaps, robots.txt and pages at /sites/:domain/:file
   app.get("/sites/:domain/sitemap.xml", async (req: Request, res: Response) => {
-    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    const _DA: Record<string,string> = { "subdraw.com": "pages.subdraw.com" };
+    const website = await storage.getWebsiteByDomain(_DA[req.params.domain as string] || req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
     const ppRaw = ((website.settings as any)?.proxyPath || "") as string;
@@ -4286,7 +4287,8 @@ Return ONLY valid JSON (no markdown):
   });
 
   app.get("/sites/:domain/sitemap-:num.xml", async (req: Request, res: Response) => {
-    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    const _DA2: Record<string,string> = { "subdraw.com": "pages.subdraw.com" };
+    const website = await storage.getWebsiteByDomain(_DA2[req.params.domain as string] || req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
     const ppRaw2 = ((website.settings as any)?.proxyPath || "") as string;
@@ -4321,7 +4323,8 @@ Return ONLY valid JSON (no markdown):
   });
 
   app.get("/sites/:domain/robots.txt", async (req: Request, res: Response) => {
-    const website = await storage.getWebsiteByDomain(req.params.domain as string);
+    const _DA3: Record<string,string> = { "subdraw.com": "pages.subdraw.com" };
+    const website = await storage.getWebsiteByDomain(_DA3[req.params.domain as string] || req.params.domain as string);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
     const pd = (website.settings as any)?.parentDomain;
     const ppRaw3 = ((website.settings as any)?.proxyPath || "") as string;
@@ -4333,7 +4336,17 @@ Return ONLY valid JSON (no markdown):
   });
 
   app.get("/sites/:domain/:slug", async (req: Request, res: Response) => {
-    const website = await storage.getWebsiteByDomain((req.params.domain as string));
+    const domainParam = req.params.domain as string;
+    // Domain alias map: old domain → current domain (handles renamed websites)
+    const DOMAIN_ALIASES: Record<string, string> = {
+      "subdraw.com": "pages.subdraw.com",
+    };
+    const lookupDomain = DOMAIN_ALIASES[domainParam] || domainParam;
+    // Redirect /sites/old-domain/slug → /sites/new-domain/slug so URLs self-correct
+    if (lookupDomain !== domainParam) {
+      return res.redirect(301, `/sites/${lookupDomain}/${req.params.slug}`);
+    }
+    const website = await storage.getWebsiteByDomain(lookupDomain);
     if (!website) return res.status(404).send(notFoundHtml("Website not found"));
 
     const slug = req.params.slug as string;
@@ -4590,8 +4603,11 @@ Return ONLY valid JSON (no markdown):
         return next();
       }
 
-      // Look up website by the incoming domain
-      const website = await storage.getWebsiteByDomain(host);
+      // Domain alias map — handles renamed website domains without DNS changes
+      const DOMAIN_ALIASES: Record<string, string> = { "subdraw.com": "pages.subdraw.com" };
+      const lookupHost = DOMAIN_ALIASES[host] || host;
+      // Look up website by the incoming domain (or its alias)
+      const website = await storage.getWebsiteByDomain(lookupHost);
       if (!website) {
         console.log(`[domain-mw] no website found for host=${host}`);
         return next(); // unknown domain — fall through to admin app
