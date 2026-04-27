@@ -193,7 +193,7 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
   let cityPagesPromise: Promise<NavData["cityPages"]> = Promise.resolve([]);
   let stateDisplayName = "";
   if (page.pageType === "state_hub") {
-    const match = page.title.match(/\bin\s+(.+?)(\s*\|.*)?$/i);
+    const match = (page.title || "").match(/\bin\s+(.+?)(\s*\|.*)?$/i);
     if (match) {
       stateDisplayName = match[1].trim();
       cityPagesPromise = storage.getStateDataByName(stateDisplayName).then((stateEntry) =>
@@ -516,7 +516,8 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
   const baseUrl = canonicalBase;
 
   // Extract service name and location from title (e.g. "Merchant Services in Dallas, TX | Brand")
-  const titleMatch = page.title.match(/^(.+?)\s+in\s+(.+?)(?:\s*\|.*)?$/i);
+  const safeTitle = page.title || page.slug || "";
+  const titleMatch = safeTitle.match(/^(.+?)\s+in\s+(.+?)(?:\s*\|.*)?$/i);
   const serviceNameFromTitle = titleMatch ? titleMatch[1].trim() : brandName;
   const locationFromTitle = titleMatch ? titleMatch[2].trim() : "";
 
@@ -4760,7 +4761,8 @@ Return ONLY valid JSON (no markdown):
       res.setHeader("X-Cache", "MISS");
       console.log(`[page-serve] 200 ${host}/${rawSlug}`);
       return res.send(html);
-    } catch (err) {
+    } catch (err: any) {
+      console.error(`[domain-mw] 500 ${req.headers.host}${req.path} — ${err?.message || err}`);
       return next(err);
     }
   });
