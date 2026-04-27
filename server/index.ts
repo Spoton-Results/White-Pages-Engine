@@ -265,13 +265,14 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Always fix subdraw.com settings: normalize proxyPath and set mainWebsiteUrl to the
-    // SubDraw landing page (subtrackers.replit.app). Root requests redirect there; all
-    // SEO slugs (subdraw.com/<slug>) are served directly by Nexus.
+    // Always fix subdraw.com settings: normalize proxyPath, clear any stale redirect.
+    // subdraw.com is a pure SEO domain — only serves Nexus-generated pages at /slug.
+    // No root redirect needed; spotonnexus.com is the Nexus platform landing page.
     await db.execute(sql`
       UPDATE websites
-      SET settings = settings
-        || '{"proxyPath":"","parentDomain":"subdraw.com","mainWebsiteUrl":"https://subtrackers.replit.app"}'::jsonb
+      SET settings = (settings
+        || '{"proxyPath":"","parentDomain":"subdraw.com"}'::jsonb)
+        - 'mainWebsiteUrl'
       WHERE domain = 'subdraw.com'
     `);
     console.log("[startup] subdraw.com website record ensured (idempotent).");
