@@ -261,11 +261,11 @@ async function runBackgroundStartup() {
       )
       ON CONFLICT (domain) DO NOTHING
     `);
-    // Step 4: Always ensure correct settings (fixes any stale values)
+    // Step 4: Always ensure correct settings — root redirects to SubDraw landing page
     await db.execute(sql`
       UPDATE websites
-      SET settings = (settings || '{"proxyPath":"","parentDomain":"pages.subdraw.com"}'::jsonb)
-        - 'mainWebsiteUrl'
+      SET settings = settings
+        || '{"proxyPath":"","parentDomain":"pages.subdraw.com","mainWebsiteUrl":"https://subtrackers.replit.app"}'::jsonb
       WHERE domain = 'pages.subdraw.com'
     `);
     console.log("[startup] pages.subdraw.com website record ensured (idempotent).");
