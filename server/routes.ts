@@ -909,7 +909,15 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  app.use(sessionMiddleware());
+  // Session middleware runs ONLY on API routes — prevents it from:
+  //   1. Hitting the Postgres session table on every public page request
+  //   2. Setting Cache-Control:private on cacheable SEO pages
+  //   3. Emitting Set-Cookie on public pages (which breaks CDN caching)
+  const _sessionMW = sessionMiddleware();
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!req.path.startsWith("/api/")) return next();
+    return _sessionMW(req, res, next);
+  });
 
   // ── Health check — must respond instantly with no DB access ──────────────
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
@@ -4311,7 +4319,7 @@ Return ONLY valid JSON (no markdown):
     const cachedPage = pageHtmlCache.get(pageCacheKey);
     if (cachedPage && cachedPage.expiresAt > Date.now()) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=600");
+      res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
       res.setHeader("X-Cache", "HIT");
       return res.send(cachedPage.html);
     }
@@ -4328,14 +4336,14 @@ Return ONLY valid JSON (no markdown):
       const hubPage = await storage.getHubPageBySlug(website.id, slug);
       if (hubPage && hubPage.status === "published" && hubPage.content) {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
         return res.send(hubPage.content);
       }
       const dynamic = await tryGenerateDynamicPage(slug, website, brand, siteLinkBase || undefined);
       if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
       if (dynamic && "html" in dynamic) {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
         console.log(`[dynamic-page] 200 on-the-fly: ${slug}`);
         return res.send(dynamic.html);
       }
@@ -4357,7 +4365,7 @@ Return ONLY valid JSON (no markdown):
     }
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=600");
+    res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
     res.setHeader("X-Cache", "MISS");
     return res.send(html);
   });
@@ -4612,15 +4620,18 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       }
 
       // Serve a specific page by slug
-      const page = await storage.getPageBySlug(website.id, rawSlug);
-      const brandProfiles = await storage.getBrandProfiles(website.accountId);
+      // Parallel: page lookup + brand lookup simultaneously
+      const [page, brandProfiles] = await Promise.all([
+        storage.getPageBySlug(website.id, rawSlug),
+        storage.getBrandProfiles(website.accountId),
+      ]);
       const brand = brandProfiles[0];
       if (!page || page.status !== "published") {
         // Check hub pages before dynamic fallback
         const hubPage = await storage.getHubPageBySlug(website.id, rawSlug);
         if (hubPage && hubPage.status === "published" && hubPage.content) {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.setHeader("Cache-Control", "public, max-age=3600");
+          res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
           console.log(`[hub-page] 200 ${host}/${rawSlug}`);
           return res.send(hubPage.content);
         }
@@ -4628,7 +4639,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
         if (dynamic && "html" in dynamic) {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.setHeader("Cache-Control", "public, max-age=3600");
+          res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
           console.log(`[dynamic-page] 200 on-the-fly: ${host}/${rawSlug}`);
           return res.send(dynamic.html);
         }
@@ -4637,12 +4648,28 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
         return res.status(404).send(notFoundHtml("Page not found or not yet published"));
       }
 
-      const version = await storage.getActivePageVersion(page.id);
-      const [statePages, cityPages, stateDisplayName, siblingServices] = await resolveNavData(page, website.id);
-      const internalLinks = await storage.getOutboundLinksForPage(page.id);
+      // HTML page cache — return immediately if warm
+      const dmCacheKey = `${website.id}:${rawSlug}`;
+      const dmCached = pageHtmlCache.get(dmCacheKey);
+      if (dmCached && dmCached.expiresAt > Date.now()) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
+        res.setHeader("X-Cache", "HIT");
+        console.log(`[page-serve] 200 CACHE-HIT ${host}/${rawSlug}`);
+        return res.send(dmCached.html);
+      }
+
+      // Parallel: content version + nav data + internal links
+      const [version, [statePages, cityPages, stateDisplayName, siblingServices], internalLinks] = await Promise.all([
+        storage.getActivePageVersion(page.id),
+        resolveNavData(page, website.id),
+        storage.getOutboundLinksForPage(page.id),
+      ]);
       const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, effectiveLinkBase || undefined);
+      pageHtmlCacheSet(dmCacheKey, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
+      res.setHeader("X-Cache", "MISS");
       console.log(`[page-serve] 200 ${host}/${rawSlug}`);
       return res.send(html);
     } catch (err) {
@@ -4669,7 +4696,7 @@ h1{color:${primaryColor}}a{color:${primaryColor}}ul{line-height:2}</style></head
       const internalLinks = await storage.getOutboundLinksForPage(page.id);
       const html = renderPageHtml(page, version, website, brand, { statePages, cityPages, stateDisplayName, siblingServices, internalLinks }, linkBase || undefined);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
       return res.send(html);
     } catch (err) {
       return next(err);
