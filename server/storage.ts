@@ -1401,7 +1401,7 @@ export function clearAllOutboundLinksCache(): void {
   outboundLinksCache.clear();
 }
 
-// Get pages eligible for internal linking (has both serviceId + locationId)
+// Get all published pages for a website for internal link building
 export async function getPagesForLinking(websiteId: string, limit = 5000): Promise<Array<{
   id: string; title: string; slug: string; pageType: string | null;
   serviceId: string | null; locationId: string | null;

@@ -146,10 +146,9 @@ export default function InternalLinksPage() {
 
             {/* How it works */}
             <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "1.5rem", fontSize: ".85rem", color: "#0c4a6e" }}>
-              <strong>How the link builder works:</strong> For each service+city page, it creates:
-              (1) a <em>state-nav</em> link to its state hub, and (2) up to 3 <em>cross-service</em> links to other services in the same city.
-              State hubs also get <em>hub-to-city</em> links to their top 10 city pages.
-              Links are stored in the database and used for internal analytics — they can also be injected into page HTML in a future update.
+              <strong>How the link builder works:</strong> For each service+city page, it creates up to 3 <em>cross-service</em> links to other services in the same city (rendered as a "More Services" section on the live page).
+              State hub pages get <em>hub-to-city</em> links to their top 10 city pages (rendered as "Cities We Serve").
+              Links are rebuilt on demand and injected directly into the live HTML of every published page.
             </div>
 
             {/* Coverage bar */}
