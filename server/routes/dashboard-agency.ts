@@ -7,7 +7,9 @@ import { querySiteAnalytics, getServiceAccountEmail } from "../services/gsc-sear
 
 const router = Router();
 
-// ── Simple 30-second server-side cache ─────────────────────────────────────
+// ── 5-minute server-side cache ───────────────────────────────────────────────
+// The SEO tier query scans 1M+ rows — too slow to run on every page load.
+// 5 minutes is fine for a dashboard that shows monthly aggregates.
 interface CacheEntry { data: unknown; expiresAt: number }
 const summaryCache = new Map<string, CacheEntry>();
 function getCached(key: string): unknown | null {
@@ -15,7 +17,7 @@ function getCached(key: string): unknown | null {
   if (!entry || Date.now() > entry.expiresAt) { summaryCache.delete(key); return null; }
   return entry.data;
 }
-function setCache(key: string, data: unknown, ttlMs = 30_000) {
+function setCache(key: string, data: unknown, ttlMs = 300_000) {
   summaryCache.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 

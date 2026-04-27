@@ -200,6 +200,8 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
       `CREATE INDEX IF NOT EXISTS idx_page_versions_active     ON page_versions(page_id, is_active)`,
       `CREATE INDEX IF NOT EXISTS idx_websites_account_id      ON websites(account_id)`,
+      // Functional index so getWebsiteByDomain's lower(domain) lookup uses an index scan
+      `CREATE INDEX IF NOT EXISTS idx_websites_domain_lower     ON websites(lower(domain))`,
       `CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`,
       `CREATE INDEX IF NOT EXISTS idx_users_account_id         ON users(account_id)`,
       `CREATE INDEX IF NOT EXISTS idx_locations_account_id     ON locations(account_id)`,
@@ -241,6 +243,12 @@ async function runBackgroundStartup() {
       // Critical for COUNT, tier-filtering, scoring, and sitemap queries on large datasets.
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier
          ON pages(website_id, tier)
+         WHERE status = 'published'`,
+      // Covering index: allows COUNT(*) + AVG(quality_score) GROUP BY tier to be
+      // answered entirely from the index (no heap fetch), even on 1M+ row tables.
+      `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier_qscore
+         ON pages(website_id, tier)
+         INCLUDE (quality_score)
          WHERE status = 'published'`,
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_quality
          ON pages(website_id, quality_score)
