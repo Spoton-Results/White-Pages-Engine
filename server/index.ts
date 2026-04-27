@@ -170,6 +170,18 @@ async function runBackgroundStartup() {
         from_tier integer NOT NULL, to_tier integer NOT NULL,
         reason text NOT NULL, created_at timestamp NOT NULL DEFAULT NOW()
       )`),
+      exec(`CREATE TABLE IF NOT EXISTS api_usage_log (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id VARCHAR REFERENCES accounts(id) ON DELETE SET NULL,
+        website_id VARCHAR REFERENCES websites(id) ON DELETE SET NULL,
+        generation_type VARCHAR(100) NOT NULL,
+        model_used VARCHAR(100) NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        estimated_cost_cents INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )`),
     ]);
     console.log("[startup] Schema migrations: CREATE TABLE ensured.");
 

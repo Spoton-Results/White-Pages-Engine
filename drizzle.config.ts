@@ -11,6 +11,6 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
-  // Exclude tables managed outside Drizzle (express-session, etc.)
-  tablesFilter: ["!session"],
+  // Exclude tables managed outside Drizzle (express-session, api_usage_log, etc.)
+  tablesFilter: ["!session", "!api_usage_log"],
 });
