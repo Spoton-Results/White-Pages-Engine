@@ -252,10 +252,16 @@ export async function getWebsiteByDomain(domain: string): Promise<Website | unde
   if (cached && Date.now() < cached.exp) return cached.website;
 
   const withWww = `www.${stripped}`;
+  // Also try the root domain (e.g. pages.subdraw.com → subdraw.com) as a fallback
+  // so subdomains transparently resolve to the canonical root-domain website record.
+  const parts = stripped.split(".");
+  const rootDomain = parts.length > 2 ? parts.slice(1).join(".") : null;
+
   const [row] = await db.select().from(websites).where(
     or(
       eq(sql`lower(${websites.domain})`, stripped),
       eq(sql`lower(${websites.domain})`, withWww),
+      ...(rootDomain ? [eq(sql`lower(${websites.domain})`, rootDomain)] : []),
     )
   );
   websiteByDomainCache.set(stripped, { website: row, exp: Date.now() + 5 * 60_000 });

@@ -314,49 +314,29 @@ async function runBackgroundStartup() {
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
     `);
-    // ── pages.subdraw.com — SEO white-label pages only ─────────────────────────
-    // Moves all pages from any old subdraw.com / subtrackers records → pages.subdraw.com
-    // This is idempotent: safe to run on every boot.
-
-    // Step A: Ensure pages.subdraw.com record exists first
-    await db.execute(sql`
-      INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
-      VALUES (
-        gen_random_uuid(),
-        'pages.subdraw.com',
-        'Subdraw',
-        '70ec4b1c-80b2-4c17-9d22-f63275d21310',
-        '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb,
-        NOW(), NOW()
-      )
-      ON CONFLICT (domain) DO NOTHING
-    `);
-
-    // Step B: Reassign all pages from old domain records → pages.subdraw.com
-    await db.execute(sql`
-      UPDATE pages
-      SET website_id = (SELECT id FROM websites WHERE domain = 'pages.subdraw.com')
-      WHERE website_id IN (
-        SELECT id FROM websites
-        WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
-      )
-    `);
-
-    // Step C: Delete the now-empty old domain records
-    await db.execute(sql`
-      DELETE FROM websites
-      WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
-    `);
-
-    // Step D: Always ensure correct settings on pages.subdraw.com
+    // ── subdraw.com — canonical SEO white-label domain ───────────────────────
+    // Renames pages.subdraw.com → subdraw.com in-place (same website ID, preserving
+    // all associated sitemaps/jobs/etc) so requests arriving with Host: subdraw.com
+    // are correctly matched. Safe to run on every boot; the WHERE clause is a noop
+    // once the rename has already happened.
     await db.execute(sql`
       UPDATE websites
-      SET settings = (settings
-        || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb)
-        - 'mainWebsiteUrl'
+      SET domain   = 'subdraw.com',
+          settings = (settings
+            || '{"proxyPath":"","parentDomain":"subdraw.com","primaryColor":"#1e40af"}'::jsonb)
+            - 'mainWebsiteUrl'
       WHERE domain = 'pages.subdraw.com'
     `);
-    console.log("[startup] pages.subdraw.com: all pages migrated, old subdraw.com records removed (idempotent).");
+    // Also consolidate any surviving legacy aliases (subtrackers.*) that might be empty.
+    // Pages from those domains were already moved in previous deployments.
+    await db.execute(sql`
+      DELETE FROM websites
+      WHERE domain IN ('subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
+        AND NOT EXISTS (
+          SELECT 1 FROM pages WHERE pages.website_id = websites.id
+        )
+    `);
+    console.log("[startup] subdraw.com: canonical domain ensured (pages.subdraw.com renamed in-place, idempotent).");
 
     // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
     // Caused by blueprint templates using {city}, {state} applied to state-level targets
