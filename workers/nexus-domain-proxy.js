@@ -2,12 +2,17 @@
 // Routes client-domain requests to the Nexus origin (sospages.replit.app) and
 // caches HTML page responses at the Cloudflare edge for 1 hour.
 //
-// Caching logic:
-//   GET /any-page-slug        → checked in CF edge cache → served or fetched + cached
-//   GET /api/*                → never cached (dynamic data)
-//   GET /sitemap*.xml         → cached (1 hour, same as pages)
-//   GET /robots.txt           → cached
-//   POST / non-GET            → never cached, proxied directly
+// Why Cache-Control is overridden here:
+//   Replit's infrastructure injects a Set-Cookie tracking header (GAESA) on
+//   every response. Any Set-Cookie forces Cache-Control to "private" by the
+//   HTTP spec, making CDN caching impossible. The Worker strips that cookie
+//   and resets the header to "public" so Cloudflare can cache the response.
+//
+// Caching rules:
+//   GET /any-page-slug  → edge cached for 1 hour (s-maxage=3600)
+//   GET /api/*          → never cached (live data)
+//   GET /sites/*        → never cached (admin previews)
+//   POST / non-GET      → never cached, proxied directly
 
 export default {
   async fetch(request, env, ctx) {
@@ -15,25 +20,21 @@ export default {
     const url = new URL(request.url);
 
     // Resolve the real client-facing hostname.
-    // CF-Custom-Hostname is set by Cloudflare for SaaS when a custom domain hits the fallback origin.
     const clientHost =
       request.headers.get("CF-Custom-Hostname") ||
       request.cf?.hostname ||
       request.headers.get("host") ||
       url.hostname;
 
-    // Decide whether this request is eligible for edge caching.
-    // Only cache GET requests for non-API, non-admin paths.
+    // Only cache GET/HEAD requests for non-API, non-admin paths.
     const isGet = request.method === "GET" || request.method === "HEAD";
     const isApi = url.pathname.startsWith("/api/");
     const isAdminSite = url.pathname.startsWith("/sites/");
-    const isStaticAsset = /\.(js|css|woff2?|png|ico|webmanifest)(\?|$)/.test(url.pathname);
-    const shouldCache = isGet && !isApi && !isAdminSite && !isStaticAsset;
+    const shouldCache = isGet && !isApi && !isAdminSite;
 
-    // ── Edge cache check ────────────────────────────────────────────────────
+    // ── Edge cache check ─────────────────────────────────────────────────────
     if (shouldCache) {
-      const cache = caches.default;
-      const cached = await cache.match(request);
+      const cached = await caches.default.match(request);
       if (cached) {
         const h = new Headers(cached.headers);
         h.set("X-Edge-Cache", "HIT");
@@ -45,7 +46,7 @@ export default {
       }
     }
 
-    // ── Proxy to Nexus origin ───────────────────────────────────────────────
+    // ── Proxy to Nexus origin ────────────────────────────────────────────────
     const targetUrl = `${origin}${url.pathname}${url.search}`;
     const headers = new Headers(request.headers);
     headers.set("X-Forwarded-Host", clientHost);
@@ -63,18 +64,25 @@ export default {
 
     const responseHeaders = new Headers(response.headers);
 
-    // ── Store in edge cache ─────────────────────────────────────────────────
-    // Cache only 200 OK HTML responses (not 301/302/404/500).
-    // Cloudflare honours the Cache-Control: s-maxage=3600 header Nexus sends,
-    // meaning the edge entry lives for 1 hour before Cloudflare revalidates.
+    // ── Fix Replit-injected headers that break caching ───────────────────────
+    // Replit injects Set-Cookie: GAESA (analytics) on every response.
+    // That cookie forces Cache-Control: private, killing CDN caching.
+    // For public SEO pages we strip the cookie and restore public caching.
     if (shouldCache && response.status === 200) {
+      responseHeaders.delete("Set-Cookie");
+      responseHeaders.set(
+        "Cache-Control",
+        "public, max-age=60, s-maxage=3600, stale-while-revalidate=60"
+      );
       responseHeaders.set("X-Edge-Cache", "MISS");
+
       const toCache = new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
       });
-      // waitUntil: store in cache without blocking the response to the user
+
+      // Store in edge cache without blocking the response to the user
       ctx.waitUntil(caches.default.put(request, toCache.clone()));
       return toCache;
     }
