@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 40,                          // raised: domain cache cuts per-request queries; headroom for crawler peaks
+  max: 10,                          // Replit autoscales to 3+ instances — 10×3=30 total, well within DB limits
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,   // 10s — enough for pool to free a slot under burst load
+  connectionTimeoutMillis: 5000,    // 5s — fail fast so requests don't pile up waiting for connections
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
