@@ -190,11 +190,8 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_pages_website_slug       ON pages(website_id, slug)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_status             ON pages(status)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at DESC)`,
-      // Covering index so ORDER BY updated_at LIMIT 20 is a true index-only scan (no heap fetches)
-      `CREATE INDEX IF NOT EXISTS idx_pages_recent_activity
-         ON pages(updated_at DESC)
-         INCLUDE (id, website_id, slug, title, status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_pages_recent_activity    ON pages(website_id, updated_at)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_website_id         ON pages(website_id)`,
       `CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag     ON pages(website_id, duplicate_flag)`,
       `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
@@ -231,10 +228,9 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_account      ON booked_jobs(account_id)`,
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_page         ON booked_jobs(page_id)`,
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
-      `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at DESC)`,
-      `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at DESC)`,
-      // Unique constraints moved out of Drizzle schema to avoid interactive db:push prompts
-      // during deployment (DB had _key suffix, Drizzle expects _unique — name mismatch).
+      `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at)`,
+      // These unique indexes are also in the Drizzle schema — these are noops after first deploy.
       `CREATE UNIQUE INDEX IF NOT EXISTS state_data_state_abbr_unique              ON state_data(state_abbr)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS call_tracking_numbers_dynamic_number_unique ON call_tracking_numbers(dynamic_number)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS onboarding_submissions_token_unique        ON onboarding_submissions(token)`,
@@ -244,17 +240,14 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier
          ON pages(website_id, tier)
          WHERE status = 'published'`,
-      // Covering index: allows COUNT(*) + AVG(quality_score) GROUP BY tier to be
-      // answered entirely from the index (no heap fetch), even on 1M+ row tables.
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier_qscore
          ON pages(website_id, tier)
-         INCLUDE (quality_score)
          WHERE status = 'published'`,
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_quality
          ON pages(website_id, quality_score)
          WHERE status = 'published' AND quality_score IS NOT NULL`,
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_updated
-         ON pages(website_id, updated_at DESC)
+         ON pages(website_id, updated_at)
          WHERE status = 'published'`,
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_slug
          ON pages(website_id, slug)

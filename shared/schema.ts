@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
-  pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, pgEnum
+  pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, pgEnum,
+  index, uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -49,7 +50,9 @@ export const accounts = pgTable("accounts", {
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_accounts_agency_id").on(t.agencyId),
+]);
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -60,7 +63,9 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default("viewer"),
   isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_users_account_id").on(t.accountId),
+]);
 
 export const brandProfiles = pgTable("brand_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -110,7 +115,11 @@ export const websites = pgTable("websites", {
   warmupPageCapOverride: integer("warmup_page_cap_override"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_websites_account_id").on(t.accountId),
+  index("idx_websites_domain_lower").on(sql`lower(${t.domain})`),
+  index("idx_websites_protection_mode").on(t.protectionMode),
+]);
 
 // ─── Location / Service / Industry / Query ───────────────────────────────────
 
@@ -129,7 +138,9 @@ export const locations = pgTable("locations", {
   parentId: varchar("parent_id"),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_locations_account_id").on(t.accountId),
+]);
 
 export const services = pgTable("services", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -141,7 +152,9 @@ export const services = pgTable("services", {
   industryId: varchar("industry_id"),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_services_account_id").on(t.accountId),
+]);
 
 export const industries = pgTable("industries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -165,7 +178,9 @@ export const queryClusters = pgTable("query_clusters", {
   difficulty: integer("difficulty"),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_query_clusters_account_id").on(t.accountId),
+]);
 
 // ─── Blueprints ───────────────────────────────────────────────────────────────
 
@@ -197,7 +212,10 @@ export const blueprints = pgTable("blueprints", {
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_blueprints_account_id").on(t.accountId),
+  index("idx_blueprints_website_id").on(t.websiteId),
+]);
 
 // ─── Pages ────────────────────────────────────────────────────────────────────
 
@@ -247,7 +265,24 @@ export const pages = pgTable("pages", {
   contentQualityScore: integer("content_quality_score"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_pages_website_id").on(t.websiteId),
+  index("idx_pages_website_slug").on(t.websiteId, t.slug),
+  index("idx_pages_website_status").on(t.websiteId, t.status),
+  index("idx_pages_website_updated").on(t.websiteId, t.updatedAt),
+  index("idx_pages_website_created").on(t.websiteId, t.createdAt),
+  index("idx_pages_status").on(t.status),
+  index("idx_pages_updated_at").on(t.updatedAt),
+  index("idx_pages_duplicate_flag").on(t.websiteId, t.duplicateFlag),
+  index("idx_pages_gsc_submitted").on(t.websiteId, t.gscSubmittedAt),
+  index("idx_pages_publish_wave").on(t.websiteId, t.publishWave),
+  index("idx_pages_pub_tier").on(t.websiteId, t.tier).where(sql`status = 'published'`),
+  index("idx_pages_pub_slug").on(t.websiteId, t.slug).where(sql`status = 'published'`),
+  index("idx_pages_pub_quality").on(t.websiteId, t.qualityScore).where(sql`status = 'published'`),
+  index("idx_pages_pub_updated").on(t.websiteId, t.updatedAt).where(sql`status = 'published'`),
+  index("idx_pages_pub_tier_qscore").on(t.websiteId, t.tier).where(sql`status = 'published'`),
+  index("idx_pages_recent_activity").on(t.websiteId, t.updatedAt),
+]);
 
 // ─── Onboarding Submissions ──────────────────────────────────────────────────
 
@@ -273,7 +308,9 @@ export const onboardingSubmissions = pgTable("onboarding_submissions", {
   submittedAt: timestamp("submitted_at"),
   generationStartedAt: timestamp("generation_started_at"),
   completedAt: timestamp("completed_at"),
-});
+}, (t) => [
+  uniqueIndex("onboarding_submissions_token_unique").on(t.token),
+]);
 
 export const insertOnboardingSubmissionSchema = createInsertSchema(onboardingSubmissions).omit({
   id: true,
@@ -293,7 +330,10 @@ export const pageVersions = pgTable("page_versions", {
   reviewNotes: text("review_notes"),
   isActive: boolean("is_active").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_page_versions_page_id").on(t.pageId),
+  index("idx_page_versions_active").on(t.pageId, t.isActive),
+]);
 
 export const internalLinks = pgTable("internal_links", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -303,7 +343,9 @@ export const internalLinks = pgTable("internal_links", {
   anchorText: text("anchor_text").notNull(),
   linkType: text("link_type").notNull().default("contextual"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_internal_links_website_id").on(t.websiteId),
+]);
 
 // ─── Generation Jobs ─────────────────────────────────────────────────────────
 
@@ -323,7 +365,10 @@ export const generationJobs = pgTable("generation_jobs", {
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_generation_jobs_account_id").on(t.accountId),
+  index("idx_generation_jobs_website_id").on(t.websiteId),
+]);
 
 // ─── Sitemaps ─────────────────────────────────────────────────────────────────
 
@@ -338,7 +383,9 @@ export const sitemaps = pgTable("sitemaps", {
   lastGenerated: timestamp("last_generated"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_sitemaps_website_id").on(t.websiteId),
+]);
 
 // ─── Page Metrics ─────────────────────────────────────────────────────────────
 
@@ -377,7 +424,9 @@ export const stateData = pgTable("state_data", {
   businessCulture: text("business_culture").notNull(),
   paymentRegulations: text("payment_regulations").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("state_data_state_abbr_unique").on(t.stateAbbr),
+]);
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
@@ -451,7 +500,10 @@ export const hubPages = pgTable("hub_pages", {
   metaDescription: text("meta_description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_hub_pages_account_id").on(t.accountId),
+  index("idx_hub_pages_website_id").on(t.websiteId),
+]);
 
 // ─── Insert Schemas & Types ───────────────────────────────────────────────────
 
@@ -534,7 +586,9 @@ export const adminNotifications = pgTable("admin_notifications", {
   metadata: jsonb("metadata"),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_admin_notif_website").on(t.websiteId, t.createdAt),
+]);
 
 export const insertAdminNotificationSchema = createInsertSchema(adminNotifications).omit({ id: true, createdAt: true });
 export type InsertAdminNotification = z.infer<typeof insertAdminNotificationSchema>;
@@ -551,7 +605,9 @@ export const demotionLogs = pgTable("demotion_logs", {
   toTier: integer("to_tier").notNull(),
   reason: text("reason").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_demotion_logs_website").on(t.websiteId, t.createdAt),
+]);
 
 export const insertDemotionLogSchema = createInsertSchema(demotionLogs).omit({ id: true, createdAt: true });
 export type InsertDemotionLog = z.infer<typeof insertDemotionLogSchema>;
@@ -566,7 +622,10 @@ export const launchHealthScores = pgTable("launch_health_scores", {
   maxScore: integer("max_score").default(100),
   breakdown: jsonb("breakdown"),
   calculatedAt: timestamp("calculated_at").defaultNow(),
-});
+}, (t) => [
+  index("idx_launch_health_website").on(t.websiteId),
+  index("idx_launch_health_date").on(t.calculatedAt),
+]);
 export type LaunchHealthScore = typeof launchHealthScores.$inferSelect;
 
 // ─── Phase 9: Client Weekly Digests ──────────────────────────────────────────
@@ -582,7 +641,10 @@ export const clientWeeklyDigests = pgTable("client_weekly_digests", {
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").defaultNow(),
   status: varchar("status", { length: 20 }).default("pending"),
-});
+}, (t) => [
+  index("idx_client_digest_website").on(t.websiteId),
+  index("idx_client_digest_status").on(t.status),
+]);
 export type ClientWeeklyDigest = typeof clientWeeklyDigests.$inferSelect;
 
 // ─── Phase 10: Call Tracking Numbers ─────────────────────────────────────────
@@ -598,7 +660,11 @@ export const callTrackingNumbers = pgTable("call_tracking_numbers", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("call_tracking_numbers_dynamic_number_unique").on(t.dynamicNumber),
+  index("idx_call_tracking_page").on(t.pageId),
+  index("idx_call_tracking_website").on(t.websiteId),
+]);
 
 export const insertCallTrackingNumberSchema = createInsertSchema(callTrackingNumbers).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertCallTrackingNumber = z.infer<typeof insertCallTrackingNumberSchema>;
@@ -619,7 +685,11 @@ export const trackedCalls = pgTable("tracked_calls", {
   callStatus: varchar("call_status", { length: 50 }),
   callProviderId: varchar("call_provider_id", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => [
+  index("idx_tracked_calls_website").on(t.websiteId),
+  index("idx_tracked_calls_page").on(t.pageId),
+  index("idx_tracked_calls_timestamp").on(t.callTimestamp),
+]);
 
 export const insertTrackedCallSchema = createInsertSchema(trackedCalls).omit({ id: true, createdAt: true });
 export type InsertTrackedCall = z.infer<typeof insertTrackedCallSchema>;
@@ -642,7 +712,11 @@ export const trackedLeads = pgTable("tracked_leads", {
   sourcePageTitle: varchar("source_page_title", { length: 255 }),
   formTimestamp: timestamp("form_timestamp").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => [
+  index("idx_tracked_leads_website").on(t.websiteId),
+  index("idx_tracked_leads_page").on(t.pageId),
+  index("idx_tracked_leads_timestamp").on(t.formTimestamp),
+]);
 
 export const insertTrackedLeadSchema = createInsertSchema(trackedLeads).omit({ id: true, createdAt: true });
 export type InsertTrackedLead = z.infer<typeof insertTrackedLeadSchema>;
@@ -661,7 +735,11 @@ export const bookedJobs = pgTable("booked_jobs", {
   status: varchar("status", { length: 50 }).default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (t) => [
+  index("idx_booked_jobs_account").on(t.accountId),
+  index("idx_booked_jobs_page").on(t.pageId),
+  index("idx_booked_jobs_date").on(t.bookedDate),
+]);
 
 export const insertBookedJobSchema = createInsertSchema(bookedJobs).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertBookedJob = z.infer<typeof insertBookedJobSchema>;
