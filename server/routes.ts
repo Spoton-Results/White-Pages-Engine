@@ -81,16 +81,16 @@ export function invalidateSitemapCache(websiteId: string) {
 // Caches the fully-rendered HTML for each slug so repeated requests (crawlers,
 // multiple users) skip all 7 DB queries and return in <5 ms from memory.
 // Also used for dynamically-generated pages (same key space, same TTL).
-// SIZE-CAPPED: max 500 entries. Real SEO pages average 200-400 KB each so
-// 2000 entries consumed up to 800 MB+, contributing to OOM crashes on autoscale.
-// 500 entries ≈ 150 MB worst-case; CDN / Cloudflare absorbs the rest.
+// SIZE-CAPPED: max 5000 entries. Pages average 40-80 KB rendered HTML.
+// 5000 entries ≈ 250-400 MB worst-case. Cloudflare edge cache absorbs the rest
+// so warm re-requests never reach the server.
 const pageHtmlCache = new Map<string, { html: string; expiresAt: number }>();
-const PAGE_HTML_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — CDN handles freshness beyond this
-const PAGE_HTML_CACHE_MAX = 500;
+const PAGE_HTML_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours — Cloudflare edge cache handles staleness
+const PAGE_HTML_CACHE_MAX = 5000; // hold more pages in memory; evict LRU when full
 
 // Rate-limit fallback promotion checks to once per minute per website (avoids DB flood under crawler traffic)
 const fallbackPromotionLastRun = new Map<string, number>();
-const PAGE_HTML_CACHE_EVICT = 50; // evict oldest 50 when full (10% of 500)
+const PAGE_HTML_CACHE_EVICT = 500; // evict oldest 500 when full (10% of 5000)
 
 function pageHtmlCacheSet(key: string, value: { html: string; expiresAt: number }) {
   if (pageHtmlCache.size >= PAGE_HTML_CACHE_MAX) {
