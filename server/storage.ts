@@ -920,7 +920,30 @@ export async function getStateNavPages(websiteId: string, serviceSlug?: string):
   return result;
 }
 
-export async function getSiblingServicePages(websiteId: string, currentSlug: string, currentPageId: string): Promise<{title: string, slug: string, serviceName: string | null}[]> {
+export async function getSiblingServicePages(websiteId: string, currentSlug: string, currentPageId: string, locationId?: string | null): Promise<{title: string, slug: string, serviceName: string | null}[]> {
+  // Use locationId when available — hits idx_pages_website_loc_pub (fast index).
+  // Fall back to slug suffix LIKE only when locationId is absent (older pages).
+  if (locationId) {
+    const cacheKey = `${websiteId}:loc:${locationId}`;
+    const cached = siblingServiceCache.get(cacheKey);
+    if (cached && Date.now() < cached.exp) {
+      return cached.data.filter(r => r.slug !== currentSlug);
+    }
+    const rows = await db.select({ title: pages.title, slug: pages.slug, serviceName: services.name })
+      .from(pages)
+      .leftJoin(services, eq(pages.serviceId, services.id))
+      .where(and(
+        eq(pages.websiteId, websiteId),
+        eq(pages.status, "published"),
+        eq(pages.locationId, locationId),
+      ))
+      .orderBy(asc(services.name), asc(pages.title))
+      .limit(21);
+    const result = rows.map(r => ({ title: r.title, slug: r.slug, serviceName: r.serviceName ?? null }));
+    siblingServiceCache.set(cacheKey, { data: result, exp: Date.now() + NAV_CACHE_TTL });
+    return result.filter(r => r.slug !== currentSlug);
+  }
+
   const inIdx = currentSlug.lastIndexOf("-in-");
   if (inIdx === -1) return [];
   const locationSuffix = currentSlug.slice(inIdx); // e.g. "-in-dallas-tx"
@@ -928,7 +951,6 @@ export async function getSiblingServicePages(websiteId: string, currentSlug: str
   const cacheKey = `${websiteId}:${locationSuffix}`;
   const cached = siblingServiceCache.get(cacheKey);
   if (cached && Date.now() < cached.exp) {
-    // Filter out the current page from the cached result
     return cached.data.filter(r => r.slug !== currentSlug);
   }
 
@@ -941,7 +963,7 @@ export async function getSiblingServicePages(websiteId: string, currentSlug: str
       sql`${pages.slug} LIKE ${"%" + locationSuffix}`,
     ))
     .orderBy(asc(services.name), asc(pages.title))
-    .limit(21); // fetch one extra so we have room to exclude current
+    .limit(21);
   const result = rows.map(r => ({ title: r.title, slug: r.slug, serviceName: r.serviceName ?? null }));
   siblingServiceCache.set(cacheKey, { data: result, exp: Date.now() + NAV_CACHE_TTL });
   return result.filter(r => r.slug !== currentSlug);

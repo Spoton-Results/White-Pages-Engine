@@ -188,56 +188,105 @@ function buildFirstPassPrompt(ctx: PageContext): string {
 
   // Build bank snippets block — inject 1 variation per section as a style anchor
   const snippetBlock = ctx.bankSnippets?.length
-    ? `APPROVED CONTENT SNIPPETS (use these as style anchors — paraphrase and expand, do not copy verbatim):
+    ? `APPROVED CONTENT SNIPPETS (use as style anchors — paraphrase and expand, do not copy verbatim):
 ${ctx.bankSnippets.map(s => `[${s.section}]: ${s.snippet}`).join("\n\n")}`
     : "";
 
   const voiceDirective = ctx.brandVoiceAndTone
-    ? `BRAND VOICE: ${ctx.brandVoiceAndTone}`
-    : "BRAND VOICE: Direct, helpful, specific. Avoid corporate filler.";
+    ? `BRAND VOICE & TONE: ${ctx.brandVoiceAndTone}`
+    : "BRAND VOICE & TONE: Direct, confident, genuinely helpful. Speak like a knowledgeable local expert, not a corporate copywriter.";
 
-  return `You are a specialist content writer creating a locally-targeted service page. Your job is to write content that reads like it was written by someone who actually knows this business and this area — NOT like generic SEO filler.
+  const locationLine = ctx.locationName
+    ? `${ctx.locationName}${ctx.locationState ? `, ${ctx.locationState}` : ""}`
+    : "the service area";
 
-PAGE DETAILS:
-- Title: ${title}
-- H1: ${h1}
-- Meta Description: ${metaDesc}
-- Slug: ${slug}
-- Page Type: ${ctx.pageType}
-- Target Word Count: ${ctx.requiredWordCount}+ words
-${ctx.locationName ? `- Location: ${ctx.locationName}${ctx.locationState ? `, ${ctx.locationState}` : ""}` : ""}
-${ctx.serviceName ? `- Service: ${ctx.serviceName}` : ""}
-${ctx.industryName ? `- Industry: ${ctx.industryName}` : ""}
-${ctx.primaryKeyword ? `- Primary Keyword: ${ctx.primaryKeyword}` : ""}
-${ctx.secondaryKeywords?.length ? `- Secondary Keywords: ${ctx.secondaryKeywords.join(", ")}` : ""}
+  return `You are a senior SEO content strategist and local service copywriter. Your content must satisfy Google's E-E-A-T guidelines (Experience, Expertise, Authoritativeness, Trustworthiness) and pass Google's Helpful Content evaluation — meaning it must be written primarily to genuinely help people, not just to rank.
 
-${businessFacts.length ? `BUSINESS FACTS (weave these naturally into the content — do not list them as bullet points):\n${businessFacts.map(f => `• ${f}`).join("\n")}` : ""}
+═══════════════════════════════════════
+PAGE ASSIGNMENT
+═══════════════════════════════════════
+Title:          ${title}
+H1:             ${h1}
+Meta Desc:      ${metaDesc}
+Slug:           ${slug}
+Page Type:      ${ctx.pageType}
+Target Length:  ${ctx.requiredWordCount}+ words
+Location:       ${locationLine}
+${ctx.serviceName ? `Service:        ${ctx.serviceName}` : ""}
+${ctx.industryName ? `Industry:       ${ctx.industryName}` : ""}
+${ctx.primaryKeyword ? `Primary KW:     ${ctx.primaryKeyword}` : ""}
+${ctx.secondaryKeywords?.length ? `Secondary KWs:  ${ctx.secondaryKeywords.join(", ")}` : ""}
 
-${serviceFacts.length ? `SERVICE SPECIFICS (use these to explain the actual process and set expectations):\n${serviceFacts.map(f => `• ${f}`).join("\n")}` : ""}
+═══════════════════════════════════════
+BUSINESS INTELLIGENCE (use this — do not invent facts)
+═══════════════════════════════════════
+${businessFacts.length
+  ? businessFacts.map(f => `• ${f}`).join("\n")
+  : `• Business name: ${ctx.brandName || "this business"}\n• (Fill content from service specifics and location context below)`}
+
+${serviceFacts.length ? `SERVICE SPECIFICS — explain the real process, not marketing fluff:\n${serviceFacts.map(f => `• ${f}`).join("\n")}` : ""}
 
 ${snippetBlock}
 
 ${voiceDirective}
 
-REQUIRED SECTIONS:
+═══════════════════════════════════════
+REQUIRED SECTIONS
+═══════════════════════════════════════
 ${sections || "- Introduction\n- How It Works\n- Why Choose This Business\n- Local Service Area\n- FAQ\n- Call to Action"}
 
-WRITING RULES — READ CAREFULLY:
-1. Write at least ${ctx.requiredWordCount} words. Every section must be substantive — no padding.
-2. Be specific about ${ctx.locationName || "the area"}: reference actual neighborhoods, cross-streets, landmarks, or local context that people there would recognize.
-3. Use the primary keyword naturally 3-5 times. Do not keyword-stuff.
-4. Every claim must feel grounded in this specific business. Use the business facts above.
-5. Explain the actual service process step by step — what happens after the customer contacts them, what the timeline looks like, what they should expect.
-6. Set clear expectations: timeframes, what is included, what happens next.
-${ctx.faqEnabled ? "7. Include a FAQ section with 4-6 questions that real customers actually ask — answer each one specifically, not generically." : ""}
+═══════════════════════════════════════
+E-E-A-T CONTENT REQUIREMENTS (Google ranks on these signals)
+═══════════════════════════════════════
+EXPERIENCE — Show first-hand knowledge of doing this work:
+• Describe what actually happens during a service call / project — the real sequence of events
+• Include details only someone who has performed this service would know (prep steps, common complications, what good vs poor results look like)
+• Reference real scenarios: "When we see X, we typically do Y because Z"
 
-ABSOLUTELY FORBIDDEN — do not use any of these phrases or their variants:
+EXPERTISE — Demonstrate deep subject-matter knowledge:
+• Use precise industry terminology correctly — spell out acronyms, explain technical terms in plain language
+• Address common misconceptions customers have about this service
+• Include at least 2-3 specific data points, statistics, or industry facts that are verifiably true and relevant (e.g., typical cost ranges, code requirements, failure rates, timeframes)
+• Explain the WHY behind your process, not just the WHAT
+
+AUTHORITATIVENESS — Establish credibility for ${locationLine}:
+• Reference the business's credentials, years in business, and specific expertise from the business facts above
+• Name-drop the specific service area geography: neighborhoods, major roads, zip codes, or local landmarks people in ${ctx.locationName || "this area"} would recognize
+• Mention local regulations, permit requirements, or area-specific considerations that affect this service
+
+TRUSTWORTHINESS — Build confidence before the ask:
+• Be honest about limitations: what this service does NOT cover, when they should call someone else
+• Set realistic expectations: actual timeframes, what factors affect cost, what the customer needs to do to prepare
+• Address price/cost questions directly — give ranges if possible, explain what drives price variation
+• Include social proof signals: describe the type of customers served, outcomes achieved
+
+═══════════════════════════════════════
+GOOGLE HELPFUL CONTENT RULES (non-negotiable)
+═══════════════════════════════════════
+1. Write for the PERSON reading this, not for the search engine crawling it
+2. Every paragraph must answer a real question or serve a real need — cut anything that is just filler
+3. If you would not say something to a customer's face, do not write it
+4. Do not summarize what you are about to say — just say it
+5. Do not end sections with "Contact us to learn more" — give the information first, THEN the CTA
+6. Write at least ${ctx.requiredWordCount} words. Depth and specificity are more valuable than length — reach the target through substance, not repetition
+
+═══════════════════════════════════════
+WRITING RULES
+═══════════════════════════════════════
+1. Use the primary keyword naturally 3-5 times. No stuffing. Use semantic variants and LSI terms.
+2. Every factual claim must come from the business facts above OR be a verifiable industry standard — never invent company-specific facts
+3. Be hyper-local: reference actual neighborhoods, cross-streets, landmarks, or local context specific to ${ctx.locationName || "the area"} that locals would recognize
+4. Structure for scannability: use <h2> and <h3> subheadings that themselves answer questions (not just label topics)
+5. Use <ul> and <li> for process steps, checklists, and comparison points — not for padding
+${ctx.faqEnabled ? "6. FAQ section: 4-6 questions real customers actually type into Google. Answers must be specific, not generic — treat each as a mini-article" : ""}
+
+ABSOLUTELY FORBIDDEN — using any of these phrases or close variants:
 ${FORBIDDEN_PHRASES.map(p => `"${p}"`).join(", ")}
-Also forbidden: any phrase that could apply to any business in any city. Every sentence must be specific to ${ctx.brandName || "this business"} in ${ctx.locationName || "this location"}.
+Also forbidden: vague superlatives ("the best", "top-rated" without evidence), future-tense promises without specifics, and any sentence that could be copy-pasted onto a competitor's page unchanged.
 
-IMPORTANT — OUTPUT FORMAT:
-Use EXACTLY these delimiters (four equals signs, name, four equals signs). Output nothing outside them.
-
+═══════════════════════════════════════
+OUTPUT FORMAT — use EXACTLY these delimiters
+═══════════════════════════════════════
 ====TITLE====
 ${title}
 ====META====
@@ -247,37 +296,40 @@ ${h1}
 ====SLUG====
 ${slug}
 ====PUBLISH_SCORE====
-<a decimal 0.0-1.0 representing your honest quality assessment>
+<decimal 0.0-1.0 — your honest E-E-A-T quality assessment>
 ====LOCAL_SIGNAL_SCORE====
-<a decimal 0.0-1.0 representing how locally specific this content is>
+<decimal 0.0-1.0 — how locally specific and verifiable this content is>
 ====CONTENT====
-<Write the full HTML article here using <h2>, <p>, <ul>, <li> tags. Write ALL ${ctx.requiredWordCount}+ words. Use double quotes for HTML attributes.>
+<Full HTML article using <h2>, <h3>, <p>, <ul>, <li>. Write ALL ${ctx.requiredWordCount}+ words. Double quotes for HTML attributes. No markdown — pure HTML only.>
 ${ctx.faqEnabled ? `====FAQ====
-<A JSON array of FAQ objects: [{"question":"...","answer":"..."}]>` : ""}
+<JSON array only: [{"question":"...","answer":"..."}]>` : ""}
 ====END====`;
 }
 
 function buildReviewPrompt(originalHtml: string, ctx: PageContext): string {
-  return `You are an adversarial SEO editor reviewing a locally-targeted article. Be strict and honest.
+  return `You are a senior SEO quality editor applying Google's E-E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness) standards and Helpful Content guidelines. Be strict — mediocre content that technically has enough words still fails.
 
 REVIEW CRITERIA:
 1. Word count >= ${ctx.requiredWordCount}
-2. Local specificity — does it mention actual local details, not generic text?
-3. Unique value — not thin, not duplicate-feeling
-4. Keyword usage — natural, not stuffed
-5. Professional and helpful tone
-6. All required sections present and substantial
-7. No factual errors or placeholder text
+2. EXPERIENCE — Does it show first-hand knowledge of actually doing this work? (Real process details, real scenarios, insider knowledge)
+3. EXPERTISE — Does it demonstrate deep subject-matter knowledge? (Precise terminology, specific data points, explains WHY not just WHAT)
+4. AUTHORITATIVENESS — Does it establish credibility for this specific location and business? (Local geography, credentials, track record)
+5. TRUSTWORTHINESS — Does it set honest expectations? (Real timeframes, cost factors, limitations, what NOT to expect)
+6. Helpful Content — Is every paragraph genuinely useful to a person, or is it filler written for the search engine?
+7. Local specificity — Does it reference real local details (neighborhoods, roads, landmarks) or is it generic text with a city name pasted in?
+8. No forbidden filler phrases or generic corporate language
+9. Natural keyword usage — primary keyword appears 3-5 times, no stuffing
+10. All required sections are present and substantive
 
-ORIGINAL CONTENT:
+CONTENT TO REVIEW:
 ${originalHtml.substring(0, 6000)}
 
 Respond with ONLY valid JSON (no markdown, no code fences):
 {
   "passed": true,
   "score": <0.0-1.0>,
-  "issues": ["list of specific issues found"],
-  "notes": "brief overall assessment"
+  "issues": ["list of specific, actionable issues found"],
+  "notes": "brief overall assessment focusing on E-E-A-T quality"
 }`;
 }
 

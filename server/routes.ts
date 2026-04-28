@@ -189,7 +189,7 @@ async function resolveNavData(page: any, websiteId: string): Promise<[NavData["s
   // Kick off all independent queries in parallel
   const stateNavPromise = storage.getStateNavPages(websiteId, pageServiceSlug);
   const siblingPromise = ((page.pageType === "service_city" || page.pageType === "industry_city") && page.slug)
-    ? storage.getSiblingServicePages(websiteId, page.slug, page.id)
+    ? storage.getSiblingServicePages(websiteId, page.slug, page.id, page.locationId ?? null)
     : Promise.resolve([] as NavData["siblingServices"]);
 
   let cityPagesPromise: Promise<NavData["cityPages"]> = Promise.resolve([]);
@@ -793,9 +793,12 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
       var status = document.getElementById('formStatus');
       btn.disabled = true;
       btn.textContent = 'Sending...';
+      var controller = new AbortController();
+      var timer = setTimeout(function() { controller.abort(); }, 15000);
       fetch('/api/public/contact', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
+        signal: controller.signal,
         body: JSON.stringify({
           websiteId: '${page.websiteId}',
           pageId: '${page.id}',
@@ -806,7 +809,7 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
           phone: document.getElementById('cf-phone').value,
           message: document.getElementById('cf-msg').value
         })
-      }).then(function(r){ return r.json(); }).then(function(data){
+      }).then(function(r){ clearTimeout(timer); return r.json(); }).then(function(data){
         if (data.success) {
           document.getElementById('contactForm').style.display = 'none';
           status.style.display = 'block';
@@ -821,11 +824,14 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
           btn.disabled = false;
           btn.textContent = '${ctaButtonLabel}';
         }
-      }).catch(function(){
+      }).catch(function(err){
+        clearTimeout(timer);
         status.style.display = 'block';
         status.style.background = '#fee2e2';
         status.style.color = '#991b1b';
-        status.textContent = 'Connection error. Please try again.';
+        status.textContent = (err && err.name === 'AbortError')
+          ? 'Request timed out. Please try again.'
+          : 'Connection error. Please try again.';
         btn.disabled = false;
         btn.textContent = '${ctaButtonLabel}';
       });
