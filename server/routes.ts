@@ -4347,6 +4347,8 @@ Return ONLY valid JSON (no markdown):
     const parentDomain = (website.settings as any)?.parentDomain;
     const proxyPath = (website.settings as any)?.proxyPath || "";
     const canonicalBase = parentDomain ? `https://${parentDomain}${proxyPath}` : `https://${website.domain}`;
+    const page = await storage.getPageBySlug(website.id, slug);
+    if (!page || page.status !== "published") return res.status(404).send("Page not found");
 
     // Sitemap index
     if (slug === "sitemap.xml" || slug === "sitemap_index.xml" || slug === "sitemap") {
@@ -4413,6 +4415,10 @@ Return ONLY valid JSON (no markdown):
       return res.send(robotsContent);
     }
 
+    res.set("Cache-Control", "public, max-age=3600");
+    res.set("Content-Type", "text/html; charset=utf-8");
+    res.removeHeader("Set-Cookie");
+
     // Determine the link base for nav links rendered into the page HTML.
     // For websites with a real proxy path (/pages, etc.): always use the real path.
     //   - On live domains, Cloudflare handles /pages/* correctly.
@@ -4435,30 +4441,16 @@ Return ONLY valid JSON (no markdown):
       return res.send(cachedPage.html);
     }
 
-    // Parallel: page lookup + brand lookup simultaneously
-    const [page, brandProfiles] = await Promise.all([
-      storage.getPageBySlug(website.id, slug),
-      storage.getBrandProfiles(website.accountId),
-    ]);
+    // Parallel: brand lookup only — page already loaded above
+    const brandProfiles = await storage.getBrandProfiles(website.accountId);
     const brand = brandProfiles[0];
 
-    if (!page || page.status !== "published") {
-      // Check hub pages first
-      const hubPage = await storage.getHubPageBySlug(website.id, slug);
-      if (hubPage && hubPage.status === "published" && hubPage.content) {
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
-        return res.send(hubPage.content);
-      }
-      const dynamic = await tryGenerateDynamicPage(slug, website, brand, siteLinkBase || undefined);
-      if (dynamic && "redirect" in dynamic) return res.redirect(301, dynamic.redirect);
-      if (dynamic && "html" in dynamic) {
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
-        console.log(`[dynamic-page] 200 on-the-fly: ${slug}`);
-        return res.send(dynamic.html);
-      }
-      return res.status(404).send(notFoundHtml("Page not found or not yet published"));
+    // Check hub pages first
+    const hubPage = await storage.getHubPageBySlug(website.id, slug);
+    if (hubPage && hubPage.status === "published" && hubPage.content) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
+      return res.send(hubPage.content);
     }
 
     // Parallel: content version + nav data + internal links
@@ -4475,9 +4467,6 @@ Return ONLY valid JSON (no markdown):
       pageHtmlCacheSet(pageCacheKey, { html, expiresAt: Date.now() + PAGE_HTML_CACHE_TTL_MS });
     }
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=60");
-    res.setHeader("X-Cache", "MISS");
     return res.send(html);
   });
 
