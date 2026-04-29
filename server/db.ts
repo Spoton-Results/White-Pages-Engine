@@ -10,9 +10,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,                          // Replit autoscales to 3+ instances — 10×3=30 total, well within DB limits
+  max: 15,                          // Replit autoscales to 3+ instances — 15×3=45 total, within DB limits
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,    // 5s — fail fast so requests don't pile up waiting for connections
+  connectionTimeoutMillis: 8000,    // 8s — fail fast so requests don't pile up waiting for connections
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
