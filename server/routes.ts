@@ -5272,11 +5272,9 @@ Return ONLY valid JSON (no markdown):
 
     // Fire-and-forget — runs entirely on the server after response is sent
     const { runBulkBackgroundJob } = await import("./services/bulk-background");
-    setImmediate(() => {
-      runBulkBackgroundJob(job.id).catch(err => {
-        console.error("[bulk-background] unhandled error in job", job.id, err);
-        storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() }).catch(() => {});
-      });
+    void runBulkBackgroundJob(job.id).catch(err => {
+      console.error("[bulk-background] unhandled error in job", job.id, err);
+      storage.updateGenerationJob(job.id, { status: "failed", completedAt: new Date() }).catch(() => {});
     });
 
     return res.json({ jobId: job.id, message: "Job started in background" });
