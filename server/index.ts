@@ -504,13 +504,7 @@ async function runBackgroundStartup() {
     () => {
       log(`serving on port ${port}`);
 
-      // Run heavy startup tasks only after the app has been stable for a bit,
-      // so interactive admin work stays responsive during the initial burst.
-      setTimeout(() => {
-        runBackgroundStartup().catch(err => {
-          console.error("[startup] Background startup failed (non-fatal):", err);
-        });
-      }, 2 * 60 * 1000);
+      // Keep startup light so admin workflows stay responsive.
 
       // Daily database backup — runs at 03:00 UTC, keeps last 7 files
       setImmediate(async () => {
