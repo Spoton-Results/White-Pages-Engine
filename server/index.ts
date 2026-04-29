@@ -504,45 +504,13 @@ async function runBackgroundStartup() {
     () => {
       log(`serving on port ${port}`);
 
-      // Run all heavy startup tasks in the background after the port is open
-      setImmediate(() => {
+      // Run heavy startup tasks only after the app has been stable for a bit,
+      // so interactive admin work stays responsive during the initial burst.
+      setTimeout(() => {
         runBackgroundStartup().catch(err => {
           console.error("[startup] Background startup failed (non-fatal):", err);
         });
-      });
-
-      // Sitemap startup task — warm cache then one-time regen for any missing xml_content
-      setImmediate(async () => {
-        try {
-          const { getWebsites, getSitemaps } = await import("./storage");
-          const { warmSitemapCache } = await import("./routes");
-          const { generateSitemapsForWebsite } = await import("./services/sitemap");
-          const allWebsites = await getWebsites();
-          const withPages = allWebsites.filter(w => w.publishedPageCount && w.publishedPageCount > 0);
-          if (withPages.length === 0) return;
-
-          console.log(`[startup] Sitemap startup task for ${withPages.length} website(s)...`);
-
-          for (const w of withPages) {
-            try {
-              await warmSitemapCache(w.id);
-              const chunks = await getSitemaps(w.id);
-              const needsRegen = chunks.length > 0 && chunks.some(c => !c.xmlContent);
-              if (needsRegen) {
-                console.log(`[startup] Running one-time sitemap regen for ${w.domain} (${chunks.length} chunk(s) missing xml_content)...`);
-                await generateSitemapsForWebsite(w.id, w.domain);
-                console.log(`[startup] Sitemap regen complete for ${w.domain}`);
-              }
-            } catch (err) {
-              console.error(`[startup] Sitemap task failed for ${w.domain} (non-fatal):`, err);
-            }
-          }
-
-          console.log("[startup] Sitemap startup task complete.");
-        } catch (err) {
-          console.error("[startup] Sitemap startup task failed (non-fatal):", err);
-        }
-      });
+      }, 2 * 60 * 1000);
 
       // Daily database backup — runs at 03:00 UTC, keeps last 7 files
       setImmediate(async () => {
