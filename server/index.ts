@@ -523,7 +523,7 @@ async function runBackgroundStartup() {
 
           console.log(`[startup] Sitemap startup task for ${withPages.length} website(s)...`);
 
-          await Promise.all(withPages.map(async (w) => {
+          for (const w of withPages) {
             try {
               await warmSitemapCache(w.id);
               const chunks = await getSitemaps(w.id);
@@ -536,7 +536,7 @@ async function runBackgroundStartup() {
             } catch (err) {
               console.error(`[startup] Sitemap task failed for ${w.domain} (non-fatal):`, err);
             }
-          }));
+          }
 
           console.log("[startup] Sitemap startup task complete.");
         } catch (err) {
