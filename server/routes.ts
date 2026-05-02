@@ -5900,14 +5900,9 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     const total = s.progress?.length ?? job.totalPages;
     const done = s.progress?.filter((p: any) => ["done", "error", "skipped"].includes(p.status)).length ?? job.processedPages;
     return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
-  });  app.get("/api/websites/:id/hub-pages/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
-    const job = await storage.getGenerationJob(req.params.jobId as string);
-    if (!job) return res.status(404).json({ error: "Job not found" });
-    const s = job.settings as any;
-    const total = s.progress?.length ?? job.totalPages;
-    const done = s.progress?.filter((p: any) => ["done", "error", "skipped"].includes(p.status)).length ?? job.processedPages;
-    return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
-  });  // ── Hub Backfill: Generate content for all published hubs with no content ──
+  });
+
+  // ── Hub Backfill: Generate content for all published hubs with no content ──
   app.post("/api/websites/:id/hub-pages/backfill-content", requireAuth, async (req: Request, res: Response) => {
     const websiteId = req.params.id as string;
     const website = await storage.getWebsite(websiteId);
