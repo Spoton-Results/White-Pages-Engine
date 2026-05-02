@@ -110,3 +110,37 @@ export function getPublicUrl(key: string): string {
   if (!base) return key;
   return `${base.replace(/\/$/, "")}/${key}`;
 }
+
+// ── Page HTML offload ─────────────────────────────────────────────────────────
+// Stores the fully-rendered page HTML in R2 and returns the storage key.
+// The key is persisted on pages.r2_key so the serve path can skip re-rendering.
+
+export async function savePageHtml(websiteId: string, slug: string, html: string): Promise<string> {
+  const key = `pages/${websiteId}/${slug}.html`;
+  await putObject(key, html, "text/html; charset=utf-8");
+  return key;
+}
+
+// Fetches rendered HTML for a page from R2.
+// Returns null if the object does not exist (404) so callers can fall back to DB.
+export async function getPageHtml(r2Key: string): Promise<string | null> {
+  try {
+    return await getObject(r2Key);
+  } catch (err: any) {
+    // NoSuchKey = object never written or already deleted — treat as cache miss
+    if (
+      err?.name === "NoSuchKey" ||
+      err?.Code === "NoSuchKey" ||
+      err?.$metadata?.httpStatusCode === 404
+    ) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+// Deletes all page HTML objects for a website (e.g. when a website is torn down).
+export async function deletePageHtmlForWebsite(websiteId: string): Promise<void> {
+  const keys = await listObjects(`pages/${websiteId}/`);
+  await Promise.all(keys.map((k) => deleteObject(k)));
+}
