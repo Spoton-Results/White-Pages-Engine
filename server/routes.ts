@@ -5900,6 +5900,55 @@ Return ONLY valid JSON (no markdown, no explanation outside the JSON):
     const total = s.progress?.length ?? job.totalPages;
     const done = s.progress?.filter((p: any) => ["done", "error", "skipped"].includes(p.status)).length ?? job.processedPages;
     return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
+  });  app.get("/api/websites/:id/hub-pages/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+    const job = await storage.getGenerationJob(req.params.jobId as string);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    const s = job.settings as any;
+    const total = s.progress?.length ?? job.totalPages;
+    const done = s.progress?.filter((p: any) => ["done", "error", "skipped"].includes(p.status)).length ?? job.processedPages;
+    return res.json({ status: job.status, total, done, created: job.passedPages, progress: s.progress ?? [] });
+  });  // ── Hub Backfill: Generate content for all published hubs with no content ──
+  app.post("/api/websites/:id/hub-pages/backfill-content", requireAuth, async (req: Request, res: Response) => {
+    const websiteId = req.params.id as string;
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { limit } = req.body as any;
+    const allHubs = await storage.getHubPages(websiteId);
+    const targets = allHubs.filter((h: any) => h.status === "published" && !h.content);
+    const batch = limit ? targets.slice(0, Number(limit)) : targets;
+
+    res.json({
+      ok: true,
+      total: batch.length,
+      message: `Backfill started for ${batch.length} hubs with no content.`,
+    });
+
+    setImmediate(async () => {
+      const { renderHubPageHtml } = await import("./services/hub-pages");
+      let success = 0;
+      let failed = 0;
+      for (const hub of batch) {
+        try {
+          const childLinks = await storage.getChildPagesForHub(websiteId, hub.hubType, hub.name, hub.maxChildLinks);
+          const content = renderHubPageHtml({
+            hubType: hub.hubType as any,
+            name: hub.name,
+            slug: hub.slug,
+            metaDescription: hub.metaDescription ?? undefined,
+            parentSlug: hub.parentSlug ?? undefined,
+            childLinks,
+            website,
+          });
+          await storage.updateHubPage(hub.id, { content, status: "published" });
+          success++;
+        } catch (err) {
+          failed++;
+          console.error(`[hub-backfill] Failed hub ${hub.id} (${hub.slug}):`, err);
+        }
+      }
+      console.log(`[hub-backfill] Complete — success: ${success}, failed: ${failed} / ${batch.length}`);
+    });
   });
 
   // ── P8: Top Services / States by Tier 1 + Thin-Bank Warnings ─────────────
