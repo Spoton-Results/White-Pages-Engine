@@ -1,4 +1,5 @@
 import type { ContentVariationBank, StateData } from "@shared/schema";
+import { getDisplayLocation, sanitizeGeoText } from "./geo-guardrails";
 
 export interface VariationPageResult {
   contentHtml: string;
@@ -53,6 +54,7 @@ function buildBreadcrumbJsonLd(
 ): string {
   const base = domain ? `https://${domain}` : "";
   const statePageSlug = `${serviceSlug}-in-${slugify(stateName)}`;
+  const displayLocation = getDisplayLocation({ locationName, locationType, stateName, stateAbbr });
 
   const items =
     locationType === "state"
@@ -63,7 +65,7 @@ function buildBreadcrumbJsonLd(
       : [
           { "@type": "ListItem", position: 1, name: "Home", item: `${base}/` },
           { "@type": "ListItem", position: 2, name: `${serviceName} in ${stateName}`, item: `${base}/${statePageSlug}` },
-          { "@type": "ListItem", position: 3, name: `${serviceName} in ${locationName}, ${stateAbbr}` },
+          { "@type": "ListItem", position: 3, name: `${serviceName} in ${displayLocation}` },
         ];
 
   return `<script type="application/ld+json">${JSON.stringify({
@@ -82,11 +84,12 @@ function buildLocalBusinessJsonLd(
   locationType: string,
 ): string {
   if (locationType !== "city") return "";
+  const displayLocation = getDisplayLocation({ locationName, locationType, stateName, stateAbbr });
   return `<script type="application/ld+json">${JSON.stringify({
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
     name: brandName,
-    description: `${serviceName} services for businesses in ${locationName}, ${stateAbbr}`,
+    description: `${serviceName} services for businesses in ${displayLocation}`,
     areaServed: { "@type": "City", name: locationName, containedInPlace: { "@type": "State", name: stateName } },
     serviceType: serviceName,
     address: {
@@ -128,10 +131,13 @@ export function buildVariationPage(
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
   const city = locationType === "state" ? stateName : locationName;
   const stateDisplay = stateName;
+  const geoTarget = { locationName, locationType, stateName, stateAbbr };
+  const displayLocation = getDisplayLocation(geoTarget);
 
   const vars: Record<string, string> = {
     service: serviceName,
     city,
+    location: displayLocation,
     state: stateDisplay,
     state_abbr: stateAbbr,
     landmark,
@@ -150,7 +156,7 @@ export function buildVariationPage(
     if (!bank) return "";
     const variations = bank.variations as string[];
     if (!variations.length) return "";
-    return substitute(pick(variations), vars);
+    return sanitizeGeoText(substitute(pick(variations), vars), geoTarget);
   };
 
   const intro = getSection("intro");
@@ -162,7 +168,7 @@ export function buildVariationPage(
   const h2Style = `style="font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20"`;
 
   const section = (heading: string, body: string) =>
-    body ? `<h2 ${h2Style}>${heading}</h2>\n${body}` : "";
+    body ? `<h2 ${h2Style}>${sanitizeGeoText(heading, geoTarget)}</h2>\n${body}` : "";
 
   // ── State hub → city pages (downward links) ──────────────────────────────
   let citiesSection = "";
@@ -193,7 +199,7 @@ export function buildVariationPage(
           return `<li style="break-inside:avoid;margin-bottom:.35rem"><a href="${linkPrefix}/${pageSlug}" style="color:#2563eb;text-decoration:none;font-size:.95rem">${s.name}</a></li>`;
         })
         .join("\n");
-      relatedServicesSection = `<h2 ${h2Style}>Related Services in ${city}, ${stateAbbr}</h2>\n<ul style="column-count:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:1.8;margin:0">\n${items}\n</ul>`;
+      relatedServicesSection = `<h2 ${h2Style}>Related Services in ${displayLocation}</h2>\n<ul style="column-count:2;column-gap:2rem;list-style:disc;padding-left:1.5rem;line-height:1.8;margin:0">\n${items}\n</ul>`;
     }
   }
 
@@ -219,8 +225,8 @@ export function buildVariationPage(
 
   const contentHtml = [
     intro,
-    section(`How ${serviceName} Works in ${city}, ${stateAbbr}`, howItWorks),
-    section(`Why ${city} Businesses Choose ${brandName}`, benefits),
+    section(`How ${serviceName} Works in ${displayLocation}`, howItWorks),
+    section(`Why ${displayLocation} Businesses Choose ${brandName}`, benefits),
     section("Frequently Asked Questions", faq),
     cta
       ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>`
@@ -254,20 +260,27 @@ export function buildVariationPage(
   const title =
     locationType === "state"
       ? `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${stateName} | ${brandName}`
-      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${city}, ${stateAbbr} | ${brandName}`;
+      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${displayLocation} | ${brandName}`;
 
   const h1 =
     locationType === "state"
       ? `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${stateName}`
-      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${city}, ${stateAbbr}`;
+      : `${serviceName}${clusterLabel ? ` – ${clusterLabel}` : ""} in ${displayLocation}`;
 
   const targetKeyword = cluster?.primaryKeyword ?? serviceName;
 
   // "near me" phrasing for city pages captures the highest-volume local modifier
   const metaDescription =
     locationType === "city"
-      ? `Looking for ${targetKeyword} near ${city}, ${stateAbbr}? ${brandName} provides trusted ${serviceName} to local businesses. Serving the ${city} area — get a free quote today.`
+      ? `Looking for ${targetKeyword} near ${displayLocation}? ${brandName} provides trusted ${serviceName} to local businesses. Serving the ${locationName} area — get a free quote today.`
       : `Looking for ${targetKeyword} in ${stateName}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
 
-  return { contentHtml, title, h1, metaDescription, slug, wordCount };
+  return {
+    contentHtml: sanitizeGeoText(contentHtml, geoTarget),
+    title: sanitizeGeoText(title, geoTarget),
+    h1: sanitizeGeoText(h1, geoTarget),
+    metaDescription: sanitizeGeoText(metaDescription, geoTarget),
+    slug,
+    wordCount,
+  };
 }
