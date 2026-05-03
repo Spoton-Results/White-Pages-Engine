@@ -128,6 +128,8 @@ async function getPublishedPage(options: RenderPublishedPageToR2Options): Promis
       p.h1,
       p.canonical_url,
       p.r2_key,
+      p.content_hash,
+      p.rendered_at,
       p.status,
       p.noindex,
       w.domain,
@@ -196,7 +198,7 @@ export async function renderPublishedPageToR2(
       slug: row.slug,
       r2Key: row.r2_key,
       contentHash,
-      renderedAt: null,
+      renderedAt: row.rendered_at ? new Date(row.rendered_at).toISOString() : null,
       skipped: true,
       reason: "Existing R2 artifact already matches content hash",
     };
@@ -209,7 +211,7 @@ export async function renderPublishedPageToR2(
       slug: row.slug,
       r2Key: row.r2_key ?? null,
       contentHash,
-      renderedAt: null,
+      renderedAt: row.rendered_at ? new Date(row.rendered_at).toISOString() : null,
       skipped: true,
       reason: "Dry run: HTML rendered and hashed but not uploaded",
     };
