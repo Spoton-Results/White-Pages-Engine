@@ -15,6 +15,10 @@ function equalLoose(a: string | null | undefined, b: string | null | undefined):
   return normalizeText(a).toLowerCase() === normalizeText(b).toLowerCase();
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function normalizeGeoTarget(target: GeoTarget): GeoTarget {
   const locationName = normalizeText(target.locationName);
   const stateName = normalizeText(target.stateName);
@@ -96,11 +100,40 @@ export function sanitizeGeoText(text: string, target: GeoTarget): string {
   if (!text) return text;
 
   const stateName = normalized.stateName;
+  const stateAbbr = normalized.stateAbbr;
   if (!stateName) return text;
 
-  const escapedState = stateName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
+  const escapedState = escapeRegExp(stateName);
+  const escapedAbbr = stateAbbr ? escapeRegExp(stateAbbr) : "";
+
+  let output = text
+    // Alabama, Alabama -> Alabama
     .replace(new RegExp(`\\b${escapedState}\\s*,\\s*${escapedState}\\b`, "gi"), stateName)
+    // Alabama, AL -> Alabama for state-level pages only. City pages still need City, AL.
+    .replace(
+      normalized.locationType === "state" && escapedAbbr
+        ? new RegExp(`\\b${escapedState}\\s*,\\s*${escapedAbbr}\\b`, "gi")
+        : /a^/g,
+      stateName,
+    );
+
+  // Generic duplicate phrase cleanup catches blueprint/rendered strings without target context.
+  output = output.replace(/\b([A-Z][A-Za-z .'-]{2,})\s*,\s*\1\b/g, "$1");
+
+  return output
     .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
     .trim();
+}
+
+export function sanitizeSlug(slug: string): string {
+  if (!slug) return slug;
+
+  // Fix repeated state slugs at the end: seasonal-payment-processing-alabama-alabama -> seasonal-payment-processing-alabama
+  const parts = slug.split("-").filter(Boolean);
+  if (parts.length >= 2 && parts[parts.length - 1] === parts[parts.length - 2]) {
+    parts.pop();
+  }
+
+  return parts.join("-").replace(/-{2,}/g, "-").replace(/(^-|-$)/g, "");
 }
