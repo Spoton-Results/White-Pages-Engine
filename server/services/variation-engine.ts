@@ -1,5 +1,5 @@
 import type { ContentVariationBank, StateData } from "@shared/schema";
-import { getDisplayLocation, sanitizeGeoText } from "./geo-guardrails";
+import { getDisplayLocation, sanitizeGeoText, sanitizeSlug } from "./geo-guardrails";
 
 export interface VariationPageResult {
   contentHtml: string;
@@ -53,7 +53,7 @@ function buildBreadcrumbJsonLd(
   stateAbbr: string,
 ): string {
   const base = domain ? `https://${domain}` : "";
-  const statePageSlug = `${serviceSlug}-in-${slugify(stateName)}`;
+  const statePageSlug = sanitizeSlug(`${serviceSlug}-in-${slugify(stateName)}`);
   const displayLocation = getDisplayLocation({ locationName, locationType, stateName, stateAbbr });
 
   const items =
@@ -175,7 +175,7 @@ export function buildVariationPage(
   if (locationType === "state" && citiesInState && citiesInState.length > 0) {
     const items = citiesInState
       .map(c => {
-        const citySlug = `${serviceSlug}-in-${slugify(c.name)}-${stateAbbr.toLowerCase()}`;
+        const citySlug = sanitizeSlug(`${serviceSlug}-in-${slugify(c.name)}-${stateAbbr.toLowerCase()}`);
         return `<li style="break-inside:avoid"><a href="${linkPrefix}/${citySlug}" style="color:#2563eb;text-decoration:none">${c.name}, ${stateAbbr}</a></li>`;
       })
       .join("\n");
@@ -191,11 +191,11 @@ export function buildVariationPage(
         ? /\{state\}/.test(blueprintSlugTemplate) && !/\{state_abbr\}/.test(blueprintSlugTemplate)
         : false;
       const statePart = bpUsesFullState ? slugify(stateName) : stateAbbr.toLowerCase();
-      const locationSlug = `${slugify(city)}-${statePart}`;
+      const locationSlug = sanitizeSlug(`${slugify(city)}-${statePart}`);
       const items = others
         .slice(0, 30)
         .map(s => {
-          const pageSlug = `${s.slug}-in-${locationSlug}`;
+          const pageSlug = sanitizeSlug(`${s.slug}-in-${locationSlug}`);
           return `<li style="break-inside:avoid;margin-bottom:.35rem"><a href="${linkPrefix}/${pageSlug}" style="color:#2563eb;text-decoration:none;font-size:.95rem">${s.name}</a></li>`;
         })
         .join("\n");
@@ -246,11 +246,11 @@ export function buildVariationPage(
   const locationSlug =
     locationType === "state"
       ? slugify(stateName)
-      : `${slugify(locationName)}-${stateAbbr.toLowerCase()}`;
+      : sanitizeSlug(`${slugify(locationName)}-${stateAbbr.toLowerCase()}`);
 
-  const slug = clusterSlug
+  const slug = sanitizeSlug(clusterSlug
     ? `${serviceSlug}--${clusterSlug}--in-${locationSlug}`
-    : `${serviceSlug}-in-${locationSlug}`;
+    : `${serviceSlug}-in-${locationSlug}`);
 
   const clusterLabel =
     cluster?.primaryKeyword && cluster.primaryKeyword.toLowerCase() !== serviceName.toLowerCase()
