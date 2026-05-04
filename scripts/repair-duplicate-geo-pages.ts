@@ -1,4 +1,5 @@
 import { pool } from "../server/db";
+import { sanitizeSlug } from "../server/services/geo-guardrails";
 
 const DUPLICATE_GEO_PATTERN = /\b([A-Z][A-Za-z .'-]{2,})\s*,\s*\1\b/g;
 
@@ -19,12 +20,22 @@ function repairDuplicateGeo(value: string | null | undefined): string | null {
   if (value == null) return null;
   return value
     .replace(DUPLICATE_GEO_PATTERN, (_match, place) => place)
+    .replace(/\b([A-Z][A-Za-z .'-]{2,})\s*,\s*\1\b/g, "$1")
     .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
     .trim();
 }
 
 function changed(before: string | null | undefined, after: string | null | undefined): boolean {
   return (before ?? "") !== (after ?? "");
+}
+
+async function slugExists(websiteId: string, slug: string, pageId: string): Promise<boolean> {
+  const res = await pool.query(
+    `SELECT 1 FROM pages WHERE website_id = $1 AND slug = $2 AND id <> $3 LIMIT 1`,
+    [websiteId, slug, pageId],
+  );
+  return res.rowCount > 0;
 }
 
 async function main() {
@@ -57,7 +68,8 @@ async function main() {
      LEFT JOIN page_versions pv ON pv.page_id = p.id AND pv.is_active = true
      WHERE ${clauses.join(" AND ")}
        AND (
-         p.title ~ ',\\s*[^,]+$'
+         p.slug ~ '([a-z0-9]+)-\\1$'
+         OR p.title ~ ',\\s*[^,]+$'
          OR p.h1 ~ ',\\s*[^,]+$'
          OR p.meta_description ~ ',\\s*[^,]+$'
          OR pv.content_html ~ ',\\s*[^,]+$'
@@ -70,7 +82,9 @@ async function main() {
   const repairs: Array<{
     pageId: string;
     websiteId: string;
-    slug: string;
+    oldSlug: string;
+    newSlug?: string;
+    slugSkippedReason?: string;
     fields: string[];
   }> = [];
 
@@ -79,6 +93,7 @@ async function main() {
     const nextH1 = repairDuplicateGeo(row.h1);
     const nextMeta = repairDuplicateGeo(row.meta_description);
     const nextContent = repairDuplicateGeo(row.content_html);
+    const repairedSlug = sanitizeSlug(row.slug);
 
     const fields: string[] = [];
     if (changed(row.title, nextTitle)) fields.push("title");
@@ -86,30 +101,46 @@ async function main() {
     if (changed(row.meta_description, nextMeta)) fields.push("meta_description");
     if (changed(row.content_html, nextContent)) fields.push("content_html");
 
-    if (fields.length === 0) continue;
+    let nextSlug: string | undefined;
+    let slugSkippedReason: string | undefined;
+    if (changed(row.slug, repairedSlug)) {
+      if (await slugExists(row.website_id, repairedSlug, row.id)) {
+        slugSkippedReason = `Target slug already exists: ${repairedSlug}`;
+      } else {
+        nextSlug = repairedSlug;
+        fields.push("slug");
+      }
+    }
+
+    if (fields.length === 0 && !slugSkippedReason) continue;
 
     repairs.push({
       pageId: row.id,
       websiteId: row.website_id,
-      slug: row.slug,
+      oldSlug: row.slug,
+      newSlug: nextSlug,
+      slugSkippedReason,
       fields,
     });
 
-    if (!dryRun) {
+    if (!dryRun && fields.length > 0) {
       await pool.query(
         `UPDATE pages
-         SET title = $1,
-             h1 = $2,
-             meta_description = $3,
+         SET slug = COALESCE($1, slug),
+             title = $2,
+             h1 = $3,
+             meta_description = $4,
              qa_report = COALESCE(qa_report, '{}'::jsonb) || jsonb_build_object(
                'duplicate_geo_repair', jsonb_build_object(
                  'repaired_at', NOW(),
-                 'fields', $4::jsonb
+                 'old_slug', $5,
+                 'new_slug', $1,
+                 'fields', $6::jsonb
                )
              ),
              updated_at = NOW()
-         WHERE id = $5`,
-        [nextTitle, nextH1, nextMeta, JSON.stringify(fields), row.id],
+         WHERE id = $7`,
+        [nextSlug ?? null, nextTitle, nextH1, nextMeta, row.slug, JSON.stringify(fields), row.id],
       );
 
       if (row.page_version_id && nextContent != null && fields.includes("content_html")) {
@@ -128,6 +159,8 @@ async function main() {
     dryRun,
     scannedCandidates: result.rows.length,
     repairCount: repairs.length,
+    slugRepairCount: repairs.filter((repair) => repair.newSlug).length,
+    slugSkippedCount: repairs.filter((repair) => repair.slugSkippedReason).length,
     repairs: repairs.slice(0, 50),
     recommendation:
       dryRun
