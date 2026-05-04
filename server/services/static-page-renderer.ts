@@ -50,7 +50,7 @@ function escapeHtml(value: string | null | undefined): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -246,13 +246,18 @@ export async function renderPublishedPagesBatchToR2(
 ): Promise<RenderPublishedPagesBatchResult> {
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 500);
 
+  const missingMetadataClause = options.force
+    ? ""
+    : `AND (r2_key IS NULL OR content_hash IS NULL OR rendered_at IS NULL)`;
+
   const result = await pool.query(
     `SELECT id
      FROM pages
      WHERE website_id = $1
        AND status = 'published'
        AND COALESCE(noindex, false) = false
-     ORDER BY updated_at DESC
+       ${missingMetadataClause}
+     ORDER BY created_at ASC, id ASC
      LIMIT $2`,
     [options.websiteId, limit],
   );
