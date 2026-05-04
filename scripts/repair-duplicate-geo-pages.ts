@@ -126,28 +126,28 @@ async function main() {
     if (!dryRun && fields.length > 0) {
       await pool.query(
         `UPDATE pages
-         SET slug = COALESCE($1, slug),
-             title = $2,
-             h1 = $3,
-             meta_description = $4,
+         SET slug = COALESCE($1::text, slug),
+             title = $2::text,
+             h1 = $3::text,
+             meta_description = $4::text,
              qa_report = COALESCE(qa_report, '{}'::jsonb) || jsonb_build_object(
                'duplicate_geo_repair', jsonb_build_object(
                  'repaired_at', NOW(),
-                 'old_slug', $5,
-                 'new_slug', $1,
+                 'old_slug', $5::text,
+                 'new_slug', $1::text,
                  'fields', $6::jsonb
                )
              ),
              updated_at = NOW()
-         WHERE id = $7`,
+         WHERE id = $7::varchar`,
         [nextSlug ?? null, nextTitle, nextH1, nextMeta, row.slug, JSON.stringify(fields), row.id],
       );
 
       if (row.page_version_id && nextContent != null && fields.includes("content_html")) {
         await pool.query(
           `UPDATE page_versions
-           SET content_html = $1
-           WHERE id = $2`,
+           SET content_html = $1::text
+           WHERE id = $2::varchar`,
           [nextContent, row.page_version_id],
         );
       }
