@@ -105,7 +105,7 @@ async function getTargets(args: Args): Promise<PageRow[]> {
   const websiteId = args.websiteId!;
   if (args.slug) {
     const res = await pool.query(
-      `SELECT id, slug, r2_key, page_type
+      `SELECT id, slug, r2_key, page_type::text AS page_type
        FROM pages
        WHERE website_id = $1::text
          AND slug = $2::text
@@ -125,7 +125,7 @@ async function getTargets(args: Args): Promise<PageRow[]> {
 
   if (args.pageType) {
     params.push(args.pageType);
-    where.push(`page_type = $${params.length}::text`);
+    where.push(`page_type::text = $${params.length}::text`);
   }
   if (args.slugContains) {
     params.push(`%${args.slugContains}%`);
@@ -144,7 +144,7 @@ async function getTargets(args: Args): Promise<PageRow[]> {
   const limitParam = params.length;
 
   const res = await pool.query(
-    `SELECT id, slug, r2_key, page_type
+    `SELECT id, slug, r2_key, page_type::text AS page_type
      FROM pages
      WHERE ${where.join(" AND ")}
      ORDER BY ${orderBySql(args.orderBy)}
@@ -175,8 +175,8 @@ async function getStats(websiteId: string) {
   const res = await pool.query(
     `SELECT
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false)::int AS published_indexable,
-      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type = 'service_city')::int AS service_city,
-      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type = 'state_hub')::int AS state_hub,
+      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type::text = 'service_city')::int AS service_city,
+      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type::text = 'state_hub')::int AS state_hub,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND r2_key IS NOT NULL)::int AS has_r2_key,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND content_hash IS NOT NULL)::int AS has_content_hash,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND rendered_at IS NOT NULL)::int AS has_rendered_at
