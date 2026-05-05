@@ -5,6 +5,7 @@ type Args = {
   batch: number;
   limit: number;
   dryRun: boolean;
+  repairWeak: boolean;
 };
 
 type HubRow = {
@@ -27,13 +28,14 @@ type ChildLink = {
 };
 
 function parseArgs(): Args {
-  const args: Args = { batch: 100, limit: 0, dryRun: false };
+  const args: Args = { batch: 100, limit: 0, dryRun: false, repairWeak: false };
   for (const raw of process.argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, "").split("=");
     if (key === "websiteId") args.websiteId = value;
     if (key === "batch") args.batch = Math.max(1, Number(value || 100));
     if (key === "limit") args.limit = Math.max(0, Number(value || 0));
     if (key === "dryRun") args.dryRun = value !== "false";
+    if (key === "repairWeak") args.repairWeak = value !== "false";
   }
   if (!args.websiteId) throw new Error("Missing required --websiteId=<id>");
   return args;
@@ -70,7 +72,8 @@ async function getStats(websiteId: string) {
        COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE status = 'published')::int AS published,
        COUNT(*) FILTER (WHERE content IS NOT NULL AND btrim(content) <> '')::int AS with_content,
-       COUNT(*) FILTER (WHERE status = 'published' AND (content IS NULL OR btrim(content) = ''))::int AS missing_content
+       COUNT(*) FILTER (WHERE status = 'published' AND (content IS NULL OR btrim(content) = ''))::int AS missing_content,
+       COUNT(*) FILTER (WHERE status = 'published' AND content ILIKE '%Related child pages are being organized%')::int AS weak_content
      FROM hub_pages
      WHERE website_id = $1::text`,
     [websiteId],
@@ -78,13 +81,14 @@ async function getStats(websiteId: string) {
   return res.rows[0];
 }
 
-async function getMissingHubs(websiteId: string, batch: number): Promise<HubRow[]> {
+async function getTargetHubs(websiteId: string, batch: number, repairWeak: boolean): Promise<HubRow[]> {
+  const weakSql = repairWeak ? `OR content ILIKE '%Related child pages are being organized%'` : "";
   const res = await pool.query(
     `SELECT id, website_id, account_id, hub_type, name, slug, max_child_links, meta_description, parent_slug
      FROM hub_pages
      WHERE website_id = $1::text
        AND status = 'published'
-       AND (content IS NULL OR btrim(content) = '')
+       AND ((content IS NULL OR btrim(content) = '') ${weakSql})
      ORDER BY created_at ASC, id ASC
      LIMIT $2::int`,
     [websiteId, batch],
@@ -92,87 +96,113 @@ async function getMissingHubs(websiteId: string, batch: number): Promise<HubRow[
   return res.rows;
 }
 
-async function getChildLinks(hub: HubRow): Promise<ChildLink[]> {
-  const maxLinks = Math.max(5, Math.min(Number(hub.max_child_links || 30), 500));
-  const words = serviceWords(hub.name);
-
-  if (hub.hub_type === "service" && words.length > 0) {
-    const likeTerms = words.slice(0, 6).map((w) => `%${w}%`);
-    const res = await pool.query(
-      `SELECT title, slug, quality_score, tier
-       FROM pages
-       WHERE website_id = $1::text
-         AND status = 'published'
-         AND COALESCE(noindex, false) = false
-         AND page_type NOT IN ('state_hub', 'city_hub')
-         AND (
-           slug ILIKE ANY($2::text[])
-           OR title ILIKE ANY($2::text[])
-           OR h1 ILIKE ANY($2::text[])
-         )
-       ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
-       LIMIT $3::int`,
-      [hub.website_id, likeTerms, maxLinks],
-    );
-    return res.rows;
-  }
-
-  if (hub.hub_type === "state") {
-    const stateSlug = hub.slug;
-    const res = await pool.query(
-      `SELECT title, slug, quality_score, tier
-       FROM pages
-       WHERE website_id = $1::text
-         AND status = 'published'
-         AND COALESCE(noindex, false) = false
-         AND slug ILIKE $2::text
-       ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
-       LIMIT $3::int`,
-      [hub.website_id, `%-${stateSlug}`, maxLinks],
-    );
-    return res.rows;
-  }
-
-  if (hub.hub_type === "city") {
-    const citySlug = hub.slug;
-    const res = await pool.query(
-      `SELECT title, slug, quality_score, tier
-       FROM pages
-       WHERE website_id = $1::text
-         AND status = 'published'
-         AND COALESCE(noindex, false) = false
-         AND slug ILIKE $2::text
-       ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
-       LIMIT $3::int`,
-      [hub.website_id, `%-in-${citySlug}-%`, maxLinks],
-    );
-    if (res.rows.length > 0) return res.rows;
-
-    const fallback = await pool.query(
-      `SELECT title, slug, quality_score, tier
-       FROM pages
-       WHERE website_id = $1::text
-         AND status = 'published'
-         AND COALESCE(noindex, false) = false
-         AND slug ILIKE $2::text
-       ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
-       LIMIT $3::int`,
-      [hub.website_id, `%${citySlug}%`, maxLinks],
-    );
-    return fallback.rows;
-  }
-
+async function getFallbackTopPages(hub: HubRow, maxLinks: number): Promise<ChildLink[]> {
   const res = await pool.query(
     `SELECT title, slug, quality_score, tier
      FROM pages
      WHERE website_id = $1::text
        AND status = 'published'
        AND COALESCE(noindex, false) = false
+       AND slug <> $2::text
      ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
-     LIMIT $2::int`,
-    [hub.website_id, maxLinks],
+     LIMIT $3::int`,
+    [hub.website_id, hub.slug, Math.min(maxLinks, 30)],
   );
   return res.rows;
+}
+
+async function getChildLinks(hub: HubRow): Promise<ChildLink[]> {
+  const maxLinks = Math.max(5, Math.min(Number(hub.max_child_links || 30), 500));
+
+  if (hub.hub_type === "service") {
+    const byService = await pool.query(
+      `SELECT p.title, p.slug, p.quality_score, p.tier
+       FROM pages p
+       LEFT JOIN services s ON s.id = p.service_id
+       WHERE p.website_id = $1::text
+         AND p.status = 'published'
+         AND COALESCE(p.noindex, false) = false
+         AND p.page_type NOT IN ('state_hub', 'city_hub')
+         AND (
+           s.slug = $2::text
+           OR lower(s.name) = lower($3::text)
+           OR p.slug ILIKE $4::text
+           OR p.title ILIKE $5::text
+           OR p.h1 ILIKE $5::text
+         )
+       ORDER BY COALESCE(p.quality_score, 0) DESC, COALESCE(p.tier, 9) ASC, p.updated_at DESC
+       LIMIT $6::int`,
+      [hub.website_id, hub.slug, hub.name, `${hub.slug}-%`, `%${hub.name}%`, maxLinks],
+    );
+    if (byService.rows.length > 0) return byService.rows;
+
+    const words = serviceWords(hub.name);
+    if (words.length > 0) {
+      const likeTerms = words.slice(0, 6).map((w) => `%${w}%`);
+      const fuzzy = await pool.query(
+        `SELECT title, slug, quality_score, tier
+         FROM pages
+         WHERE website_id = $1::text
+           AND status = 'published'
+           AND COALESCE(noindex, false) = false
+           AND page_type NOT IN ('state_hub', 'city_hub')
+           AND (slug ILIKE ANY($2::text[]) OR title ILIKE ANY($2::text[]) OR h1 ILIKE ANY($2::text[]))
+         ORDER BY COALESCE(quality_score, 0) DESC, COALESCE(tier, 9) ASC, updated_at DESC
+         LIMIT $3::int`,
+        [hub.website_id, likeTerms, maxLinks],
+      );
+      if (fuzzy.rows.length > 0) return fuzzy.rows;
+    }
+  }
+
+  if (hub.hub_type === "state") {
+    const byLocation = await pool.query(
+      `SELECT p.title, p.slug, p.quality_score, p.tier
+       FROM pages p
+       LEFT JOIN locations l ON l.id = p.location_id
+       WHERE p.website_id = $1::text
+         AND p.status = 'published'
+         AND COALESCE(p.noindex, false) = false
+         AND (
+           l.slug = $2::text
+           OR lower(l.name) = lower($3::text)
+           OR lower(l.state_name) = lower($3::text)
+           OR lower(l.state_code) = lower($2::text)
+           OR p.slug ILIKE $4::text
+           OR p.title ILIKE $5::text
+           OR p.h1 ILIKE $5::text
+         )
+       ORDER BY COALESCE(p.quality_score, 0) DESC, COALESCE(p.tier, 9) ASC, p.updated_at DESC
+       LIMIT $6::int`,
+      [hub.website_id, hub.slug, hub.name, `%-${hub.slug}`, `%${hub.name}%`, maxLinks],
+    );
+    if (byLocation.rows.length > 0) return byLocation.rows;
+  }
+
+  if (hub.hub_type === "city") {
+    const byLocation = await pool.query(
+      `SELECT p.title, p.slug, p.quality_score, p.tier
+       FROM pages p
+       LEFT JOIN locations l ON l.id = p.location_id
+       WHERE p.website_id = $1::text
+         AND p.status = 'published'
+         AND COALESCE(p.noindex, false) = false
+         AND (
+           l.slug = $2::text
+           OR lower(l.name) = lower($3::text)
+           OR p.slug ILIKE $4::text
+           OR p.slug ILIKE $5::text
+           OR p.title ILIKE $6::text
+           OR p.h1 ILIKE $6::text
+         )
+       ORDER BY COALESCE(p.quality_score, 0) DESC, COALESCE(p.tier, 9) ASC, p.updated_at DESC
+       LIMIT $7::int`,
+      [hub.website_id, hub.slug, hub.name, `%-in-${hub.slug}-%`, `%${hub.slug}%`, `%${hub.name}%`, maxLinks],
+    );
+    if (byLocation.rows.length > 0) return byLocation.rows;
+  }
+
+  return getFallbackTopPages(hub, maxLinks);
 }
 
 function buildHubContent(hub: HubRow, childLinks: ChildLink[]): { html: string; metaDescription: string } {
@@ -197,7 +227,7 @@ function buildHubContent(hub: HubRow, childLinks: ChildLink[]): { html: string; 
 </section>`
     : `<section class="hub-section hub-child-links">
   <h2>Related pages for ${name}</h2>
-  <p>Related child pages are being organized for this ${escapeHtml(hubLabel)} hub. Check back as more pages are connected.</p>
+  <p>This hub is being organized while related child pages are connected.</p>
 </section>`;
 
   const html = `<section class="hub-hero">
@@ -208,7 +238,7 @@ function buildHubContent(hub: HubRow, childLinks: ChildLink[]): { html: string; 
 
 <section class="hub-section">
   <h2>What this hub covers</h2>
-  <p>This hub organizes the strongest published pages connected to <strong>${name}</strong>. It is designed to help visitors move from a broad topic into the most relevant child pages without digging through the entire site.</p>
+  <p>This hub organizes the strongest published pages connected to <strong>${name}</strong>. It helps visitors move from a broad topic into the most relevant child pages without digging through the entire site.</p>
 </section>
 
 ${linksSection}
@@ -221,8 +251,12 @@ ${linksSection}
   return { html, metaDescription };
 }
 
-async function updateHub(hub: HubRow, html: string, metaDescription: string, dryRun: boolean) {
+async function updateHub(hub: HubRow, html: string, metaDescription: string, dryRun: boolean, repairWeak: boolean) {
   if (dryRun) return;
+  const contentCondition = repairWeak
+    ? `AND ((content IS NULL OR btrim(content) = '') OR content ILIKE '%Related child pages are being organized%')`
+    : `AND (content IS NULL OR btrim(content) = '')`;
+
   await pool.query(
     `UPDATE hub_pages
      SET content = $1::text,
@@ -230,7 +264,7 @@ async function updateHub(hub: HubRow, html: string, metaDescription: string, dry
          updated_at = NOW()
      WHERE id = $3::text
        AND website_id = $4::text
-       AND (content IS NULL OR btrim(content) = '')`,
+       ${contentCondition}`,
     [html, metaDescription, hub.id, hub.website_id],
   );
 }
@@ -242,20 +276,20 @@ async function main() {
   let failed = 0;
 
   console.log(`[hub-backfill] Starting missing hub content backfill for website=${websiteId}`);
-  console.log(`[hub-backfill] Options: batch=${args.batch} limit=${args.limit || "none"} dryRun=${args.dryRun}`);
+  console.log(`[hub-backfill] Options: batch=${args.batch} limit=${args.limit || "none"} dryRun=${args.dryRun} repairWeak=${args.repairWeak}`);
   console.log("[hub-backfill] Before:", await getStats(websiteId));
 
   while (true) {
     if (args.limit && processed >= args.limit) break;
     const batchSize = args.limit ? Math.min(args.batch, args.limit - processed) : args.batch;
-    const hubs = await getMissingHubs(websiteId, batchSize);
+    const hubs = await getTargetHubs(websiteId, batchSize, args.repairWeak);
     if (hubs.length === 0) break;
 
     for (const hub of hubs) {
       try {
         const childLinks = await getChildLinks(hub);
         const { html, metaDescription } = buildHubContent(hub, childLinks);
-        await updateHub(hub, html, metaDescription, args.dryRun);
+        await updateHub(hub, html, metaDescription, args.dryRun, args.repairWeak);
         processed++;
         console.log(`[hub-backfill] filled ${processed}: ${hub.hub_type}/${hub.slug} childLinks=${childLinks.length}`);
       } catch (err: any) {
@@ -266,7 +300,7 @@ async function main() {
   }
 
   console.log("[hub-backfill] After:", await getStats(websiteId));
-  console.log(`[hub-backfill] Done. processed=${processed} failed=${failed} dryRun=${args.dryRun}`);
+  console.log(`[hub-backfill] Done. processed=${processed} failed=${failed} dryRun=${args.dryRun} repairWeak=${args.repairWeak}`);
 }
 
 main()
