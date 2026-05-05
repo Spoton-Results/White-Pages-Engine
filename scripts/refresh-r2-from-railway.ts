@@ -9,12 +9,18 @@ type Args = {
   batch: number;
   dryRun: boolean;
   onlyPlain: boolean;
+  pageType?: string;
+  slugContains?: string;
+  slugStartsWith?: string;
+  slugEndsWith?: string;
+  orderBy: "updated" | "created" | "slug";
 };
 
 type PageRow = {
   id: string;
   slug: string;
   r2_key: string | null;
+  page_type: string | null;
 };
 
 type WebsiteRow = {
@@ -25,7 +31,7 @@ type WebsiteRow = {
 };
 
 function parseArgs(): Args {
-  const args: Args = { limit: 100, batch: 25, dryRun: false, onlyPlain: false };
+  const args: Args = { limit: 100, batch: 25, dryRun: false, onlyPlain: false, orderBy: "updated" };
   for (const raw of process.argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, "").split("=");
     if (key === "websiteId") args.websiteId = value;
@@ -34,6 +40,11 @@ function parseArgs(): Args {
     if (key === "batch") args.batch = Math.max(1, Number(value || 25));
     if (key === "dryRun") args.dryRun = value !== "false";
     if (key === "onlyPlain") args.onlyPlain = value !== "false";
+    if (key === "pageType") args.pageType = value;
+    if (key === "slugContains") args.slugContains = value;
+    if (key === "slugStartsWith") args.slugStartsWith = value;
+    if (key === "slugEndsWith") args.slugEndsWith = value;
+    if (key === "orderBy" && (value === "updated" || value === "created" || value === "slug")) args.orderBy = value;
   }
   if (!args.websiteId) throw new Error("Missing required --websiteId=<id>");
   return args;
@@ -84,29 +95,61 @@ function deriveR2Key(page: PageRow, website: WebsiteRow, pattern: { sampleSlug: 
   return `${prefix}/${page.slug}.html`;
 }
 
-async function getTargets(websiteId: string, slug: string | undefined, limit: number): Promise<PageRow[]> {
-  if (slug) {
+function orderBySql(orderBy: Args["orderBy"]): string {
+  if (orderBy === "created") return "created_at ASC, id ASC";
+  if (orderBy === "slug") return "slug ASC, id ASC";
+  return "updated_at DESC, id ASC";
+}
+
+async function getTargets(args: Args): Promise<PageRow[]> {
+  const websiteId = args.websiteId!;
+  if (args.slug) {
     const res = await pool.query(
-      `SELECT id, slug, r2_key
+      `SELECT id, slug, r2_key, page_type
        FROM pages
        WHERE website_id = $1::text
          AND slug = $2::text
          AND status = 'published'
        LIMIT 1`,
-      [websiteId, slug],
+      [websiteId, args.slug],
     );
     return res.rows;
   }
 
+  const where: string[] = [
+    "website_id = $1::text",
+    "status = 'published'",
+    "COALESCE(noindex, false) = false",
+  ];
+  const params: any[] = [websiteId];
+
+  if (args.pageType) {
+    params.push(args.pageType);
+    where.push(`page_type = $${params.length}::text`);
+  }
+  if (args.slugContains) {
+    params.push(`%${args.slugContains}%`);
+    where.push(`slug ILIKE $${params.length}::text`);
+  }
+  if (args.slugStartsWith) {
+    params.push(`${args.slugStartsWith}%`);
+    where.push(`slug ILIKE $${params.length}::text`);
+  }
+  if (args.slugEndsWith) {
+    params.push(`%${args.slugEndsWith}`);
+    where.push(`slug ILIKE $${params.length}::text`);
+  }
+
+  params.push(args.limit);
+  const limitParam = params.length;
+
   const res = await pool.query(
-    `SELECT id, slug, r2_key
+    `SELECT id, slug, r2_key, page_type
      FROM pages
-     WHERE website_id = $1::text
-       AND status = 'published'
-       AND COALESCE(noindex, false) = false
-     ORDER BY updated_at DESC, id ASC
-     LIMIT $2::int`,
-    [websiteId, limit],
+     WHERE ${where.join(" AND ")}
+     ORDER BY ${orderBySql(args.orderBy)}
+     LIMIT $${limitParam}::int`,
+    params,
   );
   return res.rows;
 }
@@ -132,6 +175,8 @@ async function getStats(websiteId: string) {
   const res = await pool.query(
     `SELECT
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false)::int AS published_indexable,
+      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type = 'service_city')::int AS service_city,
+      COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND page_type = 'state_hub')::int AS state_hub,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND r2_key IS NOT NULL)::int AS has_r2_key,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND content_hash IS NOT NULL)::int AS has_content_hash,
       COUNT(*) FILTER (WHERE status = 'published' AND COALESCE(noindex, false) = false AND rendered_at IS NOT NULL)::int AS has_rendered_at
@@ -164,10 +209,10 @@ async function main() {
 
   const website = await getWebsite(websiteId);
   const pattern = await getExistingKeyPattern(websiteId);
-  const targets = await getTargets(websiteId, args.slug, args.limit);
+  const targets = await getTargets(args);
 
   console.log(`[r2-refresh-railway] Starting website=${websiteId} domain=${website.domain}`);
-  console.log(`[r2-refresh-railway] Options: slug=${args.slug || "none"} limit=${args.limit} dryRun=${args.dryRun} onlyPlain=${args.onlyPlain}`);
+  console.log(`[r2-refresh-railway] Options: slug=${args.slug || "none"} pageType=${args.pageType || "any"} slugContains=${args.slugContains || "none"} slugStartsWith=${args.slugStartsWith || "none"} slugEndsWith=${args.slugEndsWith || "none"} orderBy=${args.orderBy} limit=${args.limit} dryRun=${args.dryRun} onlyPlain=${args.onlyPlain}`);
   console.log(`[r2-refresh-railway] Existing key pattern: ${pattern ? `${pattern.sampleKey} from ${pattern.sampleSlug}` : "none"}`);
   console.log("[r2-refresh-railway] Before:", await getStats(websiteId));
   console.log(`[r2-refresh-railway] Found ${targets.length} target page(s)`);
@@ -182,7 +227,7 @@ async function main() {
       const plain = looksPlainOrUnwrapped(html);
       if (args.onlyPlain && !plain) {
         skipped++;
-        console.log(`[r2-refresh-railway] skipped styled railway html: ${page.slug}`);
+        console.log(`[r2-refresh-railway] skipped styled railway html: ${page.page_type || "unknown"}/${page.slug}`);
         continue;
       }
 
@@ -200,6 +245,7 @@ async function main() {
             websiteId,
             pageId: page.id,
             slug: page.slug,
+            pageType: page.page_type || "unknown",
             contentHash,
             source: "railway-rendered-html",
           },
@@ -218,7 +264,7 @@ async function main() {
       }
 
       refreshed++;
-      console.log(`[r2-refresh-railway] refreshed ${refreshed}: ${page.slug} -> ${key} bytes=${html.length}`);
+      console.log(`[r2-refresh-railway] refreshed ${refreshed}: ${page.page_type || "unknown"}/${page.slug} -> ${key} bytes=${html.length}`);
     } catch (err: any) {
       failed++;
       console.error(`[r2-refresh-railway] failed ${page.id} ${page.slug}:`, err?.message || err);
