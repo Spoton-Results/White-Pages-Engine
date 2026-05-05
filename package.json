@@ -16,6 +16,7 @@
     "r2:backfill-pages": "tsx scripts/backfill-pages-to-r2.ts",
     "r2:page-health": "tsx scripts/r2-page-health.ts",
     "r2:diagnose-stuck": "tsx scripts/diagnose-r2-stuck-pages.ts",
+    "r2:force-render-stuck": "tsx scripts/force-render-stuck-r2-pages.ts",
     "pages:repair-missing-versions": "tsx scripts/repair-missing-active-page-versions.ts",
     "hub:backfill-content": "tsx scripts/backfill-missing-hub-content.ts",
     "qa:audit-pages": "tsx scripts/audit-published-pages.ts",
