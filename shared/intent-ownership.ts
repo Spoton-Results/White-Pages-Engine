@@ -79,24 +79,48 @@ export function riskFromOverlapScore(score: number): CannibalizationRisk {
   return "LOW";
 }
 
+export function getIntentModifier(slug = ""): string {
+  const normalizedSlug = slug.toLowerCase();
+  const parts = normalizedSlug.split("--");
+  return parts.length > 1 ? parts.slice(1).join("-") : normalizedSlug;
+}
+
+export function hasModifierIntentSlug(slug = ""): boolean {
+  return slug.includes("--");
+}
+
+export function intentTypeFromSlug(slug = ""): IntentType | null {
+  const normalizedSlug = slug.toLowerCase();
+  const modifier = getIntentModifier(slug);
+  const target = modifier || normalizedSlug;
+
+  if (target.includes("-vs-") || target.includes("vs-") || target.includes("comparison") || target.includes("compare") || target.includes("alternative") || target.includes("alternatives")) return "COMPARISON_INTENT";
+  if (target.includes("pricing") || target.includes("rates") || target.includes("fees") || target.includes("cost") || target.includes("affordable")) return "PRICING_INTENT";
+  if (target.includes("calculator") || target.includes("estimator") || target.includes("checker")) return "CALCULATOR_INTENT";
+  if (target.includes("case-study") || target.includes("case-studies")) return "CASE_STUDY_INTENT";
+  if (target.includes("results") || target.includes("success-story")) return "RESULTS_INTENT";
+  if (target.includes("faq") || target.includes("questions")) return "FAQ_INTENT";
+  if (target.includes("what-is") || target.includes("definition") || target.startsWith("define-")) return "DEFINITION_INTENT";
+  if (target.includes("solution") || target.includes("platform") || target.includes("system")) return "SOLUTION_INTENT";
+  if (target.includes("problem") || target.includes("fix") || target.includes("solve") || target.includes("fraud") || target.includes("chargeback") || target.includes("requirements")) return "PROBLEM_INTENT";
+
+  if (hasModifierIntentSlug(slug)) return "PROBLEM_INTENT";
+  return null;
+}
+
 export function intentTypeFromPageType(pageType: string | null | undefined, slug = ""): IntentType {
   const normalizedPageType = (pageType || "").toLowerCase();
-  const normalizedSlug = slug.toLowerCase();
+  const slugIntent = intentTypeFromSlug(slug);
+
+  // Modifier slugs like /state--ach-payment-processing are not true hub pages.
+  // The slug modifier carries the real intent and must override page_type.
+  if (slugIntent) return slugIntent;
 
   if (normalizedPageType === "state_hub") return "STATE_HUB";
   if (normalizedPageType === "city_hub") return "CITY_HUB";
   if (normalizedPageType === "industry_city") return "INDUSTRY_CITY";
   if (normalizedPageType === "service_city") return "CITY_SERVICE";
   if (normalizedPageType === "problem_intent") return "PROBLEM_INTENT";
-
-  if (normalizedSlug.includes("-vs-") || normalizedSlug.includes("-alternative") || normalizedSlug.includes("comparison")) return "COMPARISON_INTENT";
-  if (normalizedSlug.includes("pricing") || normalizedSlug.includes("rates") || normalizedSlug.includes("cost")) return "PRICING_INTENT";
-  if (normalizedSlug.includes("calculator") || normalizedSlug.includes("estimator")) return "CALCULATOR_INTENT";
-  if (normalizedSlug.includes("case-study") || normalizedSlug.includes("results")) return "CASE_STUDY_INTENT";
-  if (normalizedSlug.includes("faq") || normalizedSlug.includes("questions")) return "FAQ_INTENT";
-  if (normalizedSlug.includes("what-is") || normalizedSlug.includes("definition")) return "DEFINITION_INTENT";
-  if (normalizedSlug.includes("solution")) return "SOLUTION_INTENT";
-  if (normalizedSlug.includes("problem") || normalizedSlug.includes("fix") || normalizedSlug.includes("solve")) return "PROBLEM_INTENT";
 
   return "CITY_SERVICE";
 }
@@ -153,8 +177,21 @@ export function buildIntentCluster(page: {
   stateCode?: string | null;
   stateName?: string | null;
 }): string {
-  const pageType = normalizeIntentToken(page.pageType || "page");
-  const service = normalizeIntentToken(page.serviceSlug || page.serviceName || "general");
-  const location = normalizeIntentToken(page.locationSlug || page.locationName || page.stateCode || page.stateName || "national");
-  return [pageType, service, location].filter(Boolean).join(":");
+  const primaryIntent = intentTypeFromPageType(page.pageType, page.slug || "");
+  const family = normalizeIntentToken(primaryIntent.replace(/_INTENT$/, "").replace(/_HUB$/, "-hub"));
+  const service = normalizeIntentToken(page.serviceSlug || page.serviceName || inferServiceFromSlug(page.slug || "") || "general");
+  const location = normalizeIntentToken(page.locationSlug || page.locationName || page.stateCode || page.stateName || inferLocationFromSlug(page.slug || "") || "national");
+  return [family, service, location].filter(Boolean).join(":");
+}
+
+export function inferLocationFromSlug(slug: string): string | null {
+  const normalizedSlug = slug.toLowerCase().split("--")[0];
+  const match = normalizedSlug.match(/-in-([a-z-]+)$/);
+  return match?.[1] || null;
+}
+
+export function inferServiceFromSlug(slug: string): string | null {
+  const normalizedSlug = slug.toLowerCase().split("--")[0];
+  const service = normalizedSlug.replace(/-in-[a-z-]+$/, "");
+  return service || null;
 }
