@@ -7,6 +7,10 @@ import { createIntentBuildJob, getLatestIntentBuildJob } from "../services/inten
 
 const router = Router();
 
+function routeParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] : value || "";
+}
+
 // GET /api/admin/dashboard/accounts
 router.get("/dashboard/accounts", requireSuperAdmin, async (req, res) => {
   try {
@@ -88,7 +92,8 @@ router.get("/dashboard/revenue-summary", requireSuperAdmin, async (req, res) => 
 // POST /api/admin/websites/:websiteId/intent-build/run
 router.post("/websites/:websiteId/intent-build/run", requireSuperAdmin, async (req, res) => {
   try {
-    const { websiteId } = req.params;
+    const websiteId = routeParam(req.params.websiteId);
+    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
     const result = await createIntentBuildJob(websiteId);
     return res.status(result.alreadyRunning ? 200 : 202).json(result);
   } catch (error: any) {
@@ -100,7 +105,8 @@ router.post("/websites/:websiteId/intent-build/run", requireSuperAdmin, async (r
 // GET /api/admin/websites/:websiteId/intent-build/status
 router.get("/websites/:websiteId/intent-build/status", requireSuperAdmin, async (req, res) => {
   try {
-    const { websiteId } = req.params;
+    const websiteId = routeParam(req.params.websiteId);
+    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
     const job = await getLatestIntentBuildJob(websiteId);
     return res.json({ job });
   } catch (error: any) {
@@ -112,7 +118,8 @@ router.get("/websites/:websiteId/intent-build/status", requireSuperAdmin, async 
 // GET /api/admin/websites/:websiteId/intent-build/report
 router.get("/websites/:websiteId/intent-build/report", requireSuperAdmin, async (req, res) => {
   try {
-    const { websiteId } = req.params;
+    const websiteId = routeParam(req.params.websiteId);
+    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
     const job = await getLatestIntentBuildJob(websiteId);
     return res.json({ job, report: job?.result_json ?? job?.resultJson ?? null });
   } catch (error: any) {
