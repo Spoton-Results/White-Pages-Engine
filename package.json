@@ -19,6 +19,7 @@
     "intent:pipeline": "tsx scripts/run-intent-pipeline.ts",
     "intent:build": "tsx scripts/run-intent-pipeline.ts --phase=all --ownerLimit=100000 --minClusterSize=2",
     "intent:build:dry": "tsx scripts/run-intent-pipeline.ts --phase=all --ownerLimit=100000 --minClusterSize=2 --dryRun=true",
+    "intent:health": "tsx scripts/audit-intent-owner-health-phase3.ts",
     "r2:render-pages": "tsx scripts/render-pages-to-r2.ts",
     "r2:backfill-pages": "tsx scripts/backfill-pages-to-r2.ts",
     "r2:page-health": "tsx scripts/r2-page-health.ts",
