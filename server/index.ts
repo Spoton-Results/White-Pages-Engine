@@ -441,7 +441,7 @@ async function runBackgroundStartup() {
         setImmediate(() => {
           runBulkBackgroundJob(j.id).catch(err => {
             console.error("[startup] Failed to resume bulk job", j.id, err);
-            updateGenerationJob(j.id, { status: "error", completedAt: new Date() }).catch(() => {});
+            updateGenerationJob(j.id, { status: "failed", completedAt: new Date() }).catch(() => {});
           });
         });
       }
@@ -461,7 +461,7 @@ async function runBackgroundStartup() {
         setImmediate(() => {
           runBankWriteJob(j.id).catch(err => {
             console.error("[startup] Failed to resume bank-write job", j.id, err);
-            updateGenerationJob(j.id, { status: "error", completedAt: new Date() }).catch(() => {});
+            updateGenerationJob(j.id, { status: "failed", completedAt: new Date() }).catch(() => {});
           });
         });
       }
@@ -495,14 +495,18 @@ async function runBackgroundStartup() {
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
+  const isWindows = process.platform === "win32";
+  const host = process.env.HOST || (isWindows ? "127.0.0.1" : "0.0.0.0");
+  const listenOptions: { port: number; host: string; reusePort?: boolean } = { port, host };
+
+  if (!isWindows) {
+    listenOptions.reusePort = true;
+  }
+
   httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
+    listenOptions,
     () => {
-      log(`serving on port ${port}`);
+      log(`serving on http://${host}:${port}`);
 
       // Keep startup light so admin workflows stay responsive.
 
