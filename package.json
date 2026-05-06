@@ -16,6 +16,7 @@
     "intent:backfill": "tsx scripts/backfill-intent-ownership-phase1.ts",
     "intent:audit": "tsx scripts/audit-intent-ownership-phase1.ts",
     "intent:phase2": "tsx scripts/select-canonical-owners-phase2.ts",
+    "intent:pipeline": "tsx scripts/run-intent-pipeline.ts",
     "r2:render-pages": "tsx scripts/render-pages-to-r2.ts",
     "r2:backfill-pages": "tsx scripts/backfill-pages-to-r2.ts",
     "r2:page-health": "tsx scripts/r2-page-health.ts",
