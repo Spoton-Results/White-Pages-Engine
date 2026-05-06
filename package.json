@@ -12,6 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "intent:migrate": "tsx scripts/migrate-intent-ownership-phase1.ts",
+    "intent:backfill": "tsx scripts/backfill-intent-ownership-phase1.ts",
     "r2:render-pages": "tsx scripts/render-pages-to-r2.ts",
     "r2:backfill-pages": "tsx scripts/backfill-pages-to-r2.ts",
     "r2:page-health": "tsx scripts/r2-page-health.ts",
