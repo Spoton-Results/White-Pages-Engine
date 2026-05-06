@@ -49,6 +49,15 @@ export type SupportRole = (typeof SUPPORT_ROLES)[number];
 export const CANNIBALIZATION_RISKS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
 export type CannibalizationRisk = (typeof CANNIBALIZATION_RISKS)[number];
 
+const US_STATE_SLUGS = [
+  "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware", "florida", "georgia",
+  "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland",
+  "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada", "new-hampshire", "new-jersey",
+  "new-mexico", "new-york", "north-carolina", "north-dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode-island", "south-carolina",
+  "south-dakota", "tennessee", "texas", "utah", "vermont", "virginia", "washington", "west-virginia", "wisconsin", "wyoming",
+  "district-of-columbia",
+];
+
 export type IntentOwnershipProfile = {
   primaryIntent: IntentType;
   secondaryIntent?: IntentType;
@@ -79,18 +88,48 @@ export function riskFromOverlapScore(score: number): CannibalizationRisk {
   return "LOW";
 }
 
+export function splitStateIntentSlug(slug = ""):
+  | { baseSlug: string; locationSlug: string; modifier: string | null }
+  | null {
+  const normalizedSlug = normalizeIntentToken(slug.split("--")[0]);
+
+  for (const stateSlug of US_STATE_SLUGS) {
+    const marker = `-in-${stateSlug}`;
+    const markerIndex = normalizedSlug.indexOf(marker);
+    if (markerIndex === -1) continue;
+
+    const baseEnd = markerIndex + marker.length;
+    const baseSlug = normalizedSlug.slice(0, baseEnd);
+    const remainder = normalizedSlug.slice(baseEnd).replace(/^-+/, "");
+
+    return {
+      baseSlug,
+      locationSlug: stateSlug,
+      modifier: remainder || null,
+    };
+  }
+
+  return null;
+}
+
 export function getIntentModifier(slug = ""): string {
   const normalizedSlug = slug.toLowerCase();
   const parts = normalizedSlug.split("--");
-  return parts.length > 1 ? parts.slice(1).join("-") : normalizedSlug;
+  if (parts.length > 1) return normalizeIntentToken(parts.slice(1).join("-"));
+
+  const split = splitStateIntentSlug(slug);
+  if (split?.modifier) return split.modifier;
+
+  return normalizeIntentToken(normalizedSlug);
 }
 
 export function hasModifierIntentSlug(slug = ""): boolean {
-  return slug.includes("--");
+  if (slug.includes("--")) return true;
+  return Boolean(splitStateIntentSlug(slug)?.modifier);
 }
 
 export function intentTypeFromSlug(slug = ""): IntentType | null {
-  const normalizedSlug = slug.toLowerCase();
+  const normalizedSlug = normalizeIntentToken(slug);
   const modifier = getIntentModifier(slug);
   const target = modifier || normalizedSlug;
 
@@ -100,9 +139,9 @@ export function intentTypeFromSlug(slug = ""): IntentType | null {
   if (target.includes("case-study") || target.includes("case-studies")) return "CASE_STUDY_INTENT";
   if (target.includes("results") || target.includes("success-story")) return "RESULTS_INTENT";
   if (target.includes("faq") || target.includes("questions")) return "FAQ_INTENT";
-  if (target.includes("what-is") || target.includes("definition") || target.startsWith("define-")) return "DEFINITION_INTENT";
-  if (target.includes("solution") || target.includes("platform") || target.includes("system")) return "SOLUTION_INTENT";
-  if (target.includes("problem") || target.includes("fix") || target.includes("solve") || target.includes("fraud") || target.includes("chargeback") || target.includes("requirements")) return "PROBLEM_INTENT";
+  if (target.includes("what-is") || target.includes("definition") || target.startsWith("define-") || target.startsWith("types-of")) return "DEFINITION_INTENT";
+  if (target.includes("how-to") || target.includes("solution") || target.includes("platform") || target.includes("system") || target.includes("benefits") || target.includes("setup")) return "SOLUTION_INTENT";
+  if (target.includes("problem") || target.includes("fix") || target.includes("solve") || target.includes("fraud") || target.includes("chargeback") || target.includes("requirements") || target.includes("security") || target.includes("compliance")) return "PROBLEM_INTENT";
 
   if (hasModifierIntentSlug(slug)) return "PROBLEM_INTENT";
   return null;
@@ -112,8 +151,8 @@ export function intentTypeFromPageType(pageType: string | null | undefined, slug
   const normalizedPageType = (pageType || "").toLowerCase();
   const slugIntent = intentTypeFromSlug(slug);
 
-  // Modifier slugs like /state--ach-payment-processing are not true hub pages.
-  // The slug modifier carries the real intent and must override page_type.
+  // Modifier slugs like /state--ach-payment-processing or /state-extra-topic
+  // are not true hub pages. The slug modifier carries the real intent and must override page_type.
   if (slugIntent) return slugIntent;
 
   if (normalizedPageType === "state_hub") return "STATE_HUB";
@@ -185,13 +224,17 @@ export function buildIntentCluster(page: {
 }
 
 export function inferLocationFromSlug(slug: string): string | null {
-  const normalizedSlug = slug.toLowerCase().split("--")[0];
+  const split = splitStateIntentSlug(slug);
+  if (split?.locationSlug) return split.locationSlug;
+
+  const normalizedSlug = normalizeIntentToken(slug.split("--")[0]);
   const match = normalizedSlug.match(/-in-([a-z-]+)$/);
   return match?.[1] || null;
 }
 
 export function inferServiceFromSlug(slug: string): string | null {
-  const normalizedSlug = slug.toLowerCase().split("--")[0];
+  const split = splitStateIntentSlug(slug);
+  const normalizedSlug = split?.baseSlug || normalizeIntentToken(slug.split("--")[0]);
   const service = normalizedSlug.replace(/-in-[a-z-]+$/, "");
   return service || null;
 }
