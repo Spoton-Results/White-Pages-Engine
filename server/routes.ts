@@ -26,6 +26,12 @@ import { z } from "zod";
 import { db } from "./db";
 import { eq as dEq, and as dAnd, desc, like } from "drizzle-orm";
 import { randomBytes } from "crypto";
+import {
+  runIntentBuild,
+  getIntentBuildStatus,
+  getIntentBuildReport,
+} from "./services/intent-build";
+
 
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
 // When a client domain is saved, auto-register it as a CF custom hostname so
@@ -2327,8 +2333,50 @@ Return ONLY valid JSON (no markdown) with these exact keys:
   });
 
   // ── Websites ──────────────────────────────────────────────────────────────
+  app.post("/api/websites/:websiteId/intent-build/run", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId as string;
+      const website = await storage.getWebsite(websiteId);
 
-  app.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const result = await runIntentBuild(websiteId);
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[intent-build] Run failed:", err);
+      return res.status(500).json({
+        message: err.message || "Failed to start intent build",
+      });
+    }
+  });
+
+  app.get("/api/websites/:websiteId/intent-build/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId as string;
+      return res.json(getIntentBuildStatus(websiteId));
+    } catch (err: any) {
+      console.error("[intent-build] Status failed:", err);
+      return res.status(500).json({
+        message: err.message || "Failed to load intent build status",
+      });
+    }
+  });
+
+  app.get("/api/websites/:websiteId/intent-build/report", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId as string;
+      return res.json(getIntentBuildReport(websiteId));
+    } catch (err: any) {
+      console.error("[intent-build] Report failed:", err);
+      return res.status(500).json({
+        message: err.message || "Failed to load intent build report",
+      });
+    }
+  });
+  
+app.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
     const accountId = req.query.accountId as string | undefined;
     return res.json(await storage.getWebsites(accountId));
   });
