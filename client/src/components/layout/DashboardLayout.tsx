@@ -5,7 +5,7 @@ import {
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
   Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
-  ChevronDown, Handshake, FlaskConical, PhoneCall,
+  ChevronDown, Handshake, FlaskConical, PhoneCall, GitBranch,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ const contentNav = [
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
   { name: "Internal Links", href: "/internal-links", icon: Link2 },
+  { name: "Intent Build", href: "/intent-build", icon: GitBranch },
   { name: "Automation", href: "/automation", icon: Bot },
   { name: "Bank Health", href: "/bank-health", icon: Activity },
   { name: "SEO Control", href: "/search-control", icon: ShieldCheck },
