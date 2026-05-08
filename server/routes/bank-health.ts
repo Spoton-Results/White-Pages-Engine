@@ -1,7 +1,16 @@
 import { Router } from "express";
 import { pool } from "../db";
+import intentActionsRouter from "./intent-actions";
+import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
+router.use(intentActionsRouter);
+
+const globalAny = globalThis as any;
+if (!globalAny.__nexusIntentJobWorkerScheduled) {
+  globalAny.__nexusIntentJobWorkerScheduled = true;
+  scheduleIntentJobWorker();
+}
 
 const SECTION_ALIASES: Record<string, string[]> = {
   has_intro: ["intro", "introduction", "introduction paragraph", "hero headline", "hero"],
