@@ -5,12 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, Building2, CheckCircle2, FileText, Globe2, Link2, MapPinned, RefreshCcw, Search, ShieldCheck, Sparkles, TrendingUp, Wrench } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { AlertTriangle, BarChart3, Building2, CheckCircle2, FileText, Globe2, Link2, MapPinned, RefreshCcw, Search, ShieldCheck, Sparkles, TrendingUp, Wrench } from "lucide-react";
 
 interface Summary { activeClients: number; pagesLive: number; citiesCovered: number; servicesCovered: number; estimatedSearchReach: number; }
 interface Activity { pagesGenerated: number; pagesImproved: number; linksAdded: number; faqExpansions: number; intentClustersBuilt: number; sitemapUpdates: number; contentRepairs: number; qualityFixes: number; }
 interface Coverage { statesCovered: number; citiesCovered: number; cityCoveragePercentage: number; stateCoverage: { state_code: string; cities: number }[]; pageTypes: { stateHubs: number; cityHubs: number; cityService: number; industryCity: number; problemIntent: number; }; expansionOpportunities: { city: string; state: string; reason: string; population: number }[]; }
 interface ClientBreakdown { id: string; name: string; status: string; pagesLive: number; citiesCovered: number; servicesCovered: number; estimatedSearchReach: number; last30DaysWork: number; last30Days: { pagesGenerated: number; linksAdded: number; pagesImproved: number; sitemapUpdates: number; jobsCompletedOrQueued: number; failedJobs: number; }; lastActivityAt: string | null; }
+interface ClientDetail { client: { id: string; name: string; status: string }; summary: { pagesLive: number; citiesCovered: number; servicesCovered: number; estimatedSearchReach: number }; websites: { id: string; name: string; domain: string; status: string; onboarding_status: string | null }[]; pageTypes: Record<string, number>; topCities: { name: string; state_code: string; population: number }[]; topServices: { name: string; slug: string; pages_live: number }[]; workLog: { type: string; label: string; detail: string; createdAt: string }[]; expansionOpportunities: { city: string; state: string; reason: string; population: number }[]; health: { failedJobs: number; stuckJobs: number; thinBanks: number; warnings: string[] }; }
 
 async function fetchJson<T>(url: string): Promise<T> { const res = await fetch(url, { credentials: "include" }); if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `Request failed: ${res.status}`); return res.json(); }
 function fmt(n?: number) { return Math.round(n || 0).toLocaleString(); }
@@ -25,6 +27,9 @@ export default function AgencyDashboardPage() {
   const [activity, setActivity] = useState<Activity>(emptyActivity);
   const [coverage, setCoverage] = useState<Coverage>(emptyCoverage);
   const [clients, setClients] = useState<ClientBreakdown[]>([]);
+  const [selectedClient, setSelectedClient] = useState<ClientBreakdown | null>(null);
+  const [clientDetail, setClientDetail] = useState<ClientDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,10 +47,20 @@ export default function AgencyDashboardPage() {
     finally { setLoading(false); }
   }
 
+  async function openClientDetail(client: ClientBreakdown) {
+    setSelectedClient(client);
+    setClientDetail(null);
+    setDetailLoading(true);
+    try { setClientDetail(await fetchJson<ClientDetail>(`/api/agency-dashboard/clients/${client.id}`)); }
+    catch (e: any) { setError(e.message || "Failed to load client detail"); }
+    finally { setDetailLoading(false); }
+  }
+
   useEffect(() => { load(); }, []);
 
   const totalIntentPages = useMemo(() => { const p = coverage.pageTypes; return p.stateHubs + p.cityHubs + p.cityService + p.industryCity + p.problemIntent; }, [coverage]);
   const activityTotal = useMemo(() => Object.values(activity).reduce((sum, value) => sum + (Number(value) || 0), 0), [activity]);
+  const detailPageTypes = clientDetail?.pageTypes || {};
 
   return (
     <DashboardLayout>
@@ -72,8 +87,8 @@ export default function AgencyDashboardPage() {
         </div>
 
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-blue-600" />Client ROI Breakdown</CardTitle><CardDescription>Client-level retention view: live footprint, coverage, estimated search reach, and last 30 days of visible work.</CardDescription></CardHeader>
-          <CardContent><div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>Client</TableHead><TableHead className="text-right">Pages Live</TableHead><TableHead className="text-right">Cities</TableHead><TableHead className="text-right">Services</TableHead><TableHead className="text-right">Est. Reach</TableHead><TableHead className="text-right">30-Day Work</TableHead><TableHead>Breakdown</TableHead></TableRow></TableHeader><TableBody>{clients.length === 0 ? <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-gray-500">No client ROI rows yet. Launch a client or generate pages first.</TableCell></TableRow> : clients.map(client => <TableRow key={client.id}><TableCell><div className="font-medium text-gray-900">{client.name}</div><div className="mt-1 text-xs text-gray-500">{client.status || "active"}</div></TableCell><TableCell className="text-right font-semibold">{fmt(client.pagesLive)}</TableCell><TableCell className="text-right">{fmt(client.citiesCovered)}</TableCell><TableCell className="text-right">{fmt(client.servicesCovered)}</TableCell><TableCell className="text-right font-semibold">{compact(client.estimatedSearchReach)}</TableCell><TableCell className="text-right"><Badge className={client.last30DaysWork > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-gray-100 text-gray-700 hover:bg-gray-100"}>{fmt(client.last30DaysWork)} actions</Badge></TableCell><TableCell><div className="text-xs leading-5 text-gray-600">{fmt(client.last30Days.pagesGenerated)} pages · {fmt(client.last30Days.linksAdded)} links · {fmt(client.last30Days.pagesImproved)} improved · {fmt(client.last30Days.sitemapUpdates)} sitemap updates{client.last30Days.failedJobs > 0 ? ` · ${fmt(client.last30Days.failedJobs)} failed jobs` : ""}</div></TableCell></TableRow>)}</TableBody></Table></div></CardContent>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-blue-600" />Client ROI Breakdown</CardTitle><CardDescription>Click a client to open the detailed retention view.</CardDescription></CardHeader>
+          <CardContent><div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>Client</TableHead><TableHead className="text-right">Pages Live</TableHead><TableHead className="text-right">Cities</TableHead><TableHead className="text-right">Services</TableHead><TableHead className="text-right">Est. Reach</TableHead><TableHead className="text-right">30-Day Work</TableHead><TableHead>Breakdown</TableHead></TableRow></TableHeader><TableBody>{clients.length === 0 ? <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-gray-500">No client ROI rows yet. Launch a client or generate pages first.</TableCell></TableRow> : clients.map(client => <TableRow key={client.id} className="cursor-pointer hover:bg-gray-50" onClick={() => openClientDetail(client)}><TableCell><div className="font-medium text-gray-900">{client.name}</div><div className="mt-1 text-xs text-gray-500">{client.status || "active"}</div></TableCell><TableCell className="text-right font-semibold">{fmt(client.pagesLive)}</TableCell><TableCell className="text-right">{fmt(client.citiesCovered)}</TableCell><TableCell className="text-right">{fmt(client.servicesCovered)}</TableCell><TableCell className="text-right font-semibold">{compact(client.estimatedSearchReach)}</TableCell><TableCell className="text-right"><Badge className={client.last30DaysWork > 0 ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-gray-100 text-gray-700 hover:bg-gray-100"}>{fmt(client.last30DaysWork)} actions</Badge></TableCell><TableCell><div className="text-xs leading-5 text-gray-600">{fmt(client.last30Days.pagesGenerated)} pages · {fmt(client.last30Days.linksAdded)} links · {fmt(client.last30Days.pagesImproved)} improved · {fmt(client.last30Days.sitemapUpdates)} sitemap updates{client.last30Days.failedJobs > 0 ? ` · ${fmt(client.last30Days.failedJobs)} failed jobs` : ""}</div></TableCell></TableRow>)}</TableBody></Table></div></CardContent>
         </Card>
 
         <Card>
@@ -88,6 +103,41 @@ export default function AgencyDashboardPage() {
 
         <Card><CardHeader><CardTitle className="flex items-center gap-2"><Link2 className="h-5 w-5 text-green-600" />Expansion Opportunities</CardTitle><CardDescription>Markets that can support future expansion conversations and higher retainer opportunities.</CardDescription></CardHeader><CardContent><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">{coverage.expansionOpportunities.slice(0, 10).map((o) => <div key={`${o.city}-${o.state}`} className="rounded-xl border bg-gray-50 p-4"><div className="flex items-center justify-between"><div className="font-semibold text-gray-900">{o.city}, {o.state}</div><CheckCircle2 className="h-4 w-4 text-green-600" /></div><div className="mt-2 text-xs text-gray-500">Population: {fmt(o.population)}</div><p className="mt-3 text-xs leading-5 text-gray-600">{o.reason}</p></div>)}{coverage.expansionOpportunities.length === 0 && <div className="col-span-full rounded-lg border border-dashed p-8 text-center text-sm text-gray-500">No expansion opportunities found yet. Load locations and run validation.</div>}</div></CardContent></Card>
       </div>
+
+      <Sheet open={!!selectedClient} onOpenChange={(open) => { if (!open) { setSelectedClient(null); setClientDetail(null); } }}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
+          <SheetHeader>
+            <SheetTitle>{selectedClient?.name || "Client Detail"}</SheetTitle>
+            <SheetDescription>Client-level ROI proof, health, footprint, and expansion opportunities.</SheetDescription>
+          </SheetHeader>
+
+          {detailLoading && <div className="mt-8 rounded-lg border border-dashed p-8 text-center text-sm text-gray-500">Loading client detail...</div>}
+
+          {clientDetail && <div className="mt-6 space-y-6">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border bg-gray-50 p-4"><p className="text-xs text-gray-500">Pages Live</p><p className="mt-1 text-2xl font-bold">{fmt(clientDetail.summary.pagesLive)}</p></div>
+              <div className="rounded-xl border bg-gray-50 p-4"><p className="text-xs text-gray-500">Cities</p><p className="mt-1 text-2xl font-bold">{fmt(clientDetail.summary.citiesCovered)}</p></div>
+              <div className="rounded-xl border bg-gray-50 p-4"><p className="text-xs text-gray-500">Services</p><p className="mt-1 text-2xl font-bold">{fmt(clientDetail.summary.servicesCovered)}</p></div>
+              <div className="rounded-xl border bg-indigo-50 p-4"><p className="text-xs text-indigo-700">Est. Reach</p><p className="mt-1 text-2xl font-bold text-indigo-900">{compact(clientDetail.summary.estimatedSearchReach)}</p></div>
+            </div>
+
+            {clientDetail.health.warnings.length > 0 ? <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4"><div className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 text-yellow-700" /><div><p className="font-medium text-yellow-900">Health warnings</p><ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-yellow-800">{clientDetail.health.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div></div></div> : <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">No major health warnings found for this client.</div>}
+
+            <Card><CardHeader><CardTitle className="text-base">Websites</CardTitle></CardHeader><CardContent className="space-y-2">{clientDetail.websites.map(w => <div key={w.id} className="flex items-center justify-between rounded-lg border p-3"><div><div className="font-medium">{w.name}</div><div className="text-xs text-gray-500">{w.domain}</div></div><Badge variant="outline">{w.status}</Badge></div>)}</CardContent></Card>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Card><CardHeader><CardTitle className="text-base">Page Mix</CardTitle></CardHeader><CardContent className="space-y-2">{Object.entries(detailPageTypes).length === 0 ? <div className="text-sm text-gray-500">No page mix yet.</div> : Object.entries(detailPageTypes).map(([type, count]) => <div key={type} className="flex justify-between rounded-lg border p-2 text-sm"><span>{type}</span><strong>{fmt(count)}</strong></div>)}</CardContent></Card>
+              <Card><CardHeader><CardTitle className="text-base">Top Services</CardTitle></CardHeader><CardContent className="space-y-2">{clientDetail.topServices.map(s => <div key={s.slug} className="flex justify-between rounded-lg border p-2 text-sm"><span>{s.name}</span><strong>{fmt(s.pages_live)} pages</strong></div>)}</CardContent></Card>
+            </div>
+
+            <Card><CardHeader><CardTitle className="text-base">Top Cities</CardTitle></CardHeader><CardContent><div className="grid gap-2 sm:grid-cols-3">{clientDetail.topCities.map(c => <div key={`${c.name}-${c.state_code}`} className="rounded-lg border bg-gray-50 p-3"><div className="font-medium">{c.name}, {c.state_code}</div><div className="text-xs text-gray-500">Population: {fmt(c.population)}</div></div>)}</div></CardContent></Card>
+
+            <Card><CardHeader><CardTitle className="text-base">Last 30 Days Work Log</CardTitle></CardHeader><CardContent className="space-y-2">{clientDetail.workLog.length === 0 ? <div className="text-sm text-gray-500">No recent work log yet.</div> : clientDetail.workLog.map((item, idx) => <div key={`${item.type}-${idx}`} className="rounded-lg border p-3"><div className="flex items-center justify-between gap-3"><div className="font-medium text-sm">{item.label}</div><Badge variant="outline">{item.type}</Badge></div><div className="mt-1 text-xs text-gray-500">{item.detail} · {new Date(item.createdAt).toLocaleString()}</div></div>)}</CardContent></Card>
+
+            <Card><CardHeader><CardTitle className="text-base">Expansion Opportunities</CardTitle></CardHeader><CardContent><div className="grid gap-2 sm:grid-cols-2">{clientDetail.expansionOpportunities.map(o => <div key={`${o.city}-${o.state}`} className="rounded-lg border bg-gray-50 p-3"><div className="font-medium">{o.city}, {o.state}</div><div className="mt-1 text-xs text-gray-500">Population: {fmt(o.population)}</div><p className="mt-2 text-xs text-gray-600">{o.reason}</p></div>)}</div></CardContent></Card>
+          </div>}
+        </SheetContent>
+      </Sheet>
     </DashboardLayout>
   );
 }
