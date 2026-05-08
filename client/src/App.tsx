@@ -54,6 +54,7 @@ import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard";
+import ReportLinksPage from "@/pages/report-links";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -101,6 +102,7 @@ function Router() {
       <Route path="/bulk-generator"><AuthGuard><BulkGeneratorPage /></AuthGuard></Route>
       <Route path="/leads"><AuthGuard><LeadsPage /></AuthGuard></Route>
       <Route path="/agency-dashboard"><AuthGuard><AgencyDashboardPage /></AuthGuard></Route>
+      <Route path="/report-links"><AuthGuard><ReportLinksPage /></AuthGuard></Route>
       <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
       <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
