@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { pool } from "../db";
 import intentActionsRouter from "./intent-actions";
+import onboardingLiveRouter from "./onboarding-live";
 import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
 router.use(intentActionsRouter);
+router.use(onboardingLiveRouter);
 
 const globalAny = globalThis as any;
 if (!globalAny.__nexusIntentJobWorkerScheduled) {
