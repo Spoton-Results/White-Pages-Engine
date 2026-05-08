@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import bankHealthRouter from "./routes/bank-health";
+import nexusStripeRouter from "./routes/nexus-stripe";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -28,6 +29,7 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+app.use(nexusStripeRouter);
 app.use(bankHealthRouter);
 
 export function log(message: string, source = "express") {
