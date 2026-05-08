@@ -10,6 +10,9 @@ import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 const router = Router();
 
 router.use((req, _res, next) => {
+  if (req.path.startsWith("/api/auth")) {
+    return next("router");
+  }
   if (!req.path.startsWith("/api") && !req.path.startsWith("/r/")) {
     return next("router");
   }
