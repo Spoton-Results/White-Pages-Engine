@@ -56,6 +56,31 @@ async function assertClientAccess(req: any, res: any, accountId: string) {
   return account;
 }
 
+async function assertLinkAccess(req: any, res: any, linkId: string) {
+  await ensureReportLinksTable();
+  const result = await pool.query(
+    `SELECT crl.*, a.name AS account_name
+     FROM client_report_links crl
+     JOIN accounts a ON a.id = crl.account_id
+     WHERE crl.id = $1 LIMIT 1`,
+    [linkId],
+  );
+  const link = result.rows[0];
+  if (!link) {
+    res.status(404).json({ message: "Report link not found" });
+    return null;
+  }
+  if (!req.session.isSuperAdmin && req.session.accountId !== link.account_id) {
+    res.status(403).json({ message: "Forbidden" });
+    return null;
+  }
+  return link;
+}
+
+function publicUrl(req: any, token: string) {
+  return `${req.protocol}://${req.get("host")}/r/${token}`;
+}
+
 async function renderMonthlyReport(accountId: string, options: { publicView?: boolean } = {}) {
   const accountResult = await pool.query(`SELECT id, name, status FROM accounts WHERE id = $1 LIMIT 1`, [accountId]);
   const account = accountResult.rows[0];
@@ -139,8 +164,73 @@ router.post("/api/agency-dashboard/clients/:accountId/monthly-report/share", req
        VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4)`,
       [accountId, token, expiresDays, req.session.userId || null],
     );
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    res.json({ ok: true, token, url: `${baseUrl}/r/${token}`, expiresDays });
+    res.json({ ok: true, token, url: publicUrl(req, token), expiresDays });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/agency-dashboard/report-links", requireAuth, async (req, res, next) => {
+  try {
+    await ensureReportLinksTable();
+    const params: any[] = [];
+    const where = req.session.isSuperAdmin ? "" : "WHERE crl.account_id = $1";
+    if (!req.session.isSuperAdmin) params.push(req.session.accountId);
+    const result = await pool.query(
+      `SELECT crl.id, crl.account_id, a.name AS client_name, crl.token, crl.report_type, crl.expires_at, crl.revoked_at, crl.created_at, crl.last_viewed_at, crl.view_count,
+              CASE WHEN crl.revoked_at IS NOT NULL THEN 'revoked'
+                   WHEN crl.expires_at IS NOT NULL AND crl.expires_at <= NOW() THEN 'expired'
+                   ELSE 'active' END AS status
+       FROM client_report_links crl
+       JOIN accounts a ON a.id = crl.account_id
+       ${where}
+       ORDER BY crl.created_at DESC
+       LIMIT 250`,
+      params,
+    );
+    res.json(result.rows.map((r: any) => ({
+      id: r.id,
+      accountId: r.account_id,
+      clientName: r.client_name,
+      token: r.token,
+      url: publicUrl(req, r.token),
+      reportType: r.report_type,
+      expiresAt: r.expires_at,
+      revokedAt: r.revoked_at,
+      createdAt: r.created_at,
+      lastViewedAt: r.last_viewed_at,
+      viewCount: r.view_count || 0,
+      status: r.status,
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/api/agency-dashboard/report-links/:linkId/revoke", requireAuth, async (req, res, next) => {
+  try {
+    const link = await assertLinkAccess(req, res, req.params.linkId);
+    if (!link) return;
+    await pool.query(`UPDATE client_report_links SET revoked_at = NOW() WHERE id = $1`, [req.params.linkId]);
+    res.json({ ok: true, id: req.params.linkId, status: "revoked" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/api/agency-dashboard/report-links/:linkId/regenerate", requireAuth, async (req, res, next) => {
+  try {
+    const link = await assertLinkAccess(req, res, req.params.linkId);
+    if (!link) return;
+    await pool.query(`UPDATE client_report_links SET revoked_at = NOW() WHERE id = $1`, [req.params.linkId]);
+    const token = randomBytes(24).toString("hex");
+    const expiresDays = Math.max(1, Math.min(365, Number(req.body?.expiresDays || 90)));
+    const created = await pool.query(
+      `INSERT INTO client_report_links (account_id, token, expires_at, created_by)
+       VALUES ($1, $2, NOW() + ($3 || ' days')::interval, $4) RETURNING id, token, expires_at, created_at`,
+      [link.account_id, token, expiresDays, req.session.userId || null],
+    );
+    res.json({ ok: true, oldLinkId: req.params.linkId, id: created.rows[0].id, token, url: publicUrl(req, token), expiresAt: created.rows[0].expires_at, createdAt: created.rows[0].created_at });
   } catch (err) {
     next(err);
   }
