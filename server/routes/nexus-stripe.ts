@@ -7,6 +7,7 @@ const router = Router();
 
 const priceEnvByPlan: Record<string, string> = {
   local_launch: "STRIPE_NEXUS_LOCAL_LAUNCH_PRICE_ID",
+  founding_agency: "STRIPE_NEXUS_FOUNDING_AGENCY_PRICE_ID",
   growth_bundle: "STRIPE_NEXUS_GROWTH_BUNDLE_PRICE_ID",
   growth_bundle_annual: "STRIPE_NEXUS_GROWTH_BUNDLE_ANNUAL_PRICE_ID",
   addon_site: "STRIPE_NEXUS_ADDON_SITE_PRICE_ID",
