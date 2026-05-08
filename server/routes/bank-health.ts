@@ -3,12 +3,14 @@ import { pool } from "../db";
 import { requireAuth, requireSuperAdmin } from "../auth";
 import intentActionsRouter from "./intent-actions";
 import onboardingLiveRouter from "./onboarding-live";
+import agencyRoiDashboardRouter from "./agency-roi-dashboard";
 import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
 router.use(intentActionsRouter);
 router.use("/api/agencies/:agencyId/wizard", requireAuth, requireSuperAdmin);
 router.use(onboardingLiveRouter);
+router.use(agencyRoiDashboardRouter);
 
 const globalAny = globalThis as any;
 if (!globalAny.__nexusIntentJobWorkerScheduled) {
