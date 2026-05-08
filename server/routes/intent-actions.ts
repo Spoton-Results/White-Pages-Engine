@@ -1,14 +1,43 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { randomUUID } from "crypto";
 import { pool } from "../db";
+import { requireAuth } from "../auth";
 import { runIntentBuild, getIntentBuildStatus, getIntentBuildReport } from "../services/intent-build";
 
 const router = Router();
+router.use(requireAuth);
 
 type PageRef = { pageId?: string; slug?: string; canonicalOwner?: string; websiteId?: string };
 
 function cleanSlug(value: unknown) {
   return String(value ?? "").trim().replace(/^\/+/, "").replace(/^pages\//, "");
+}
+
+async function assertWebsiteAccess(req: Request, res: Response, websiteId: string) {
+  const result = await pool.query(`SELECT id, account_id FROM websites WHERE id = $1 LIMIT 1`, [websiteId]);
+  const website = result.rows[0];
+  if (!website) {
+    res.status(404).json({ message: "Website not found" });
+    return null;
+  }
+  if (!req.session.isSuperAdmin && req.session.accountId !== website.account_id) {
+    res.status(403).json({ message: "Forbidden: No access to this website" });
+    return null;
+  }
+  return website;
+}
+
+async function requireWebsiteParam(req: Request, res: Response, next: NextFunction) {
+  try {
+    const websiteId = req.params.websiteId || req.body?.websiteId;
+    if (!websiteId) return res.status(400).json({ message: "websiteId is required" });
+    const website = await assertWebsiteAccess(req, res, websiteId);
+    if (!website) return;
+    (req as any).website = website;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 async function findPage(client: any, body: PageRef) {
@@ -18,10 +47,7 @@ async function findPage(client: any, body: PageRef) {
   }
   const slug = cleanSlug(body.slug || body.canonicalOwner);
   if (!slug || !body.websiteId) return null;
-  const result = await client.query(
-    `SELECT * FROM pages WHERE website_id = $1 AND slug = $2 LIMIT 1`,
-    [body.websiteId, slug],
-  );
+  const result = await client.query(`SELECT * FROM pages WHERE website_id = $1 AND slug = $2 LIMIT 1`, [body.websiteId, slug]);
   return result.rows[0];
 }
 
@@ -40,7 +66,7 @@ async function websiteAccountId(client: any, websiteId: string) {
   return result.rows[0]?.account_id ?? null;
 }
 
-router.post("/api/websites/:websiteId/intent-build/run", async (req, res, next) => {
+router.post("/api/websites/:websiteId/intent-build/run", requireWebsiteParam, async (req, res, next) => {
   try {
     const result = await runIntentBuild(req.params.websiteId);
     res.json(result);
@@ -49,7 +75,7 @@ router.post("/api/websites/:websiteId/intent-build/run", async (req, res, next) 
   }
 });
 
-router.get("/api/websites/:websiteId/intent-build/status", async (req, res, next) => {
+router.get("/api/websites/:websiteId/intent-build/status", requireWebsiteParam, async (req, res, next) => {
   try {
     res.json(getIntentBuildStatus(req.params.websiteId));
   } catch (err) {
@@ -57,7 +83,7 @@ router.get("/api/websites/:websiteId/intent-build/status", async (req, res, next
   }
 });
 
-router.get("/api/websites/:websiteId/intent-build/report", async (req, res, next) => {
+router.get("/api/websites/:websiteId/intent-build/report", requireWebsiteParam, async (req, res, next) => {
   try {
     res.json(getIntentBuildReport(req.params.websiteId));
   } catch (err) {
@@ -65,7 +91,7 @@ router.get("/api/websites/:websiteId/intent-build/report", async (req, res, next
   }
 });
 
-router.post("/api/intent-build/promote", async (req, res, next) => {
+router.post("/api/intent-build/promote", requireWebsiteParam, async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -74,18 +100,13 @@ router.post("/api/intent-build/promote", async (req, res, next) => {
       await client.query("ROLLBACK");
       return res.status(404).json({ message: "Page not found" });
     }
-    await client.query(
-      `UPDATE pages SET tier = 1, promotion_status = 'promoted', noindex = false, updated_at = NOW() WHERE id = $1`,
-      [page.id],
-    );
+    if (page.website_id !== req.body.websiteId) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
+    }
+    await client.query(`UPDATE pages SET tier = 1, promotion_status = 'promoted', noindex = false, updated_at = NOW() WHERE id = $1`, [page.id]);
     const accountId = await websiteAccountId(client, page.website_id);
-    const sitemapJobId = await queueJob(client, { ...page, website_id: page.website_id }, "Intent Build: sitemap regeneration after promotion", {
-      type: "sitemap_regeneration",
-      reason: "intent_build_promote",
-      accountId,
-      pageId: page.id,
-      slug: page.slug,
-    });
+    const sitemapJobId = await queueJob(client, page, "Intent Build: sitemap regeneration after promotion", { type: "sitemap_regeneration", reason: "intent_build_promote", accountId, pageId: page.id, slug: page.slug });
     await client.query("COMMIT");
     res.json({ ok: true, action: "promote", pageId: page.id, slug: page.slug, tier: 1, promotionStatus: "promoted", noindex: false, sitemapJobId });
   } catch (err) {
@@ -96,19 +117,14 @@ router.post("/api/intent-build/promote", async (req, res, next) => {
   }
 });
 
-router.post("/api/intent-build/improve", async (req, res, next) => {
+router.post("/api/intent-build/improve", requireWebsiteParam, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const page = await findPage(client, req.body || {});
     if (!page) return res.status(404).json({ message: "Page not found" });
+    if (page.website_id !== req.body.websiteId) return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
     const accountId = await websiteAccountId(client, page.website_id);
-    const jobId = await queueJob(client, page, "Intent Build: improve page", {
-      type: "intent_page_improvement",
-      accountId,
-      pageId: page.id,
-      slug: page.slug,
-      requestedImprovements: ["title", "h1", "meta", "faq", "proof", "local_section", "rescore"],
-    });
+    const jobId = await queueJob(client, page, "Intent Build: improve page", { type: "intent_page_improvement", accountId, pageId: page.id, slug: page.slug, requestedImprovements: ["title", "h1", "meta", "faq", "proof", "local_section", "rescore"] });
     res.json({ ok: true, action: "improve", pageId: page.id, slug: page.slug, jobId });
   } catch (err) {
     next(err);
@@ -117,7 +133,7 @@ router.post("/api/intent-build/improve", async (req, res, next) => {
   }
 });
 
-router.post("/api/intent-build/add-links", async (req, res, next) => {
+router.post("/api/intent-build/add-links", requireWebsiteParam, async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -125,6 +141,10 @@ router.post("/api/intent-build/add-links", async (req, res, next) => {
     if (!page) {
       await client.query("ROLLBACK");
       return res.status(404).json({ message: "Page not found" });
+    }
+    if (page.website_id !== req.body.websiteId) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
     }
     const sources = await client.query(
       `SELECT id, title, slug, page_type FROM pages
@@ -138,9 +158,7 @@ router.post("/api/intent-build/add-links", async (req, res, next) => {
       const insertResult = await client.query(
         `INSERT INTO internal_links (website_id, from_page_id, to_page_id, anchor_text, link_type, created_at)
          SELECT $1, $2, $3, $4, 'intent_support', NOW()
-         WHERE NOT EXISTS (
-           SELECT 1 FROM internal_links WHERE website_id = $1 AND from_page_id = $2 AND to_page_id = $3
-         )
+         WHERE NOT EXISTS (SELECT 1 FROM internal_links WHERE website_id = $1 AND from_page_id = $2 AND to_page_id = $3)
          RETURNING id`,
         [page.website_id, source.id, page.id, page.h1 || page.title || page.slug],
       );
@@ -156,20 +174,14 @@ router.post("/api/intent-build/add-links", async (req, res, next) => {
   }
 });
 
-router.post("/api/intent-build/consolidate", async (req, res, next) => {
+router.post("/api/intent-build/consolidate", requireWebsiteParam, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const page = await findPage(client, req.body || {});
     if (!page) return res.status(404).json({ message: "Page not found" });
+    if (page.website_id !== req.body.websiteId) return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
     const accountId = await websiteAccountId(client, page.website_id);
-    const jobId = await queueJob(client, page, "Intent Build: consolidation review", {
-      type: "intent_consolidation_review",
-      accountId,
-      winnerPageId: page.id,
-      winnerSlug: page.slug,
-      intentCluster: req.body?.intentCluster || null,
-      destructiveActionAllowed: false,
-    });
+    const jobId = await queueJob(client, page, "Intent Build: consolidation review", { type: "intent_consolidation_review", accountId, winnerPageId: page.id, winnerSlug: page.slug, intentCluster: req.body?.intentCluster || null, destructiveActionAllowed: false });
     res.json({ ok: true, action: "consolidate", queuedForReview: true, pageId: page.id, slug: page.slug, jobId });
   } catch (err) {
     next(err);
@@ -178,23 +190,14 @@ router.post("/api/intent-build/consolidate", async (req, res, next) => {
   }
 });
 
-router.post("/api/intent-build/merge", async (req, res, next) => {
+router.post("/api/intent-build/merge", requireWebsiteParam, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const page = await findPage(client, req.body || {});
     if (!page) return res.status(404).json({ message: "Page not found" });
+    if (page.website_id !== req.body.websiteId) return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
     const accountId = await websiteAccountId(client, page.website_id);
-    const jobId = await queueJob(client, page, "Intent Build: merge review", {
-      type: "intent_merge_review",
-      accountId,
-      winnerPageId: page.id,
-      winnerSlug: page.slug,
-      intentCluster: req.body?.intentCluster || null,
-      requiresConfirmation: true,
-      destructiveActionAllowed: false,
-      redirectRequiredBeforePrune: true,
-      reviewToken: randomUUID(),
-    });
+    const jobId = await queueJob(client, page, "Intent Build: merge review", { type: "intent_merge_review", accountId, winnerPageId: page.id, winnerSlug: page.slug, intentCluster: req.body?.intentCluster || null, requiresConfirmation: true, destructiveActionAllowed: false, redirectRequiredBeforePrune: true, reviewToken: randomUUID() });
     res.json({ ok: true, action: "merge", queuedForReview: true, pageId: page.id, slug: page.slug, jobId });
   } catch (err) {
     next(err);
