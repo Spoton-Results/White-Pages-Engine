@@ -34,31 +34,66 @@ export function sessionMiddleware() {
   });
 }
 
+function hasSession(req: Request): boolean {
+  return !!(req && (req as any).session);
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!hasSession(req)) {
+    return res.status(500).json({
+      message: "Session middleware not initialized",
+      code: "SESSION_MISSING",
+    });
+  }
+
   if (!req.session.userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+
   next();
 }
 
 export async function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId || !req.session.isSuperAdmin) {
+  if (!hasSession(req)) {
+    return res.status(500).json({
+      message: "Session middleware not initialized",
+      code: "SESSION_MISSING",
+    });
+  }
+
+  if (!req.session.userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!req.session.isSuperAdmin) {
     return res.status(403).json({ message: "Forbidden: Super Admin only" });
   }
+
   next();
 }
 
 export async function requireAccountAccess(req: Request, res: Response, next: NextFunction) {
+  if (!hasSession(req)) {
+    return res.status(500).json({
+      message: "Session middleware not initialized",
+      code: "SESSION_MISSING",
+    });
+  }
+
   if (!req.session.userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+
   if (req.session.isSuperAdmin) {
     return next();
   }
+
   const accountId = req.params.accountId || req.body?.accountId;
+
   if (accountId && req.session.accountId !== accountId) {
     return res.status(403).json({ message: "Forbidden: No access to this account" });
   }
+
   next();
 }
 
@@ -71,13 +106,20 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 }
 
 export async function loginUser(req: Request, email: string, password: string) {
+  if (!hasSession(req)) {
+    throw new Error("Session middleware not initialized");
+  }
+
   const user = await storage.getUserByEmail(email);
   if (!user) return null;
+
   const valid = await verifyPassword(password, user.password);
   if (!valid) return null;
+
   req.session.userId = user.id;
   req.session.isSuperAdmin = user.isSuperAdmin;
   req.session.accountId = user.accountId;
   req.session.role = user.role;
+
   return user;
 }
