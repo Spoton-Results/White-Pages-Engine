@@ -44,6 +44,7 @@ import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
 import IntentBuildPage from "@/pages/intent-build";
 import ActionReviewPage from "@/pages/action-review";
+import ProductionValidationPage from "@/pages/production-validation";
 import AutomationPage from "@/pages/automation";
 import AgenciesPage from "@/pages/agencies";
 import OnboardWizard from "@/pages/agencies/onboard";
@@ -105,6 +106,7 @@ function Router() {
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
       <Route path="/intent-build"><AuthGuard><IntentBuildPage /></AuthGuard></Route>
       <Route path="/action-review"><AuthGuard><ActionReviewPage /></AuthGuard></Route>
+      <Route path="/production-validation"><AuthGuard><ProductionValidationPage /></AuthGuard></Route>
       <Route path="/automation"><AuthGuard><AutomationPage /></AuthGuard></Route>
       <Route path="/bank-health"><AuthGuard><BankHealthPage /></AuthGuard></Route>
       <Route path="/onboarding-test"><AuthGuard><OnboardingTestPage /></AuthGuard></Route>
