@@ -3,7 +3,6 @@ import { pool } from "../db";
 import { requireAuth } from "../auth";
 
 const router = Router();
-router.use(requireAuth);
 
 function searchReachEstimate(pagesLive: number, citiesCovered: number, servicesCovered: number) {
   const base = pagesLive * 35;
@@ -34,7 +33,7 @@ async function assertClientAccess(req: any, res: any, accountId: string) {
   return account;
 }
 
-router.get("/api/agency-dashboard/summary", async (req, res, next) => {
+router.get("/api/agency-dashboard/summary", requireAuth, async (req, res, next) => {
   try {
     const scope = accountScope(req, "a");
     const andScope = accountAnd(req, "a");
@@ -52,7 +51,7 @@ router.get("/api/agency-dashboard/summary", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/api/agency-dashboard/activity", async (req, res, next) => {
+router.get("/api/agency-dashboard/activity", requireAuth, async (req, res, next) => {
   try {
     const andScope = accountAnd(req, "a");
     const [pagesGenerated, pagesImproved, linksAdded, sitemapUpdates, qualityFixes] = await Promise.all([
@@ -66,7 +65,7 @@ router.get("/api/agency-dashboard/activity", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/api/agency-dashboard/coverage", async (req, res, next) => {
+router.get("/api/agency-dashboard/coverage", requireAuth, async (req, res, next) => {
   try {
     const andScope = accountAnd(req, "a");
     const [states, cities, pageTypes, opportunities] = await Promise.all([
@@ -82,7 +81,7 @@ router.get("/api/agency-dashboard/coverage", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/api/agency-dashboard/clients", async (req, res, next) => {
+router.get("/api/agency-dashboard/clients", requireAuth, async (req, res, next) => {
   try {
     const scope = accountScope(req, "a");
     const result = await pool.query(
@@ -111,7 +110,7 @@ router.get("/api/agency-dashboard/clients", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/api/agency-dashboard/clients/:accountId", async (req, res, next) => {
+router.get("/api/agency-dashboard/clients/:accountId", requireAuth, async (req, res, next) => {
   try {
     const account = await assertClientAccess(req, res, req.params.accountId);
     if (!account) return;
