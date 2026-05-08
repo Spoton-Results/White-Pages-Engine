@@ -38,7 +38,21 @@ function hasSession(req: Request): boolean {
   return !!(req && (req as any).session);
 }
 
+function isApiRequest(req: Request): boolean {
+  return String(req.originalUrl || req.url || "").startsWith("/api");
+}
+
+function passFrontendRoute(req: Request, next: NextFunction): boolean {
+  if (!isApiRequest(req)) {
+    next();
+    return true;
+  }
+  return false;
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (passFrontendRoute(req, next)) return;
+
   if (!hasSession(req)) {
     return res.status(500).json({
       message: "Session middleware not initialized",
@@ -54,6 +68,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 }
 
 export async function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  if (passFrontendRoute(req, next)) return;
+
   if (!hasSession(req)) {
     return res.status(500).json({
       message: "Session middleware not initialized",
@@ -73,6 +89,8 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
 }
 
 export async function requireAccountAccess(req: Request, res: Response, next: NextFunction) {
+  if (passFrontendRoute(req, next)) return;
+
   if (!hasSession(req)) {
     return res.status(500).json({
       message: "Session middleware not initialized",
