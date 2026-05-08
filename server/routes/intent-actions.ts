@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { pool } from "../db";
+import { runIntentBuild, getIntentBuildStatus, getIntentBuildReport } from "../services/intent-build";
 
 const router = Router();
 
@@ -38,6 +39,31 @@ async function websiteAccountId(client: any, websiteId: string) {
   const result = await client.query(`SELECT account_id FROM websites WHERE id = $1 LIMIT 1`, [websiteId]);
   return result.rows[0]?.account_id ?? null;
 }
+
+router.post("/api/websites/:websiteId/intent-build/run", async (req, res, next) => {
+  try {
+    const result = await runIntentBuild(req.params.websiteId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/websites/:websiteId/intent-build/status", async (req, res, next) => {
+  try {
+    res.json(getIntentBuildStatus(req.params.websiteId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/api/websites/:websiteId/intent-build/report", async (req, res, next) => {
+  try {
+    res.json(getIntentBuildReport(req.params.websiteId));
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.post("/api/intent-build/promote", async (req, res, next) => {
   const client = await pool.connect();
@@ -109,15 +135,16 @@ router.post("/api/intent-build/add-links", async (req, res, next) => {
     );
     let created = 0;
     for (const source of sources.rows) {
-      await client.query(
+      const insertResult = await client.query(
         `INSERT INTO internal_links (website_id, from_page_id, to_page_id, anchor_text, link_type, created_at)
          SELECT $1, $2, $3, $4, 'intent_support', NOW()
          WHERE NOT EXISTS (
            SELECT 1 FROM internal_links WHERE website_id = $1 AND from_page_id = $2 AND to_page_id = $3
-         )`,
+         )
+         RETURNING id`,
         [page.website_id, source.id, page.id, page.h1 || page.title || page.slug],
       );
-      created += 1;
+      created += insertResult.rowCount ?? 0;
     }
     await client.query("COMMIT");
     res.json({ ok: true, action: "add-links", pageId: page.id, slug: page.slug, linksCreated: created });
