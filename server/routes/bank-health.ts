@@ -8,6 +8,14 @@ import agencyMonthlyReportRouter from "./agency-monthly-report";
 import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
+
+router.use((req, _res, next) => {
+  if (!req.path.startsWith("/api") && !req.path.startsWith("/r/")) {
+    return next("router");
+  }
+  next();
+});
+
 router.use(intentActionsRouter);
 router.use("/api/agencies/:agencyId/wizard", requireAuth, requireSuperAdmin);
 router.use(onboardingLiveRouter);
