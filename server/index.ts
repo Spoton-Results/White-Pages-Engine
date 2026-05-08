@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import bankHealthRouter from "./routes/bank-health";
+import { sessionMiddleware } from "./auth";
 
 const app = express();
 const httpServer = createServer(app);
@@ -26,6 +27,7 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+app.use(sessionMiddleware());
 app.use(bankHealthRouter);
 
 export function log(message: string, source = "express") {
