@@ -53,7 +53,7 @@ import WelcomePage from "@/pages/WelcomePage";
 import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
-import AgencyDashboardPage from "@/pages/agency-dashboard";
+import AgencyDashboardPage from "@/pages/agency-dashboard-mvp";
 import ReportLinksPage from "@/pages/report-links";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
