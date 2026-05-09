@@ -47,6 +47,7 @@ import IntentBuildPage from "@/pages/intent-build";
 import ActionReviewPage from "@/pages/action-review";
 import ProductionValidationPage from "@/pages/production-validation";
 import AutomationPage from "@/pages/automation";
+import OperationsPage from "@/pages/operations";
 import AgenciesPage from "@/pages/agencies";
 import OnboardWizard from "@/pages/agencies/onboard";
 import NexusLandingPage from "@/pages/NexusLandingPage";
@@ -115,6 +116,7 @@ function Router() {
       <Route path="/leads"><AuthGuard><LeadsPage /></AuthGuard></Route>
       <Route path="/agency-dashboard"><AuthGuard agencyAllowed><AgencyDashboardPage /></AuthGuard></Route>
       <Route path="/report-links"><AuthGuard agencyAllowed><ReportLinksPage /></AuthGuard></Route>
+      <Route path="/operations"><AuthGuard><OperationsPage /></AuthGuard></Route>
       <Route path="/search-console"><AuthGuard><SearchConsolePage /></AuthGuard></Route>
       <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
       <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
