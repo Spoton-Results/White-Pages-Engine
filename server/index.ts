@@ -8,6 +8,7 @@ import nexusStripeRouter from "./routes/nexus-stripe";
 import searchConsoleAdminRouter from "./routes/search-console-admin";
 import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
+import systemIntegrityRouter from "./routes/system-integrity";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -51,6 +52,7 @@ app.use(bankHealthRouter);
 app.use(searchConsoleAdminRouter);
 app.use(agencyRoiDashboardRouter);
 app.use(agencyMonthlyReportRouter);
+app.use(systemIntegrityRouter);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
