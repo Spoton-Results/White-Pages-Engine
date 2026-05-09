@@ -10,6 +10,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "smoke:agency": "tsx scripts/smoke-agency-retention.ts",
+    "qa:retention": "npm run smoke:agency && npm run check",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
