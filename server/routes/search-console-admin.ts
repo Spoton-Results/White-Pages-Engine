@@ -1,8 +1,10 @@
 import { Router } from "express";
+import crypto from "crypto";
 import { pool } from "../db";
 import { requireAuth } from "../auth";
 
 const router = Router();
+const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 
 function isAgencyRole(req: any) {
   const role = String(req.session?.role || req.session?.user?.role || "").toLowerCase();
@@ -12,6 +14,62 @@ function isAgencyRole(req: any) {
 function requireInternalAdmin(req: any, res: any, next: any) {
   if (isAgencyRole(req)) return res.status(403).json({ message: "Forbidden: Search Console setup is admin-only" });
   return next();
+}
+
+function base64url(input: string | Buffer) {
+  return Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function getGoogleServiceAccountConfig() {
+  const projectId = process.env.GOOGLE_PROJECT_ID || "";
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GSC_ADMIN_EMAIL || "";
+  const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY || "";
+  const privateKey = rawPrivateKey.replace(/\\n/g, "\n");
+  return { projectId, clientEmail, privateKey, hasProjectId: !!projectId, hasClientEmail: !!clientEmail, hasPrivateKey: !!privateKey, privateKeyLooksValid: privateKey.includes("BEGIN PRIVATE KEY") && privateKey.includes("END PRIVATE KEY") };
+}
+
+async function getGoogleAccessToken() {
+  const cfg = getGoogleServiceAccountConfig();
+  if (!cfg.clientEmail) throw new Error("Missing GOOGLE_CLIENT_EMAIL / GOOGLE_SERVICE_ACCOUNT_EMAIL / GSC_ADMIN_EMAIL");
+  if (!cfg.privateKey) throw new Error("Missing GOOGLE_PRIVATE_KEY");
+  if (!cfg.privateKeyLooksValid) throw new Error("GOOGLE_PRIVATE_KEY does not look like a valid PEM private key");
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const claimSet = {
+    iss: cfg.clientEmail,
+    scope: GSC_SCOPE,
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now,
+  };
+  const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claimSet))}`;
+  const signature = crypto.createSign("RSA-SHA256").update(signingInput).sign(cfg.privateKey);
+  const assertion = `${signingInput}.${base64url(signature)}`;
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+  });
+  const tokenJson: any = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok) {
+    throw new Error(tokenJson.error_description || tokenJson.error || `Google token request failed: ${tokenRes.status}`);
+  }
+  return String(tokenJson.access_token || "");
+}
+
+async function callSearchConsole(path: string, init: RequestInit = {}) {
+  const token = await getGoogleAccessToken();
+  const res = await fetch(`https://www.googleapis.com/webmasters/v3${path}`, {
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json.error?.message || json.error_description || `Search Console API failed: ${res.status}`);
+  }
+  return json;
 }
 
 async function ensureSearchConsoleTables() {
@@ -41,19 +99,61 @@ async function ensureSearchConsoleTables() {
 }
 
 router.get("/api/search-console/config", requireAuth, requireInternalAdmin, async (_req, res) => {
-  const adminGoogleUser =
-    process.env.GSC_ADMIN_EMAIL ||
-    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
-    process.env.GOOGLE_CLIENT_EMAIL ||
-    "";
+  const cfg = getGoogleServiceAccountConfig();
+  const adminGoogleUser = cfg.clientEmail;
 
   res.json({
     adminGoogleUser,
     accessMethod: "delegated_admin_user",
+    serviceAccountReady: cfg.hasClientEmail && cfg.hasPrivateKey && cfg.privateKeyLooksValid,
+    hasProjectId: cfg.hasProjectId,
+    hasClientEmail: cfg.hasClientEmail,
+    hasPrivateKey: cfg.hasPrivateKey,
+    privateKeyLooksValid: cfg.privateKeyLooksValid,
     clientInstruction: adminGoogleUser
       ? `Please add ${adminGoogleUser} as a Full user in your Google Search Console property.`
       : "Add your Google service account email as a Full user in the client's Google Search Console property.",
   });
+});
+
+router.get("/api/search-console/auth-test", requireAuth, requireInternalAdmin, async (_req, res) => {
+  const cfg = getGoogleServiceAccountConfig();
+  try {
+    const token = await getGoogleAccessToken();
+    res.json({ ok: true, message: "Google service account authenticated successfully.", projectId: cfg.projectId || null, clientEmail: cfg.clientEmail || null, tokenReceived: !!token, tokenPreview: token ? `${token.slice(0, 8)}...` : null, checks: { hasProjectId: cfg.hasProjectId, hasClientEmail: cfg.hasClientEmail, hasPrivateKey: cfg.hasPrivateKey, privateKeyLooksValid: cfg.privateKeyLooksValid } });
+  } catch (err: any) {
+    res.status(400).json({ ok: false, message: err.message || "Google service account authentication failed.", projectId: cfg.projectId || null, clientEmail: cfg.clientEmail || null, checks: { hasProjectId: cfg.hasProjectId, hasClientEmail: cfg.hasClientEmail, hasPrivateKey: cfg.hasPrivateKey, privateKeyLooksValid: cfg.privateKeyLooksValid } });
+  }
+});
+
+router.post("/api/search-console/properties/:id/sync-test", requireAuth, requireInternalAdmin, async (req, res) => {
+  try {
+    await ensureSearchConsoleTables();
+    const result = await pool.query(`SELECT id, property_url FROM search_console_properties WHERE id::text = $1::text LIMIT 1`, [req.params.id]);
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ ok: false, message: "Search Console property not found" });
+
+    const sites = await callSearchConsole("/sites");
+    const propertyUrl = String(row.property_url || "");
+    const matchedSite = (sites.siteEntry || []).find((site: any) => String(site.siteUrl) === propertyUrl);
+
+    let searchAnalytics: any = null;
+    if (matchedSite) {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 28);
+      searchAnalytics = await callSearchConsole(`/sites/${encodeURIComponent(propertyUrl)}/searchAnalytics/query`, {
+        method: "POST",
+        body: JSON.stringify({ startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), rowLimit: 1 }),
+      });
+      const totals = (searchAnalytics.rows || []).reduce((acc: any, r: any) => ({ clicks: acc.clicks + Number(r.clicks || 0), impressions: acc.impressions + Number(r.impressions || 0), positionTotal: acc.positionTotal + Number(r.position || 0), count: acc.count + 1 }), { clicks: 0, impressions: 0, positionTotal: 0, count: 0 });
+      await pool.query(`UPDATE search_console_properties SET connection_status = 'sync_active', clicks = $2, impressions = $3, average_position = $4, last_sync_at = NOW(), updated_at = NOW() WHERE id::text = $1::text`, [req.params.id, totals.clicks, totals.impressions, totals.count ? totals.positionTotal / totals.count : null]);
+    }
+
+    res.json({ ok: true, message: matchedSite ? "Property access confirmed and sample Search Console sync succeeded." : "Service account authenticated, but this property was not found in accessible Search Console sites.", propertyUrl, accessibleSitesCount: (sites.siteEntry || []).length, propertyMatched: !!matchedSite, matchedPermissionLevel: matchedSite?.permissionLevel || null, sampleRows: searchAnalytics?.rows?.length || 0 });
+  } catch (err: any) {
+    res.status(400).json({ ok: false, message: err.message || "Search Console sync test failed." });
+  }
 });
 
 router.get("/api/search-console/properties", requireAuth, requireInternalAdmin, async (_req, res, next) => {
