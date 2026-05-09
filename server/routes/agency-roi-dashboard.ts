@@ -4,11 +4,51 @@ import { requireAuth } from "../auth";
 
 const router = Router();
 
+type RoiInputs = {
+  pagesLive: number;
+  citiesCovered: number;
+  servicesCovered: number;
+  last30DaysWork: number;
+  failedJobs: number;
+  thinBanks: number;
+};
+
 function searchReachEstimate(pagesLive: number, citiesCovered: number, servicesCovered: number) {
   const base = pagesLive * 35;
   const cityBoost = citiesCovered * 120;
   const serviceBoost = servicesCovered * 450;
   return Math.round(base + cityBoost + serviceBoost);
+}
+
+function calculateRoiScore(input: RoiInputs) {
+  let score = 0;
+  if (input.pagesLive > 0) score += 25;
+  if (input.pagesLive >= 100) score += 10;
+  if (input.pagesLive >= 500) score += 10;
+  if (input.citiesCovered > 0) score += 15;
+  if (input.servicesCovered > 0) score += 15;
+  if (input.last30DaysWork > 0) score += 20;
+  score -= Math.min(input.failedJobs * 5, 20);
+  score -= Math.min(input.thinBanks * 5, 20);
+  return Math.max(0, Math.min(100, score));
+}
+
+function getChurnRiskFlags(input: RoiInputs) {
+  const flags: string[] = [];
+  if (input.pagesLive === 0) flags.push("No pages live");
+  if (input.last30DaysWork === 0) flags.push("No work in 30 days");
+  if (input.failedJobs > 0) flags.push("Failed jobs");
+  if (input.thinBanks > 0) flags.push("Thin banks");
+  if (input.citiesCovered < 3 || input.servicesCovered < 2) flags.push("Low coverage");
+  return flags;
+}
+
+function getRecommendedNextAction(input: RoiInputs) {
+  if (input.pagesLive === 0) return "Publish first page batch.";
+  if (input.last30DaysWork === 0) return "Run generation or publish new batch.";
+  if (input.failedJobs > 0) return "Review failed generation jobs.";
+  if (input.thinBanks > 0) return "Fill missing variation sections.";
+  return "Send monthly report to client.";
 }
 
 function accountScope(req: any, alias = "a") {
@@ -37,17 +77,27 @@ router.get("/api/agency-dashboard/summary", requireAuth, async (req, res, next) 
   try {
     const scope = accountScope(req, "a");
     const andScope = accountAnd(req, "a");
-    const [clients, pages, cities, services] = await Promise.all([
+    const [clients, pages, pagesBuiltThisMonthRows, clientsWithNewWorkRows, cities, services, failedJobsRows, thinBankRows] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS count FROM accounts a ${scope.clause}`, scope.params),
       pool.query(`SELECT COUNT(*)::int AS count FROM pages p JOIN websites w ON w.id = p.website_id JOIN accounts a ON a.id = w.account_id WHERE p.status = 'published' ${andScope.clause}`, andScope.params),
+      pool.query(`SELECT COUNT(*)::int AS count FROM pages p JOIN websites w ON w.id = p.website_id JOIN accounts a ON a.id = w.account_id WHERE p.status = 'published' AND p.created_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
+      pool.query(`SELECT COUNT(DISTINCT a.id)::int AS count FROM accounts a LEFT JOIN websites w ON w.account_id = a.id LEFT JOIN pages p ON p.website_id = w.id AND p.status = 'published' AND p.created_at >= NOW() - INTERVAL '30 days' LEFT JOIN generation_jobs gj ON gj.account_id = a.id AND gj.created_at >= NOW() - INTERVAL '30 days' LEFT JOIN internal_links il ON il.website_id = w.id AND il.created_at >= NOW() - INTERVAL '30 days' LEFT JOIN sitemaps sm ON sm.website_id = w.id AND sm.updated_at >= NOW() - INTERVAL '30 days' ${scope.clause} ${scope.clause ? "AND" : "WHERE"} (p.id IS NOT NULL OR gj.id IS NOT NULL OR il.id IS NOT NULL OR sm.id IS NOT NULL)`, scope.params),
       pool.query(`SELECT COUNT(DISTINCT l.slug)::int AS count FROM locations l JOIN accounts a ON a.id = l.account_id WHERE l.type = 'city' ${andScope.clause}`, andScope.params),
       pool.query(`SELECT COUNT(DISTINCT s.slug)::int AS count FROM services s JOIN accounts a ON a.id = s.account_id ${scope.clause}`, scope.params),
+      pool.query(`SELECT COUNT(*)::int AS count FROM generation_jobs gj JOIN accounts a ON a.id = gj.account_id WHERE gj.status = 'failed' AND gj.created_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
+      pool.query(`SELECT COUNT(*)::int AS count FROM variation_bank_completeness vbc JOIN websites w ON w.id = vbc.website_id JOIN accounts a ON a.id = w.account_id WHERE vbc.completeness_score < 70 ${andScope.clause}`, andScope.params),
     ]);
     const activeClients = clients.rows[0]?.count ?? 0;
     const pagesLive = pages.rows[0]?.count ?? 0;
+    const pagesBuiltThisMonth = pagesBuiltThisMonthRows.rows[0]?.count ?? 0;
+    const clientsWithNewWork = clientsWithNewWorkRows.rows[0]?.count ?? 0;
     const citiesCovered = cities.rows[0]?.count ?? 0;
     const servicesCovered = services.rows[0]?.count ?? 0;
-    res.json({ activeClients, pagesLive, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered) });
+    const failedJobs = failedJobsRows.rows[0]?.count ?? 0;
+    const thinBanks = thinBankRows.rows[0]?.count ?? 0;
+    const clientsAtRisk = Math.min(activeClients, failedJobs + thinBanks + (pagesLive === 0 ? activeClients : 0));
+    const reportsReady = clientsWithNewWork;
+    res.json({ activeClients, pagesLive, pagesBuiltThisMonth, clientsWithNewWork, failedJobs, clientsAtRisk, reportsReady, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered) });
   } catch (err) { next(err); }
 });
 
@@ -95,18 +145,25 @@ router.get("/api/agency-dashboard/clients", requireAuth, async (req, res, next) 
        ), link_counts AS (
          SELECT w.account_id, COUNT(il.id)::int AS links_30d FROM websites w LEFT JOIN internal_links il ON il.website_id = w.id AND il.created_at >= NOW() - INTERVAL '30 days' GROUP BY w.account_id
        ), job_counts AS (
-         SELECT account_id, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' AND settings->>'type' = 'intent_page_improvement' THEN 1 END)::int AS improvements_30d, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS jobs_30d, COUNT(CASE WHEN status = 'failed' AND created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS failed_jobs_30d FROM generation_jobs GROUP BY account_id
+         SELECT account_id, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' AND settings->>'type' = 'intent_page_improvement' THEN 1 END)::int AS improvements_30d, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS jobs_30d, COUNT(CASE WHEN status = 'failed' AND created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS failed_jobs_30d, MAX(created_at) AS last_job_date FROM generation_jobs GROUP BY account_id
        ), sitemap_counts AS (
          SELECT w.account_id, COUNT(CASE WHEN sm.updated_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS sitemap_updates_30d FROM websites w LEFT JOIN sitemaps sm ON sm.website_id = w.id GROUP BY w.account_id
+       ), thin_bank_counts AS (
+         SELECT w.account_id, COUNT(vbc.id)::int AS thin_banks FROM websites w LEFT JOIN variation_bank_completeness vbc ON vbc.website_id = w.id AND vbc.completeness_score < 70 GROUP BY w.account_id
        )
-       SELECT a.id, a.name, a.status, COALESCE(pc.pages_live,0)::int AS pages_live, COALESCE(cc.cities_covered,0)::int AS cities_covered, COALESCE(sc.services_covered,0)::int AS services_covered, COALESCE(pc.pages_30d,0)::int AS pages_30d, COALESCE(lc.links_30d,0)::int AS links_30d, COALESCE(jc.improvements_30d,0)::int AS improvements_30d, COALESCE(jc.jobs_30d,0)::int AS jobs_30d, COALESCE(jc.failed_jobs_30d,0)::int AS failed_jobs_30d, COALESCE(smc.sitemap_updates_30d,0)::int AS sitemap_updates_30d, MAX(w.updated_at) AS last_activity_at
-       FROM accounts a LEFT JOIN websites w ON w.account_id = a.id LEFT JOIN page_counts pc ON pc.account_id = a.id LEFT JOIN city_counts cc ON cc.account_id = a.id LEFT JOIN service_counts sc ON sc.account_id = a.id LEFT JOIN link_counts lc ON lc.account_id = a.id LEFT JOIN job_counts jc ON jc.account_id = a.id LEFT JOIN sitemap_counts smc ON smc.account_id = a.id
+       SELECT a.id, a.name, a.status, COALESCE(pc.pages_live,0)::int AS pages_live, COALESCE(cc.cities_covered,0)::int AS cities_covered, COALESCE(sc.services_covered,0)::int AS services_covered, COALESCE(pc.pages_30d,0)::int AS pages_30d, COALESCE(lc.links_30d,0)::int AS links_30d, COALESCE(jc.improvements_30d,0)::int AS improvements_30d, COALESCE(jc.jobs_30d,0)::int AS jobs_30d, COALESCE(jc.failed_jobs_30d,0)::int AS failed_jobs_30d, COALESCE(tbc.thin_banks,0)::int AS thin_banks, COALESCE(smc.sitemap_updates_30d,0)::int AS sitemap_updates_30d, MAX(w.updated_at) AS last_activity_at, MAX(jc.last_job_date) AS last_job_date
+       FROM accounts a LEFT JOIN websites w ON w.account_id = a.id LEFT JOIN page_counts pc ON pc.account_id = a.id LEFT JOIN city_counts cc ON cc.account_id = a.id LEFT JOIN service_counts sc ON sc.account_id = a.id LEFT JOIN link_counts lc ON lc.account_id = a.id LEFT JOIN job_counts jc ON jc.account_id = a.id LEFT JOIN sitemap_counts smc ON smc.account_id = a.id LEFT JOIN thin_bank_counts tbc ON tbc.account_id = a.id
        ${scope.clause}
-       GROUP BY a.id, a.name, a.status, pc.pages_live, pc.pages_30d, cc.cities_covered, sc.services_covered, lc.links_30d, jc.improvements_30d, jc.jobs_30d, jc.failed_jobs_30d, smc.sitemap_updates_30d
+       GROUP BY a.id, a.name, a.status, pc.pages_live, pc.pages_30d, cc.cities_covered, sc.services_covered, lc.links_30d, jc.improvements_30d, jc.jobs_30d, jc.failed_jobs_30d, jc.last_job_date, tbc.thin_banks, smc.sitemap_updates_30d
        ORDER BY COALESCE(pc.pages_live,0) DESC, a.name ASC LIMIT 250`,
       scope.params,
     );
-    res.json(result.rows.map((r: any) => { const estimatedSearchReach = searchReachEstimate(r.pages_live, r.cities_covered, r.services_covered); const work30d = r.pages_30d + r.links_30d + r.improvements_30d + r.sitemap_updates_30d; return { id: r.id, name: r.name, status: r.status, pagesLive: r.pages_live, citiesCovered: r.cities_covered, servicesCovered: r.services_covered, estimatedSearchReach, last30DaysWork: work30d, last30Days: { pagesGenerated: r.pages_30d, linksAdded: r.links_30d, pagesImproved: r.improvements_30d, sitemapUpdates: r.sitemap_updates_30d, jobsCompletedOrQueued: r.jobs_30d, failedJobs: r.failed_jobs_30d }, lastActivityAt: r.last_activity_at }; }));
+    res.json(result.rows.map((r: any) => {
+      const estimatedSearchReach = searchReachEstimate(r.pages_live, r.cities_covered, r.services_covered);
+      const work30d = r.pages_30d + r.links_30d + r.improvements_30d + r.sitemap_updates_30d;
+      const roiInput = { pagesLive: r.pages_live, citiesCovered: r.cities_covered, servicesCovered: r.services_covered, last30DaysWork: work30d, failedJobs: r.failed_jobs_30d, thinBanks: r.thin_banks };
+      return { id: r.id, name: r.name, status: r.status, pagesLive: r.pages_live, citiesCovered: r.cities_covered, servicesCovered: r.services_covered, estimatedSearchReach, last30DaysWork: work30d, failedJobs: r.failed_jobs_30d, thinBanks: r.thin_banks, roiScore: calculateRoiScore(roiInput), churnRiskFlags: getChurnRiskFlags(roiInput), recommendedNextAction: getRecommendedNextAction(roiInput), pagesBuiltThisMonth: r.pages_30d, lastJobDate: r.last_job_date, last30Days: { pagesGenerated: r.pages_30d, linksAdded: r.links_30d, pagesImproved: r.improvements_30d, sitemapUpdates: r.sitemap_updates_30d, jobsCompletedOrQueued: r.jobs_30d, failedJobs: r.failed_jobs_30d }, lastActivityAt: r.last_activity_at };
+    }));
   } catch (err) { next(err); }
 });
 
@@ -116,34 +173,37 @@ router.get("/api/agency-dashboard/clients/:accountId", requireAuth, async (req, 
     if (!account) return;
     const accountId = req.params.accountId;
     const [summaryRows, pageTypes, topCities, topServices, workLog, health, websites] = await Promise.all([
-      pool.query(`SELECT (SELECT COUNT(*)::int FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published') AS pages_live, (SELECT COUNT(DISTINCT slug)::int FROM locations WHERE account_id = $1 AND type = 'city') AS cities_covered, (SELECT COUNT(DISTINCT slug)::int FROM services WHERE account_id = $1) AS services_covered`, [accountId]),
+      pool.query(`SELECT (SELECT COUNT(*)::int FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published') AS pages_live, (SELECT COUNT(*)::int FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published' AND p.created_at >= NOW() - INTERVAL '30 days') AS pages_30d, (SELECT COUNT(DISTINCT slug)::int FROM locations WHERE account_id = $1 AND type = 'city') AS cities_covered, (SELECT COUNT(DISTINCT slug)::int FROM services WHERE account_id = $1) AS services_covered`, [accountId]),
       pool.query(`SELECT p.page_type, COUNT(*)::int AS count FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published' GROUP BY p.page_type ORDER BY count DESC`, [accountId]),
       pool.query(`SELECT name, state_code, population FROM locations WHERE account_id = $1 AND type = 'city' ORDER BY COALESCE(population,0) DESC LIMIT 12`, [accountId]),
       pool.query(`SELECT s.name, s.slug, COUNT(p.id)::int AS pages_live FROM services s LEFT JOIN pages p ON p.service_id = s.id AND p.status = 'published' WHERE s.account_id = $1 GROUP BY s.name, s.slug ORDER BY pages_live DESC, s.name ASC LIMIT 12`, [accountId]),
       pool.query(`SELECT 'page' AS type, p.title AS label, p.slug AS detail, p.created_at FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.created_at >= NOW() - INTERVAL '30 days' UNION ALL SELECT 'job' AS type, gj.name AS label, gj.status AS detail, gj.created_at FROM generation_jobs gj WHERE gj.account_id = $1 AND gj.created_at >= NOW() - INTERVAL '30 days' UNION ALL SELECT 'link' AS type, 'Internal link added' AS label, il.link_type AS detail, il.created_at FROM internal_links il JOIN websites w ON w.id = il.website_id WHERE w.account_id = $1 AND il.created_at >= NOW() - INTERVAL '30 days' ORDER BY created_at DESC LIMIT 30`, [accountId]),
-      pool.query(`SELECT (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status = 'failed' AND created_at >= NOW() - INTERVAL '30 days') AS failed_jobs, (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status IN ('pending','running') AND created_at < NOW() - INTERVAL '30 minutes') AS stuck_jobs, (SELECT COUNT(*)::int FROM variation_bank_completeness vbc JOIN websites w ON w.id = vbc.website_id WHERE w.account_id = $1 AND vbc.completeness_score < 70) AS thin_banks`, [accountId]),
+      pool.query(`SELECT (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status = 'failed' AND created_at >= NOW() - INTERVAL '30 days') AS failed_jobs, (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status IN ('pending','running') AND created_at < NOW() - INTERVAL '30 minutes') AS stuck_jobs, (SELECT MAX(created_at) FROM generation_jobs WHERE account_id = $1) AS last_job_date, (SELECT COUNT(*)::int FROM variation_bank_completeness vbc JOIN websites w ON w.id = vbc.website_id WHERE w.account_id = $1 AND vbc.completeness_score < 70) AS thin_banks`, [accountId]),
       pool.query(`SELECT id, name, domain, status, onboarding_status FROM websites WHERE account_id = $1 ORDER BY created_at DESC`, [accountId]),
     ]);
-    const s = summaryRows.rows[0] || { pages_live: 0, cities_covered: 0, services_covered: 0 };
+    const s = summaryRows.rows[0] || { pages_live: 0, pages_30d: 0, cities_covered: 0, services_covered: 0 };
     const pagesLive = Number(s.pages_live || 0);
+    const pagesBuiltThisMonth = Number(s.pages_30d || 0);
     const citiesCovered = Number(s.cities_covered || 0);
     const servicesCovered = Number(s.services_covered || 0);
-    const healthRow = health.rows[0] || { failed_jobs: 0, stuck_jobs: 0, thin_banks: 0 };
-    const warnings = [];
-    if (Number(healthRow.failed_jobs) > 0) warnings.push(`${healthRow.failed_jobs} failed jobs in the last 30 days`);
+    const healthRow = health.rows[0] || { failed_jobs: 0, stuck_jobs: 0, thin_banks: 0, last_job_date: null };
+    const failedJobs = Number(healthRow.failed_jobs || 0);
+    const thinBanks = Number(healthRow.thin_banks || 0);
+    const last30DaysWork = workLog.rows.length;
+    const roiInput = { pagesLive, citiesCovered, servicesCovered, last30DaysWork, failedJobs, thinBanks };
+    const churnRiskFlags = getChurnRiskFlags(roiInput);
+    const warnings = [...churnRiskFlags];
     if (Number(healthRow.stuck_jobs) > 0) warnings.push(`${healthRow.stuck_jobs} stuck jobs older than 30 minutes`);
-    if (Number(healthRow.thin_banks) > 0) warnings.push(`${healthRow.thin_banks} thin Bank Health sections`);
-    if (pagesLive === 0) warnings.push("No published pages live yet");
     res.json({
       client: { id: account.id, name: account.name, status: account.status },
-      summary: { pagesLive, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered) },
+      summary: { pagesLive, pagesBuiltThisMonth, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered), roiScore: calculateRoiScore(roiInput), last30DaysWork, failedJobs, thinBanks, lastJobDate: healthRow.last_job_date, churnRiskFlags, recommendedNextAction: getRecommendedNextAction(roiInput) },
       websites: websites.rows,
       pageTypes: Object.fromEntries(pageTypes.rows.map((r: any) => [r.page_type || "unknown", r.count])),
       topCities: topCities.rows,
       topServices: topServices.rows,
       workLog: workLog.rows.map((r: any) => ({ type: r.type, label: r.label, detail: r.detail, createdAt: r.created_at })),
       expansionOpportunities: topCities.rows.slice(0, 8).map((r: any) => ({ city: r.name, state: r.state_code, reason: "Expand service and problem-intent coverage in this high-value market.", population: r.population })),
-      health: { failedJobs: Number(healthRow.failed_jobs || 0), stuckJobs: Number(healthRow.stuck_jobs || 0), thinBanks: Number(healthRow.thin_banks || 0), warnings },
+      health: { failedJobs, stuckJobs: Number(healthRow.stuck_jobs || 0), thinBanks, warnings, churnRiskFlags, recommendedNextAction: getRecommendedNextAction(roiInput), roiScore: calculateRoiScore(roiInput), lastJobDate: healthRow.last_job_date },
     });
   } catch (err) { next(err); }
 });
