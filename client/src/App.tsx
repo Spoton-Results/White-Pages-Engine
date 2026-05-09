@@ -54,7 +54,7 @@ import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard-mvp";
-import ReportLinksPage from "@/pages/report-links";
+import ReportLinksPage from "@/pages/report-links-mvp";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
