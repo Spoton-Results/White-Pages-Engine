@@ -19,6 +19,20 @@ declare module "http" {
   }
 }
 
+function isDatabaseRecoveryError(err: any) {
+  const message = String(err?.message || "").toLowerCase();
+  return err?.code === "57P03" || message.includes("database system is in recovery mode") || message.includes("the database system is starting up");
+}
+
+function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
+  res.setHeader("Retry-After", "10");
+  return res.status(503).json({
+    message: "Database is waking up or recovering. Please retry in a moment.",
+    code: "DATABASE_RECOVERY",
+    retryAfterSeconds: 10,
+  });
+}
+
 app.use(
   express.json({
     limit: "10mb",
@@ -73,7 +87,12 @@ app.use((req, res, next) => {
 async function runBackgroundStartup() {
   try {
     const { pool: pgPool } = await import("./db");
-    const exec = (stmt: string) => pgPool.query(stmt).catch(() => {});
+    const exec = (stmt: string) => pgPool.query(stmt).catch((err) => {
+      if (isDatabaseRecoveryError(err)) {
+        console.warn("[startup] Database recovering during schema ensure; will retry on next request/run.");
+        return;
+      }
+    });
 
     await Promise.all([
       exec(`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`),
@@ -103,6 +122,10 @@ async function runBackgroundStartup() {
 
     await seedDatabase();
   } catch (err) {
+    if (isDatabaseRecoveryError(err)) {
+      console.warn("[startup] Database is recovering; startup tasks skipped and will be retried later.");
+      return;
+    }
     console.error("[startup] Background startup failed (non-fatal):", err);
   }
 }
@@ -110,7 +133,13 @@ async function runBackgroundStartup() {
 (async () => {
   await registerRoutes(httpServer, app);
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    if (isDatabaseRecoveryError(err)) {
+      console.warn("[db] Database recovery guard handled 57P03 for", req.method, req.originalUrl || req.url);
+      if (res.headersSent) return next(err);
+      return sendDatabaseRecoveryResponse(req, res);
+    }
+
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
@@ -145,6 +174,10 @@ async function runBackgroundStartup() {
 
     setImmediate(() => {
       runBackgroundStartup().catch((err) => {
+        if (isDatabaseRecoveryError(err)) {
+          console.warn("[startup] Database recovery during background startup.");
+          return;
+        }
         console.error("[startup] Background startup crashed:", err);
       });
     });
