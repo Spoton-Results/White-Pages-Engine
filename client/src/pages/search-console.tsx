@@ -15,7 +15,7 @@ export default function SearchConsolePage() {
               <h1 className="text-2xl font-bold tracking-tight text-gray-900">Search Console</h1>
             </div>
             <p className="mt-2 max-w-3xl text-sm text-gray-500">
-              Admin-only Google Search Console setup and monitoring area. Agencies should only see read-only reporting status inside their client reports.
+              Admin-only delegated Search Console access tracker. Clients add your admin Google user to their GSC property; Nexus stores the property and reports the data back.
             </p>
           </div>
           <Button variant="outline" onClick={() => window.location.href = "/agency-dashboard"}>
@@ -29,16 +29,16 @@ export default function SearchConsolePage() {
               <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-blue-100">
                 <ShieldCheck className="h-3.5 w-3.5" />Internal operations only
               </div>
-              <h2 className="mt-5 text-3xl font-bold tracking-tight md:text-5xl">Connect, verify, and monitor client search data.</h2>
+              <h2 className="mt-5 text-3xl font-bold tracking-tight md:text-5xl">Track delegated GSC access for each client.</h2>
               <p className="mt-3 text-sm leading-6 text-blue-100">
-                This page is the control room for Search Console. Client and agency screens should show proof, not setup controls.
+                No client OAuth flow required. Have the client add your admin Google user to their property, confirm access, save the property URL, then sync/report the metrics.
               </p>
             </div>
           </CardContent>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatusCard title="Google OAuth" value="Not connected" tone="warn" icon="key" />
+          <StatusCard title="Delegated Admin Access" value="Manual verification" tone="warn" icon="key" />
           <StatusCard title="Client Properties" value="Setup pending" tone="warn" icon="globe" />
           <StatusCard title="Last Sync" value="Not synced" tone="warn" icon="sync" />
         </div>
@@ -50,8 +50,9 @@ export default function SearchConsolePage() {
               <CardDescription>Use this as the operating checklist before exposing Search Console metrics in reports.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <CheckRow text="Connect agency Google account with Search Console access." />
-              <CheckRow text="Map each client website/domain to the correct GSC property." />
+              <CheckRow text="Send the client your admin Google email and ask them to add it to their Search Console property." />
+              <CheckRow text="Confirm the property is visible inside your Google Search Console account." />
+              <CheckRow text="Map the client website/domain to the correct GSC property in Nexus." />
               <CheckRow text="Verify sitemap submission and indexing access." />
               <CheckRow text="Sync clicks, impressions, indexed pages, average position, and coverage warnings." />
               <CheckRow text="Expose read-only proof inside Agency Dashboard and monthly reports." />
@@ -64,8 +65,8 @@ export default function SearchConsolePage() {
               <CardDescription>Separation keeps agencies out of admin controls while still showing proof.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <Placement label="Admin Search Console" value="Connect, verify, sync, repair." />
-              <Placement label="Client Detail Drawer" value="Show GSC connection health for that client." />
+              <Placement label="Admin Search Console" value="Confirm delegated access, map property, sync, repair." />
+              <Placement label="Client Detail Drawer" value="Show GSC access and sync health for that client." />
               <Placement label="Agency Dashboard" value="Show summary proof only." />
               <Placement label="Monthly Report" value="Show client-facing growth proof." />
             </CardContent>
@@ -75,13 +76,13 @@ export default function SearchConsolePage() {
         <Card>
           <CardHeader>
             <CardTitle>Client Property Table</CardTitle>
-            <CardDescription>Placeholder until the live Google Search Console integration is wired.</CardDescription>
+            <CardDescription>Manual delegated-access property tracker before live GSC API sync is wired.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="rounded-lg border border-dashed p-8 text-center">
               <TriangleAlert className="mx-auto h-8 w-8 text-yellow-600" />
               <p className="mt-3 font-semibold text-gray-900">No Search Console properties synced yet.</p>
-              <p className="mt-1 text-sm text-gray-500">Next backend build should add OAuth, property mapping, and per-client GSC sync tables.</p>
+              <p className="mt-1 text-sm text-gray-500">Next step: add the property form so you can save client property URL, admin Google user, access status, and current GSC metrics.</p>
             </div>
           </CardContent>
         </Card>
