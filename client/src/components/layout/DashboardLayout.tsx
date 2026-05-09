@@ -50,8 +50,8 @@ const testingNav = [
 const contentNav = [
   { name: "Published Pages", href: "/published", icon: Globe },
   { name: "Leads", href: "/leads", icon: Inbox },
-  { name: "Leads & Conversions", href: "/agency-dashboard", icon: PhoneCall },
-  { name: "Report Links", href: "/report-links", icon: Share2 },
+  { name: "Agency Dashboard", href: "/agency-dashboard", icon: PhoneCall },
+  { name: "Report Center", href: "/report-links", icon: Share2 },
   { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
   { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
