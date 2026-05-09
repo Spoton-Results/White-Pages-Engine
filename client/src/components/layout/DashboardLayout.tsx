@@ -57,6 +57,7 @@ const contentNav = [
   { name: "Leads", href: "/leads", icon: Inbox },
   { name: "Agency Dashboard", href: "/agency-dashboard", icon: PhoneCall },
   { name: "Report Center", href: "/report-links", icon: Share2 },
+  { name: "Operations", href: "/operations", icon: ShieldCheck },
   { name: "Search Console", href: "/search-console", icon: SearchCheck },
   { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
   { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
