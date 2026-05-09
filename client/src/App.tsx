@@ -56,18 +56,29 @@ import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard-mvp";
 import ReportLinksPage from "@/pages/report-links-mvp";
 
-function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+function isAgencyRole(user: any) {
+  const role = String(user?.role || "").toLowerCase();
+  return role === "agency" || role === "agency_admin" || role === "agency_user";
+}
+
+function AuthGuard({ children, agencyAllowed = false }: { children: React.ReactNode; agencyAllowed?: boolean }) {
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [, navigate] = useLocation();
-  useEffect(() => { if (!isLoading && !isAuthenticated) navigate("/login"); }, [isLoading, isAuthenticated]);
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) navigate("/login");
+    if (!isLoading && isAuthenticated && isAgencyRole(user) && !agencyAllowed) navigate("/agency-dashboard");
+  }, [isLoading, isAuthenticated, user, agencyAllowed]);
   if (isLoading || !isAuthenticated) return <div className="min-h-screen flex items-center justify-center"><div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (isAgencyRole(user) && !agencyAllowed) return <div className="min-h-screen flex items-center justify-center"><div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
   return <>{children}</>;
 }
 
 function LoginGuard() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [, navigate] = useLocation();
-  useEffect(() => { if (!isLoading && isAuthenticated) navigate("/"); }, [isLoading, isAuthenticated]);
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) navigate(isAgencyRole(user) ? "/agency-dashboard" : "/");
+  }, [isLoading, isAuthenticated, user]);
   if (isLoading) return <div className="min-h-screen flex items-center justify-center"><div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
   return <Login />;
 }
@@ -101,8 +112,8 @@ function Router() {
       <Route path="/guide"><AuthGuard><GuidePage /></AuthGuard></Route>
       <Route path="/bulk-generator"><AuthGuard><BulkGeneratorPage /></AuthGuard></Route>
       <Route path="/leads"><AuthGuard><LeadsPage /></AuthGuard></Route>
-      <Route path="/agency-dashboard"><AuthGuard><AgencyDashboardPage /></AuthGuard></Route>
-      <Route path="/report-links"><AuthGuard><ReportLinksPage /></AuthGuard></Route>
+      <Route path="/agency-dashboard"><AuthGuard agencyAllowed><AgencyDashboardPage /></AuthGuard></Route>
+      <Route path="/report-links"><AuthGuard agencyAllowed><ReportLinksPage /></AuthGuard></Route>
       <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
       <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
