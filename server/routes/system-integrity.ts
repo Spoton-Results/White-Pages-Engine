@@ -51,6 +51,10 @@ async function ensureReportLinksTable() {
     last_viewed_at TIMESTAMP,
     view_count INTEGER DEFAULT 0
   )`);
+  await pool.query(`ALTER TABLE client_report_links ALTER COLUMN account_id TYPE TEXT USING account_id::text`);
+  await pool.query(`ALTER TABLE client_report_links ALTER COLUMN created_by TYPE TEXT USING created_by::text`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_client_report_links_token ON client_report_links(token)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_client_report_links_account ON client_report_links(account_id)`);
 }
 
 async function ensureRepairLogsTable() {
@@ -275,11 +279,18 @@ router.post("/api/system-integrity/repair/:action", requireAuth, async (req, res
     const and = scopeAnd(req, "a");
 
     if (action === "sync_published_counts") {
-      const result = await pool.query(`UPDATE websites w
-        SET published_pages = COALESCE(pc.actual,0), updated_at = NOW()
-        FROM accounts a
-        LEFT JOIN LATERAL (SELECT COUNT(*)::int AS actual FROM pages p WHERE p.website_id = w.id AND p.status = 'published') pc ON true
-        WHERE a.id = w.account_id ${and.clause}
+      const result = await pool.query(`WITH actual_counts AS (
+          SELECT w.id AS website_id, COUNT(p.id)::int AS actual
+          FROM websites w
+          JOIN accounts a ON a.id = w.account_id
+          LEFT JOIN pages p ON p.website_id = w.id AND p.status = 'published'
+          WHERE 1=1 ${and.clause}
+          GROUP BY w.id
+        )
+        UPDATE websites w
+        SET published_pages = COALESCE(ac.actual,0), updated_at = NOW()
+        FROM actual_counts ac
+        WHERE w.id = ac.website_id AND COALESCE(w.published_pages,0) <> COALESCE(ac.actual,0)
         RETURNING w.id`, and.params);
       const repaired = result.rowCount || 0;
       await writeRepairLog(req, { action, affectedCount: repaired, durationMs: Date.now() - startedAt, message: "Synced website published page counters." });
