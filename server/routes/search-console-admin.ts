@@ -40,6 +40,22 @@ async function ensureSearchConsoleTables() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_search_console_properties_website ON search_console_properties(website_id)`);
 }
 
+router.get("/api/search-console/config", requireAuth, requireInternalAdmin, async (_req, res) => {
+  const adminGoogleUser =
+    process.env.GSC_ADMIN_EMAIL ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+    process.env.GOOGLE_CLIENT_EMAIL ||
+    "";
+
+  res.json({
+    adminGoogleUser,
+    accessMethod: "delegated_admin_user",
+    clientInstruction: adminGoogleUser
+      ? `Please add ${adminGoogleUser} as a Full user in your Google Search Console property.`
+      : "Add your Google service account email as a Full user in the client's Google Search Console property.",
+  });
+});
+
 router.get("/api/search-console/properties", requireAuth, requireInternalAdmin, async (_req, res, next) => {
   try {
     await ensureSearchConsoleTables();
@@ -103,7 +119,7 @@ router.post("/api/search-console/properties", requireAuth, requireInternalAdmin,
     const siteUrl = String(req.body?.siteUrl || "").trim() || null;
     const connectionStatus = String(req.body?.connectionStatus || "access_confirmed");
     const accessMethod = String(req.body?.accessMethod || "delegated_admin_user");
-    const adminGoogleUser = String(req.body?.adminGoogleUser || "").trim() || null;
+    const adminGoogleUser = String(req.body?.adminGoogleUser || process.env.GSC_ADMIN_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || "").trim() || null;
     const sitemapSubmitted = !!req.body?.sitemapSubmitted;
     const indexedPages = Math.max(0, Number(req.body?.indexedPages || 0));
     const clicks = Math.max(0, Number(req.body?.clicks || 0));
@@ -144,7 +160,7 @@ router.put("/api/search-console/properties/:id", requireAuth, requireInternalAdm
     const siteUrl = String(req.body?.siteUrl || "").trim() || null;
     const connectionStatus = String(req.body?.connectionStatus || "access_confirmed");
     const accessMethod = String(req.body?.accessMethod || "delegated_admin_user");
-    const adminGoogleUser = String(req.body?.adminGoogleUser || "").trim() || null;
+    const adminGoogleUser = String(req.body?.adminGoogleUser || process.env.GSC_ADMIN_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || "").trim() || null;
     const sitemapSubmitted = !!req.body?.sitemapSubmitted;
     const indexedPages = Math.max(0, Number(req.body?.indexedPages || 0));
     const clicks = Math.max(0, Number(req.body?.clicks || 0));
