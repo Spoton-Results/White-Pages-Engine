@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import bankHealthRouter from "./routes/bank-health";
 import nexusStripeRouter from "./routes/nexus-stripe";
+import searchConsoleAdminRouter from "./routes/search-console-admin";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -31,6 +32,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(nexusStripeRouter);
 app.use(bankHealthRouter);
+app.use(searchConsoleAdminRouter);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -70,8 +72,7 @@ app.use((req, res, next) => {
 
 async function runBackgroundStartup() {
   try {
-    const { pool: pgPool, db } = await import("./db");
-    const { sql } = await import("drizzle-orm");
+    const { pool: pgPool } = await import("./db");
     const exec = (stmt: string) => pgPool.query(stmt).catch(() => {});
 
     await Promise.all([
