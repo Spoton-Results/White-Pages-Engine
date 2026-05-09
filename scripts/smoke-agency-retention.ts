@@ -24,6 +24,7 @@ function expectAny(label: string, content: string, needles: string[]) {
 }
 
 const app = file("client/src/App.tsx");
+const layout = file("client/src/components/layout/DashboardLayout.tsx");
 const agencyDashboard = file("client/src/pages/agency-dashboard-mvp.tsx");
 const reportCenter = file("client/src/pages/report-links-mvp.tsx");
 const roiRoutes = file("server/routes/agency-roi-dashboard.ts");
@@ -33,6 +34,11 @@ expectContains("App route", app, "@/pages/agency-dashboard-mvp");
 expectContains("App route", app, "@/pages/report-links-mvp");
 expectContains("App route", app, "path=\"/agency-dashboard\"");
 expectContains("App route", app, "path=\"/report-links\"");
+
+expectContains("Sidebar navigation", layout, "Agency Dashboard");
+expectContains("Sidebar navigation", layout, "Report Center");
+expectContains("Sidebar navigation", layout, "href: \"/agency-dashboard\"");
+expectContains("Sidebar navigation", layout, "href: \"/report-links\"");
 
 expectContains("Agency Dashboard MVP", agencyDashboard, "Here’s what we built for your clients this month.");
 expectContains("Agency Dashboard MVP", agencyDashboard, "ROI Score");
@@ -81,4 +87,4 @@ if (failures.length) {
 }
 
 console.log("Agency retention smoke test passed.");
-console.log("Checked: /agency-dashboard, /report-links, monthly report, share links, public /r/:token, ROI fields, mobile layout markers.");
+console.log("Checked: sidebar nav, /agency-dashboard, /report-links, monthly report, share links, public /r/:token, ROI fields, mobile layout markers.");
