@@ -73,6 +73,73 @@ async function assertClientAccess(req: any, res: any, accountId: string) {
   return account;
 }
 
+async function ensureSearchConsoleTables() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS search_console_properties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL,
+    website_id UUID,
+    property_url TEXT NOT NULL,
+    site_url TEXT,
+    connection_status TEXT NOT NULL DEFAULT 'not_connected',
+    sitemap_submitted BOOLEAN NOT NULL DEFAULT false,
+    indexed_pages INTEGER NOT NULL DEFAULT 0,
+    clicks INTEGER NOT NULL DEFAULT 0,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    average_position NUMERIC(10,2),
+    coverage_warnings INTEGER NOT NULL DEFAULT 0,
+    last_sync_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_search_console_properties_account ON search_console_properties(account_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_search_console_properties_website ON search_console_properties(website_id)`);
+}
+
+async function getSearchConsoleStatus(accountId: string) {
+  await ensureSearchConsoleTables();
+  const result = await pool.query(
+    `SELECT scp.*, w.domain AS website_domain
+     FROM search_console_properties scp
+     LEFT JOIN websites w ON w.id = scp.website_id
+     WHERE scp.account_id = $1
+     ORDER BY COALESCE(scp.last_sync_at, scp.updated_at, scp.created_at) DESC
+     LIMIT 1`,
+    [accountId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return {
+      connected: false,
+      status: "not_connected",
+      propertyUrl: null,
+      websiteDomain: null,
+      lastSyncAt: null,
+      indexedPages: 0,
+      clicks: 0,
+      impressions: 0,
+      averagePosition: null,
+      sitemapSubmitted: false,
+      coverageWarnings: 0,
+      recommendedAction: "Connect Google Search Console property.",
+    };
+  }
+  const connected = row.connection_status === "connected";
+  return {
+    connected,
+    status: row.connection_status,
+    propertyUrl: row.property_url,
+    websiteDomain: row.website_domain || row.site_url,
+    lastSyncAt: row.last_sync_at,
+    indexedPages: Number(row.indexed_pages || 0),
+    clicks: Number(row.clicks || 0),
+    impressions: Number(row.impressions || 0),
+    averagePosition: row.average_position === null ? null : Number(row.average_position),
+    sitemapSubmitted: !!row.sitemap_submitted,
+    coverageWarnings: Number(row.coverage_warnings || 0),
+    recommendedAction: connected ? (row.last_sync_at ? "Monitor search growth in monthly report." : "Run first Search Console sync.") : "Reconnect Google Search Console property.",
+  };
+}
+
 router.get("/api/agency-dashboard/summary", requireAuth, async (req, res, next) => {
   try {
     const scope = accountScope(req, "a");
@@ -172,7 +239,7 @@ router.get("/api/agency-dashboard/clients/:accountId", requireAuth, async (req, 
     const account = await assertClientAccess(req, res, req.params.accountId);
     if (!account) return;
     const accountId = req.params.accountId;
-    const [summaryRows, pageTypes, topCities, topServices, workLog, health, websites] = await Promise.all([
+    const [summaryRows, pageTypes, topCities, topServices, workLog, health, websites, searchConsole] = await Promise.all([
       pool.query(`SELECT (SELECT COUNT(*)::int FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published') AS pages_live, (SELECT COUNT(*)::int FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published' AND p.created_at >= NOW() - INTERVAL '30 days') AS pages_30d, (SELECT COUNT(DISTINCT slug)::int FROM locations WHERE account_id = $1 AND type = 'city') AS cities_covered, (SELECT COUNT(DISTINCT slug)::int FROM services WHERE account_id = $1) AS services_covered`, [accountId]),
       pool.query(`SELECT p.page_type, COUNT(*)::int AS count FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.status = 'published' GROUP BY p.page_type ORDER BY count DESC`, [accountId]),
       pool.query(`SELECT name, state_code, population FROM locations WHERE account_id = $1 AND type = 'city' ORDER BY COALESCE(population,0) DESC LIMIT 12`, [accountId]),
@@ -180,6 +247,7 @@ router.get("/api/agency-dashboard/clients/:accountId", requireAuth, async (req, 
       pool.query(`SELECT 'page' AS type, p.title AS label, p.slug AS detail, p.created_at FROM pages p JOIN websites w ON w.id = p.website_id WHERE w.account_id = $1 AND p.created_at >= NOW() - INTERVAL '30 days' UNION ALL SELECT 'job' AS type, gj.name AS label, gj.status::text AS detail, gj.created_at FROM generation_jobs gj WHERE gj.account_id = $1 AND gj.created_at >= NOW() - INTERVAL '30 days' UNION ALL SELECT 'link' AS type, 'Internal link added' AS label, il.link_type AS detail, il.created_at FROM internal_links il JOIN websites w ON w.id = il.website_id WHERE w.account_id = $1 AND il.created_at >= NOW() - INTERVAL '30 days' ORDER BY created_at DESC LIMIT 30`, [accountId]),
       pool.query(`SELECT (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status = 'failed' AND created_at >= NOW() - INTERVAL '30 days') AS failed_jobs, (SELECT COUNT(*)::int FROM generation_jobs WHERE account_id = $1 AND status IN ('pending','running') AND created_at < NOW() - INTERVAL '30 minutes') AS stuck_jobs, (SELECT MAX(created_at) FROM generation_jobs WHERE account_id = $1) AS last_job_date, (SELECT COUNT(*)::int FROM variation_bank_completeness vbc JOIN websites w ON w.id = vbc.website_id WHERE w.account_id = $1 AND vbc.completeness_score < 70) AS thin_banks`, [accountId]),
       pool.query(`SELECT id, name, domain, status, onboarding_status FROM websites WHERE account_id = $1 ORDER BY created_at DESC`, [accountId]),
+      getSearchConsoleStatus(accountId),
     ]);
     const s = summaryRows.rows[0] || { pages_live: 0, pages_30d: 0, cities_covered: 0, services_covered: 0 };
     const pagesLive = Number(s.pages_live || 0);
@@ -197,6 +265,7 @@ router.get("/api/agency-dashboard/clients/:accountId", requireAuth, async (req, 
     res.json({
       client: { id: account.id, name: account.name, status: account.status },
       summary: { pagesLive, pagesBuiltThisMonth, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered), roiScore: calculateRoiScore(roiInput), last30DaysWork, failedJobs, thinBanks, lastJobDate: healthRow.last_job_date, churnRiskFlags, recommendedNextAction: getRecommendedNextAction(roiInput) },
+      searchConsole,
       websites: websites.rows,
       pageTypes: Object.fromEntries(pageTypes.rows.map((r: any) => [r.page_type || "unknown", r.count])),
       topCities: topCities.rows,
