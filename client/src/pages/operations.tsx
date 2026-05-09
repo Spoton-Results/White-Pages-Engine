@@ -32,6 +32,20 @@ type IntegrityScan = {
   checks: IntegrityCheck[];
 };
 
+type RepairLog = {
+  id: string;
+  action: string;
+  status: string;
+  scopeType: string;
+  accountId: string | null;
+  triggeredBy: string;
+  source: string;
+  affectedCount: number;
+  durationMs: number;
+  message: string | null;
+  createdAt: string;
+};
+
 const emptyScan: IntegrityScan = {
   scannedAt: "",
   healthScore: 0,
@@ -49,10 +63,20 @@ function fmt(n?: number) {
   return Math.round(n || 0).toLocaleString();
 }
 
+function actionLabel(action: string) {
+  return action.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function statusBadge(status: CheckStatus) {
   if (status === "ok") return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Healthy</Badge>;
   if (status === "critical") return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Critical</Badge>;
   return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">Warning</Badge>;
+}
+
+function repairStatusBadge(status: string) {
+  return status === "success"
+    ? <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Success</Badge>
+    : <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Failed</Badge>;
 }
 
 function statusIcon(status: CheckStatus) {
@@ -63,16 +87,30 @@ function statusIcon(status: CheckStatus) {
 
 export default function OperationsPage() {
   const [scan, setScan] = useState<IntegrityScan>(emptyScan);
+  const [repairLogs, setRepairLogs] = useState<RepairLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [repairing, setRepairing] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function loadLogs() {
+    try {
+      setRepairLogs(await fetchJson<RepairLog[]>("/api/system-integrity/repair-logs"));
+    } catch {
+      // Keep Operations usable even if historical logs cannot load.
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      setScan(await fetchJson<IntegrityScan>("/api/system-integrity/scan"));
+      const [scanData, logs] = await Promise.all([
+        fetchJson<IntegrityScan>("/api/system-integrity/scan"),
+        fetchJson<RepairLog[]>("/api/system-integrity/repair-logs").catch(() => []),
+      ]);
+      setScan(scanData);
+      setRepairLogs(logs);
     } catch (e: any) {
       setError(e.message || "Failed to load operations scan");
     } finally {
@@ -91,10 +129,12 @@ export default function OperationsPage() {
         body: JSON.stringify({}),
       });
       setScan(data.scan);
+      await loadLogs();
       setNotice(`Repair complete: ${fmt(data.repaired)} row(s) affected.`);
       setTimeout(() => setNotice(null), 5000);
     } catch (e: any) {
       setError(e.message || "Repair failed");
+      await loadLogs();
     } finally {
       setRepairing(null);
     }
@@ -195,6 +235,43 @@ export default function OperationsPage() {
               </Table>
             </div>
             <div className="mt-4 text-xs text-gray-500">Last scanned: {scan.scannedAt ? new Date(scan.scannedAt).toLocaleString() : "Not scanned yet"}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Repair Log</CardTitle>
+            <CardDescription>Audit trail for manual repair actions. This keeps operations accountable without adding another module.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Affected</TableHead>
+                    <TableHead className="text-right">Duration</TableHead>
+                    <TableHead>Message</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {repairLogs.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-gray-500">No repair history yet.</TableCell></TableRow>
+                  ) : repairLogs.slice(0, 12).map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-xs text-gray-500">{new Date(log.createdAt).toLocaleString()}</TableCell>
+                      <TableCell><div className="font-medium text-gray-900">{actionLabel(log.action)}</div><div className="mt-1 text-xs text-gray-500">{log.source} · {log.scopeType}</div></TableCell>
+                      <TableCell>{repairStatusBadge(log.status)}</TableCell>
+                      <TableCell className="text-right font-semibold">{fmt(log.affectedCount)}</TableCell>
+                      <TableCell className="text-right text-sm text-gray-600">{fmt(log.durationMs)}ms</TableCell>
+                      <TableCell className="max-w-lg text-sm text-gray-600">{log.message || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
 
