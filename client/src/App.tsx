@@ -39,6 +39,7 @@ import GuidePage from "@/pages/guide";
 import BulkGeneratorPage from "@/pages/bulk-generator";
 import LeadsPage from "@/pages/leads";
 import SearchControlPage from "@/pages/search-control";
+import SearchConsolePage from "@/pages/search-console";
 import BankHealthPage from "@/pages/bank-health";
 import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
@@ -114,6 +115,7 @@ function Router() {
       <Route path="/leads"><AuthGuard><LeadsPage /></AuthGuard></Route>
       <Route path="/agency-dashboard"><AuthGuard agencyAllowed><AgencyDashboardPage /></AuthGuard></Route>
       <Route path="/report-links"><AuthGuard agencyAllowed><ReportLinksPage /></AuthGuard></Route>
+      <Route path="/search-console"><AuthGuard><SearchConsolePage /></AuthGuard></Route>
       <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
       <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
