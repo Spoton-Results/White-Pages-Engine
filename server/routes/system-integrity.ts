@@ -53,11 +53,63 @@ async function ensureReportLinksTable() {
   )`);
 }
 
+async function ensureRepairLogsTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS system_repair_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'success',
+    scope_type TEXT NOT NULL DEFAULT 'platform',
+    account_id TEXT,
+    triggered_by TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    affected_count INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    message TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_system_repair_logs_created_at ON system_repair_logs(created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_system_repair_logs_account_id ON system_repair_logs(account_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_system_repair_logs_action ON system_repair_logs(action)`);
+}
+
+function actorFromReq(req: any) {
+  return String(req.session?.userId || req.session?.user?.id || req.session?.username || req.session?.user?.username || "unknown");
+}
+
+async function writeRepairLog(req: any, input: {
+  action: string;
+  status?: "success" | "failed";
+  affectedCount?: number;
+  durationMs?: number;
+  message?: string;
+  metadata?: Record<string, any>;
+}) {
+  await ensureRepairLogsTable();
+  const accountId = req.session?.isSuperAdmin ? null : String(req.session?.accountId || "") || null;
+  await pool.query(
+    `INSERT INTO system_repair_logs (action, status, scope_type, account_id, triggered_by, source, affected_count, duration_ms, message, metadata)
+     VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7, $8, $9::jsonb)`,
+    [
+      input.action,
+      input.status || "success",
+      req.session?.isSuperAdmin ? "platform" : "account",
+      accountId,
+      actorFromReq(req),
+      Math.max(0, Number(input.affectedCount || 0)),
+      Math.max(0, Number(input.durationMs || 0)),
+      input.message || null,
+      JSON.stringify(input.metadata || {}),
+    ],
+  );
+}
+
 async function getCounts(req: any) {
   const s = scopeClause(req, "a");
   const and = scopeAnd(req, "a");
 
   await ensureReportLinksTable().catch(() => undefined);
+  await ensureRepairLogsTable().catch(() => undefined);
 
   const [
     totals,
@@ -178,10 +230,48 @@ router.get("/api/system-integrity/scan", requireAuth, async (req, res, next) => 
   }
 });
 
-router.post("/api/system-integrity/repair/:action", requireAuth, async (req, res, next) => {
+router.get("/api/system-integrity/repair-logs", requireAuth, async (req, res, next) => {
   try {
     if (!(await requireOpsAccess(req, res))) return;
-    const action = String(req.params.action || "");
+    await ensureRepairLogsTable();
+    const params: any[] = [];
+    let where = "";
+    if (!req.session?.isSuperAdmin) {
+      where = "WHERE account_id::text = $1::text OR account_id IS NULL";
+      params.push(req.session.accountId);
+    }
+    const result = await pool.query(
+      `SELECT id, action, status, scope_type, account_id, triggered_by, source, affected_count, duration_ms, message, metadata, created_at
+       FROM system_repair_logs
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      params,
+    );
+    res.json(result.rows.map((r: any) => ({
+      id: r.id,
+      action: r.action,
+      status: r.status,
+      scopeType: r.scope_type,
+      accountId: r.account_id,
+      triggeredBy: r.triggered_by,
+      source: r.source,
+      affectedCount: Number(r.affected_count || 0),
+      durationMs: Number(r.duration_ms || 0),
+      message: r.message,
+      metadata: r.metadata || {},
+      createdAt: r.created_at,
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/api/system-integrity/repair/:action", requireAuth, async (req, res, next) => {
+  const startedAt = Date.now();
+  const action = String(req.params.action || "");
+  try {
+    if (!(await requireOpsAccess(req, res))) return;
     const and = scopeAnd(req, "a");
 
     if (action === "sync_published_counts") {
@@ -191,11 +281,14 @@ router.post("/api/system-integrity/repair/:action", requireAuth, async (req, res
         LEFT JOIN LATERAL (SELECT COUNT(*)::int AS actual FROM pages p WHERE p.website_id = w.id AND p.status = 'published') pc ON true
         WHERE a.id = w.account_id ${and.clause}
         RETURNING w.id`, and.params);
-      return res.json({ ok: true, action, repaired: result.rowCount || 0, scan: await getCounts(req) });
+      const repaired = result.rowCount || 0;
+      await writeRepairLog(req, { action, affectedCount: repaired, durationMs: Date.now() - startedAt, message: "Synced website published page counters." });
+      return res.json({ ok: true, action, repaired, scan: await getCounts(req) });
     }
 
     if (action === "recompute_bank_completeness") {
       const repaired = await recomputeBankCompleteness(req);
+      await writeRepairLog(req, { action, affectedCount: repaired, durationMs: Date.now() - startedAt, message: "Recomputed variation bank completeness rows." });
       return res.json({ ok: true, action, repaired, scan: await getCounts(req) });
     }
 
@@ -206,11 +299,18 @@ router.post("/api/system-integrity/repair/:action", requireAuth, async (req, res
         AND (NOT EXISTS (SELECT 1 FROM pages fp WHERE fp.id = il.from_page_id) OR NOT EXISTS (SELECT 1 FROM pages tp WHERE tp.id = il.to_page_id))
         ${and.clause}
         RETURNING il.id`, and.params);
-      return res.json({ ok: true, action, repaired: result.rowCount || 0, scan: await getCounts(req) });
+      const repaired = result.rowCount || 0;
+      await writeRepairLog(req, { action, affectedCount: repaired, durationMs: Date.now() - startedAt, message: "Deleted orphaned internal-link rows." });
+      return res.json({ ok: true, action, repaired, scan: await getCounts(req) });
     }
 
     return res.status(400).json({ message: `Unknown repair action: ${action}` });
-  } catch (err) {
+  } catch (err: any) {
+    try {
+      await writeRepairLog(req, { action: action || "unknown", status: "failed", affectedCount: 0, durationMs: Date.now() - startedAt, message: err?.message || "Repair action failed." });
+    } catch {
+      // Never let audit logging hide the original repair failure.
+    }
     next(err);
   }
 });
