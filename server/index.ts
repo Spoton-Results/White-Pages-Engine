@@ -11,6 +11,8 @@ import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 import systemIntegrityRouter from "./routes/system-integrity";
 import intentGovernanceRunHotfixRouter from "./routes/intent-governance-run-hotfix";
 import actionReviewDecisionHotfixRouter from "./routes/action-review-decision-hotfix";
+import actionReviewActiveRouter from "./routes/action-review-active";
+import clientDomainsRouter from "./routes/client-domains";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -37,6 +39,8 @@ function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+app.use(clientDomainsRouter);
+app.use(actionReviewActiveRouter);
 app.use(actionReviewDecisionHotfixRouter);
 app.use(intentGovernanceRunHotfixRouter);
 app.use(nexusStripeRouter);
