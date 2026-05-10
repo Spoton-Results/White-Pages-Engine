@@ -45,6 +45,7 @@ import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
 import IntentBuildPage from "@/pages/intent-build-v2";
 import ActionReviewPage from "@/pages/action-review";
+import ClientDomainsPage from "@/pages/client-domains";
 import ProductionValidationPage from "@/pages/production-validation";
 import AutomationPage from "@/pages/automation";
 import OperationsPage from "@/pages/operations";
@@ -123,6 +124,7 @@ function Router() {
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
       <Route path="/intent-build"><AuthGuard><IntentBuildPage /></AuthGuard></Route>
       <Route path="/action-review"><AuthGuard><ActionReviewPage /></AuthGuard></Route>
+      <Route path="/client-domains"><AuthGuard><ClientDomainsPage /></AuthGuard></Route>
       <Route path="/production-validation"><AuthGuard><ProductionValidationPage /></AuthGuard></Route>
       <Route path="/automation"><AuthGuard><AutomationPage /></AuthGuard></Route>
       <Route path="/bank-health"><AuthGuard><BankHealthPage /></AuthGuard></Route>
