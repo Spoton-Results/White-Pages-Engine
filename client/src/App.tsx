@@ -43,7 +43,7 @@ import SearchConsolePage from "@/pages/search-console";
 import BankHealthPage from "@/pages/bank-health";
 import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
-import IntentBuildPage from "@/pages/intent-build";
+import IntentBuildPage from "@/pages/intent-build-v2";
 import ActionReviewPage from "@/pages/action-review";
 import ProductionValidationPage from "@/pages/production-validation";
 import AutomationPage from "@/pages/automation";
