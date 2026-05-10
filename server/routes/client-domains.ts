@@ -165,6 +165,30 @@ async function serveSitemap(ctx: any, host: string, slug: string, res: Response)
   res.type("application/xml").send(xml);
 }
 
+async function resolveHomepageSlug(ctx: any) {
+  const settings = ctx.website_settings || {};
+  const explicit = settings.homepageSlug || settings.home_slug || settings.homePageSlug || settings.defaultSlug;
+  if (explicit) return String(explicit).replace(/^\/+/, "");
+
+  const hub = await pool.query(
+    `SELECT slug FROM hub_pages
+     WHERE website_id::text = $1::text AND status = 'published'
+     ORDER BY tier ASC, quality_score DESC NULLS LAST, updated_at DESC
+     LIMIT 1`,
+    [ctx.website_id],
+  );
+  if (hub.rows[0]?.slug) return hub.rows[0].slug;
+
+  const page = await pool.query(
+    `SELECT slug FROM pages
+     WHERE website_id::text = $1::text AND status = 'published'
+     ORDER BY tier ASC, quality_score DESC NULLS LAST, updated_at DESC
+     LIMIT 1`,
+    [ctx.website_id],
+  );
+  return page.rows[0]?.slug || null;
+}
+
 async function serveClientPage(ctx: any, host: string, slug: string, res: Response) {
   const pageResult = await pool.query(
     `SELECT * FROM pages WHERE website_id::text = $1::text AND slug = $2 AND status = 'published' LIMIT 1`,
@@ -184,6 +208,26 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
   res.type("text/html").send(renderClientPageHtml(ctx, page, version, host));
 }
 
+async function serveHealth(ctx: any, host: string, res: Response) {
+  const counts = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'published')::int AS published_pages,
+       COUNT(*) FILTER (WHERE status = 'published' AND tier = 1)::int AS tier1_pages,
+       COUNT(*) FILTER (WHERE status = 'published' AND noindex = true)::int AS noindex_pages
+     FROM pages WHERE website_id::text = $1::text`,
+    [ctx.website_id],
+  );
+  res.json({
+    ok: true,
+    hostname: host,
+    websiteId: ctx.website_id,
+    websiteDomain: ctx.website_domain,
+    clientDomainStatus: ctx.client_domain_status,
+    sslStatus: ctx.ssl_status,
+    counts: counts.rows[0] || {},
+  });
+}
+
 // Public hostname resolver: this is the bridge from pages.clientdomain.com to the correct Nexus website.
 // It must run before requireAuth so Cloudflare custom-hostname traffic can render public pages.
 router.use(async (req: Request, res: Response, next: NextFunction) => {
@@ -194,8 +238,11 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     if (!ctx) return next();
 
     const pathname = decodeURIComponent((req.path || "/").replace(/^\/+/, ""));
+    if (pathname === ".well-known/nexus-domain-health") return serveHealth(ctx, host, res);
     if (!pathname) {
-      return res.status(404).type("text/html").send(notFoundHtml("This custom domain is connected, but no homepage has been assigned yet."));
+      const homeSlug = await resolveHomepageSlug(ctx);
+      if (!homeSlug) return res.status(404).type("text/html").send(notFoundHtml("This custom domain is connected, but no published homepage or hub page exists yet."));
+      return serveClientPage(ctx, host, homeSlug, res);
     }
     if (pathname === "robots.txt") return serveRobots(ctx, host, res);
     if (/^sitemap(?:[-\w]*)?\.xml$/i.test(pathname)) return serveSitemap(ctx, host, pathname, res);
