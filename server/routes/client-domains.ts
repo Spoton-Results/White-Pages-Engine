@@ -60,6 +60,32 @@ async function ensureClientDomainsTable(client: any = pool) {
   await client.query(`CREATE INDEX IF NOT EXISTS idx_client_domains_hostname ON client_domains(hostname)`);
 }
 
+async function ensureFallbackHitLogsTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS fallback_hit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    website_id TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    promoted BOOLEAN NOT NULL DEFAULT false,
+    promoted_at TIMESTAMP
+  )`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_hit_logs_site_slug_unique ON fallback_hit_logs(website_id, slug)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_fallback_hit_logs_site ON fallback_hit_logs(website_id)`);
+}
+
+async function logCustomDomainFallbackHit(websiteId: string, slug: string) {
+  await ensureFallbackHitLogsTable();
+  await pool.query(
+    `INSERT INTO fallback_hit_logs (website_id, slug, hit_count, first_seen_at, last_seen_at)
+     VALUES ($1, $2, 1, NOW(), NOW())
+     ON CONFLICT (website_id, slug)
+     DO UPDATE SET hit_count = fallback_hit_logs.hit_count + 1, last_seen_at = NOW()`,
+    [websiteId, slug],
+  );
+}
+
 async function resolveClientDomain(hostname: string) {
   if (!hostname) return null;
   await ensureClientDomainsTable();
@@ -195,7 +221,10 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
     [ctx.website_id, slug],
   );
   const page = pageResult.rows[0];
-  if (!page) return res.status(404).type("text/html").send(notFoundHtml("No published Nexus page exists for this URL yet."));
+  if (!page) {
+    logCustomDomainFallbackHit(ctx.website_id, slug).catch(() => null);
+    return res.status(404).type("text/html").send(notFoundHtml("No published Nexus page exists for this URL yet. The request was logged for promotion review."));
+  }
 
   const versionResult = await pool.query(
     `SELECT * FROM page_versions WHERE page_id::text = $1::text AND is_active = true ORDER BY version DESC LIMIT 1`,
