@@ -10,6 +10,7 @@ import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 import systemIntegrityRouter from "./routes/system-integrity";
 import intentGovernanceRunHotfixRouter from "./routes/intent-governance-run-hotfix";
+import actionReviewDecisionHotfixRouter from "./routes/action-review-decision-hotfix";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -36,6 +37,7 @@ function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+app.use(actionReviewDecisionHotfixRouter);
 app.use(intentGovernanceRunHotfixRouter);
 app.use(nexusStripeRouter);
 app.use(bankHealthRouter);
