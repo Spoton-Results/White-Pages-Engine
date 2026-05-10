@@ -103,21 +103,90 @@ async function findCandidatePages(client: any, page: any, intentCluster?: string
   return result.rows;
 }
 
+function buildWinnerReason(page: any, affectedCount: number, linksToRepair: number) {
+  const factors: string[] = [];
+
+  if (page.tier) factors.push(`Winner is currently Tier ${page.tier}, giving it stronger governance priority than weaker overlapping pages.`);
+  if (page.page_type) factors.push(`Winner page type is ${page.page_type}, which makes it a cleaner canonical owner for this intent group.`);
+  if (page.slug) factors.push(`Winner has the canonical slug "${page.slug}", which is the target all repaired internal links will point toward.`);
+  if (affectedCount > 0) factors.push(`${affectedCount} overlapping page(s) were found and will be treated as affected pages, not deleted.`);
+  if (linksToRepair > 0) factors.push(`${linksToRepair} internal link(s) currently point toward affected pages and can be repointed to the winner.`);
+  else factors.push("No existing internal links need repair, so this governance action mainly records the canonical decision.");
+
+  return {
+    summary: `${page.slug} was selected as the canonical winner because it is the approved owner for this intent cluster and can safely absorb internal-link equity from overlapping pages.`,
+    factors,
+    scoreSignals: { tier: page.tier ?? null, pageType: page.page_type ?? null, slug: page.slug, title: page.title ?? null, affectedPages: affectedCount, internalLinksToRepair: linksToRepair },
+  };
+}
+
+async function buildInternalLinkDiff(client: any, page: any, affectedIds: string[]) {
+  const winnerLinks = await client.query(
+    `SELECT COUNT(*)::int AS count FROM internal_links WHERE website_id::text = $1::text AND to_page_id::text = $2::text`,
+    [page.website_id, page.id],
+  ).catch(() => ({ rows: [{ count: 0 }] }));
+  const linksPointingToWinner = Number(winnerLinks.rows[0]?.count || 0);
+
+  if (!affectedIds.length) {
+    return { before: { linksPointingToWinner, linksPointingToAffectedPages: 0 }, after: { linksPointingToWinner, linksPointingToAffectedPages: 0 }, changes: [] };
+  }
+
+  const repairRows = await client.query(
+    `SELECT il.id AS link_id, il.from_page_id, from_p.slug AS from_slug, from_p.title AS from_title,
+            il.to_page_id AS old_to_page_id, to_p.slug AS old_to_slug, to_p.title AS old_to_title,
+            il.anchor_text, il.link_type
+     FROM internal_links il
+     LEFT JOIN pages from_p ON from_p.id::text = il.from_page_id::text
+     LEFT JOIN pages to_p ON to_p.id::text = il.to_page_id::text
+     WHERE il.website_id::text = $1::text
+       AND il.to_page_id = ANY($2::uuid[])
+       AND il.to_page_id::text <> $3::text
+     ORDER BY from_p.slug ASC NULLS LAST, to_p.slug ASC NULLS LAST
+     LIMIT 50`,
+    [page.website_id, affectedIds, page.id],
+  ).catch(() => ({ rows: [] }));
+
+  const linksPointingToAffectedPages = repairRows.rows.length;
+  const changes = repairRows.rows.map((r: any) => ({
+    linkId: String(r.link_id),
+    fromPageId: String(r.from_page_id),
+    fromSlug: r.from_slug,
+    fromTitle: r.from_title,
+    oldToPageId: String(r.old_to_page_id),
+    oldToSlug: r.old_to_slug,
+    oldToTitle: r.old_to_title,
+    newToPageId: String(page.id),
+    newToSlug: page.slug,
+    newToTitle: page.title ?? null,
+    anchorText: r.anchor_text ?? null,
+    linkType: r.link_type ?? null,
+  }));
+
+  return {
+    before: { linksPointingToWinner, linksPointingToAffectedPages },
+    after: { linksPointingToWinner: linksPointingToWinner + linksPointingToAffectedPages, linksPointingToAffectedPages: 0 },
+    changes,
+  };
+}
+
 async function buildGovernancePreview(client: any, page: any, body: PageRef, action: "consolidate" | "merge") {
   const candidates = await findCandidatePages(client, page, body.intentCluster || null);
   const affected = candidates.map((p: any) => ({ id: p.id, slug: p.slug, title: p.title, status: p.status, tier: p.tier, pageType: p.page_type }));
-  const internalLinks = await client.query(
-    `SELECT COUNT(*)::int AS count FROM internal_links WHERE website_id::text = $1::text AND to_page_id = ANY($2::uuid[])`,
-    [page.website_id, candidates.map((p: any) => p.id)],
-  ).catch(() => ({ rows: [{ count: 0 }] }));
+  const affectedIds = affected.map((p: any) => p.id);
+  const linkDiff = await buildInternalLinkDiff(client, page, affectedIds);
+  const internalLinksToRepair = linkDiff.before.linksPointingToAffectedPages;
+  const winnerReason = buildWinnerReason(page, affected.length, internalLinksToRepair);
+
   return {
     action,
     winner: { id: page.id, slug: page.slug, title: page.title, tier: page.tier, pageType: page.page_type },
+    winnerReason,
     affectedPages: affected,
+    linkDiff,
     plannedChanges: [
       `Keep ${page.slug} as the canonical winner`,
       `Mark ${affected.length} overlapping page(s) as governance reviewed`,
-      `Repoint internal links from overlapping pages to ${page.slug}`,
+      `Repoint ${internalLinksToRepair} internal link(s) from overlapping pages to ${page.slug}`,
       action === "merge" ? "Queue merge review with redirect-required flag" : "Queue consolidation review without deleting pages",
       "Create governance audit log for rollback/review",
     ],
@@ -127,7 +196,7 @@ async function buildGovernancePreview(client: any, page: any, body: PageRef, act
       "No sitemap removal until manual validation",
       "Every change is logged in intent_governance_actions",
     ],
-    counts: { affectedPages: affected.length, internalLinksToRepair: Number(internalLinks.rows[0]?.count || 0) },
+    counts: { affectedPages: affected.length, internalLinksToRepair },
   };
 }
 
