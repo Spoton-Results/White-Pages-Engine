@@ -22,6 +22,10 @@ function statusForDecision(decision: string) {
   return "needs_changes";
 }
 
+function shouldSetCompletedAt(decision: string) {
+  return decision === "approved" || decision === "rejected";
+}
+
 router.post("/api/action-review/:jobId/decision", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const decision = String(req.body?.decision || "");
@@ -34,6 +38,7 @@ router.post("/api/action-review/:jobId/decision", async (req: Request, res: Resp
 
     const decidedAt = new Date().toISOString();
     const nextStatus = statusForDecision(decision);
+    const completeNow = shouldSetCompletedAt(decision);
     const notes = Array.isArray(job.error_log) ? job.error_log : [];
     notes.push({ decision, note: req.body?.note || null, decidedAt, decidedBy: req.session.userId || null });
 
@@ -42,12 +47,12 @@ router.post("/api/action-review/:jobId/decision", async (req: Request, res: Resp
 
     await pool.query(
       `UPDATE generation_jobs
-       SET status = $4,
+       SET status = $4::text,
            settings = $2::jsonb,
            error_log = $3::jsonb,
-           completed_at = CASE WHEN $4 IN ('completed','failed') THEN NOW() ELSE completed_at END
+           completed_at = CASE WHEN $5::boolean THEN NOW() ELSE completed_at END
        WHERE id::text = $1::text`,
-      [req.params.jobId, JSON.stringify(nextSettings), JSON.stringify(notes), nextStatus],
+      [req.params.jobId, JSON.stringify(nextSettings), JSON.stringify(notes), nextStatus, completeNow],
     );
 
     res.json({ ok: true, jobId: req.params.jobId, decision, status: nextStatus, reviewedAt: decidedAt });
