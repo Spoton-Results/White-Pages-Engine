@@ -39,6 +39,7 @@ const navigation = [
   { name: "Agencies", href: "/agencies", icon: Handshake },
   { name: "Accounts", href: "/accounts", icon: Building2 },
   { name: "Websites", href: "/websites", icon: Globe },
+  { name: "Client Domains", href: "/client-domains", icon: Globe },
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
   { name: "Industries", href: "/industries", icon: Factory },
   { name: "Locations", href: "/locations", icon: MapPin },
