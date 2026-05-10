@@ -80,6 +80,7 @@ async function runBackgroundStartup() {
         console.warn("[startup] Database recovering during schema ensure; will retry on next request/run.");
         return;
       }
+      console.error("[startup] Schema ensure failed:", err?.message || err);
     });
     await Promise.all([
       exec(`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`),
@@ -87,6 +88,35 @@ async function runBackgroundStartup() {
       exec(`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_mode BOOLEAN DEFAULT false, ADD COLUMN IF NOT EXISTS protection_expires_at TIMESTAMP, ADD COLUMN IF NOT EXISTS warmup_day INTEGER DEFAULT 0, ADD COLUMN IF NOT EXISTS warmup_page_cap_override INTEGER`),
       exec(`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS governor_results JSONB, ADD COLUMN IF NOT EXISTS brand_input_score INTEGER, ADD COLUMN IF NOT EXISTS brand_input_result JSONB, ADD COLUMN IF NOT EXISTS gap_report JSONB`),
       exec(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`),
+      exec(`CREATE TABLE IF NOT EXISTS client_domains (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id TEXT NOT NULL,
+        account_id TEXT,
+        hostname TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'pending_dns',
+        cloudflare_hostname_id TEXT,
+        ownership_txt_name TEXT,
+        ownership_txt_value TEXT,
+        ssl_status TEXT,
+        error TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        verified_at TIMESTAMP
+      )`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_client_domains_website ON client_domains(website_id)`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_client_domains_hostname ON client_domains(hostname)`),
+      exec(`CREATE TABLE IF NOT EXISTS fallback_hit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        website_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        hit_count INTEGER NOT NULL DEFAULT 1,
+        first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        promoted BOOLEAN NOT NULL DEFAULT false,
+        promoted_at TIMESTAMP
+      )`),
+      exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_hit_logs_site_slug_unique ON fallback_hit_logs(website_id, slug)`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_fallback_hit_logs_site ON fallback_hit_logs(website_id)`),
     ]);
     console.log("[startup] Schema migrations ensured.");
     await seedDatabase();
