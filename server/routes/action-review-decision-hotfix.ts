@@ -19,7 +19,7 @@ async function assertWebsiteAccess(req: Request, res: Response, websiteId: strin
 function statusForDecision(decision: string) {
   if (decision === "approved") return "completed";
   if (decision === "rejected") return "failed";
-  return "needs_changes";
+  return "pending";
 }
 
 function shouldSetCompletedAt(decision: string) {
@@ -47,7 +47,7 @@ router.post("/api/action-review/:jobId/decision", async (req: Request, res: Resp
 
     await pool.query(
       `UPDATE generation_jobs
-       SET status = $4::text,
+       SET status = $4::job_status,
            settings = $2::jsonb,
            error_log = $3::jsonb,
            completed_at = CASE WHEN $5::boolean THEN NOW() ELSE completed_at END
