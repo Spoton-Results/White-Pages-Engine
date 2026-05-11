@@ -14,6 +14,19 @@ export interface GenerationTask {
   accountId: string;
 }
 
+function sanitizePageSlug(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/--+(service-)?page-templates?-(city|state|service|industry|location|hub)$/i, "")
+    .replace(/--+.*$/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
 function buildPageContext(
   blueprint: Blueprint,
   website: Website,
@@ -148,7 +161,6 @@ export async function runGenerationJob(
       }
     }
 
-    // Build task combinations
     const combinations: Array<{
       location?: Location;
       service?: Service;
@@ -157,20 +169,14 @@ export async function runGenerationJob(
 
     if (locationsToProcess.length > 0 && servicesToProcess.length > 0) {
       for (const loc of locationsToProcess) {
-        for (const svc of servicesToProcess) {
-          combinations.push({ location: loc, service: svc });
-        }
+        for (const svc of servicesToProcess) combinations.push({ location: loc, service: svc });
       }
     } else if (locationsToProcess.length > 0 && industriesToProcess.length > 0) {
       for (const loc of locationsToProcess) {
-        for (const ind of industriesToProcess) {
-          combinations.push({ location: loc, industry: ind });
-        }
+        for (const ind of industriesToProcess) combinations.push({ location: loc, industry: ind });
       }
     } else if (locationsToProcess.length > 0) {
-      for (const loc of locationsToProcess) {
-        combinations.push({ location: loc });
-      }
+      for (const loc of locationsToProcess) combinations.push({ location: loc });
     } else {
       combinations.push({});
     }
@@ -185,11 +191,8 @@ export async function runGenerationJob(
     let failed = 0;
     const errors: any[] = [];
 
-    // Process one page combination, returns true if passed
     const processCombo = async (combo: typeof combinations[number]): Promise<void> => {
       try {
-        // Load variation bank snippets for this service — inject 1 random variation per section
-        // as style anchors so the AI generates content consistent with approved copy
         let bankSnippets: Array<{ section: string; snippet: string }> | undefined;
         if (combo.service) {
           try {
@@ -202,13 +205,12 @@ export async function runGenerationJob(
                   const snippet = vars[Math.floor(Math.random() * vars.length)];
                   return { section: b.sectionName, snippet };
                 })
-                .slice(0, 6); // cap at 6 sections to keep prompt size reasonable
+                .slice(0, 6);
             }
           } catch { /* bank load failure is non-fatal */ }
         }
 
         const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry, bankSnippets);
-
         log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
 
         const generated = await generateFirstPass(ctx);
@@ -227,18 +229,21 @@ export async function runGenerationJob(
         }
 
         const qaResult = runRuleQA(generated, blueprint);
-
         const finalHtml = generated.contentHtml;
         const reviewNotes = "";
         const finalScore = generated.publishScore;
+        const finalSlug = sanitizePageSlug(generated.slug);
 
-        const existingPage = await db.getPageBySlug(task.websiteId, generated.slug);
+        if (!finalSlug) {
+          throw new Error(`Generated slug was empty after cleanup. Original slug: ${generated.slug}`);
+        }
+
+        const existingPage = await db.getPageBySlug(task.websiteId, finalSlug);
         if (existingPage) {
-          console.warn(`Skipping duplicate slug: ${generated.slug}`);
+          console.warn(`Skipping duplicate slug: ${finalSlug}`);
           processed++;
           return;
         }
-        const finalSlug = generated.slug;
 
         const pageStatus = qaResult.passed ? "published" : "draft";
         const publishedAt = qaResult.passed ? new Date() : undefined;
@@ -293,13 +298,11 @@ export async function runGenerationJob(
       }
     };
 
-    // Process in concurrent batches of 5 — ~5× faster than sequential
     const BATCH_SIZE = 5;
     for (let i = 0; i < combinations.length; i += BATCH_SIZE) {
       const batch = combinations.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(processCombo));
 
-      // Flush progress and errors after each batch
       await db.updateGenerationJob(job.id, {
         processedPages: processed,
         passedPages: passed,
@@ -307,15 +310,11 @@ export async function runGenerationJob(
         errorLog: errors,
       });
 
-      // Small pause between batches to respect rate limits
-      if (i + BATCH_SIZE < combinations.length) {
-        await new Promise((r) => setTimeout(r, 1000));
-      }
+      if (i + BATCH_SIZE < combinations.length) await new Promise((r) => setTimeout(r, 1000));
     }
 
     log(`Job completed: ${passed} passed, ${failed} failed out of ${total} total`);
 
-    // Sync published page count on the website record
     if (passed > 0) {
       const freshWebsite = await db.getWebsite(task.websiteId);
       if (freshWebsite) {
@@ -331,7 +330,6 @@ export async function runGenerationJob(
       errorLog: errors,
     });
 
-    // Save log to R2 if configured
     if (isR2Configured()) {
       try {
         await saveLog(task.websiteId, job.id, logs.join("\n"));
