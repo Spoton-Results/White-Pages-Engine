@@ -15,6 +15,7 @@ import actionReviewDecisionHotfixRouter from "./routes/action-review-decision-ho
 import actionReviewActiveRouter from "./routes/action-review-active";
 import clientDomainsRouter from "./routes/client-domains";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
+import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -42,6 +43,7 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(clientDomainsRouter);
+app.use(publicWebsiteDomainsRouter);
 app.use(clientDomainHomepageRouter);
 app.use(agencyDashboardHotfixRouter);
 app.use(actionReviewActiveRouter);
