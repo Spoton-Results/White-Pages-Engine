@@ -13,6 +13,7 @@ import intentGovernanceRunHotfixRouter from "./routes/intent-governance-run-hotf
 import actionReviewDecisionHotfixRouter from "./routes/action-review-decision-hotfix";
 import actionReviewActiveRouter from "./routes/action-review-active";
 import clientDomainsRouter from "./routes/client-domains";
+import clientDomainHomepageRouter from "./routes/client-domain-homepage";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -40,6 +41,7 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(clientDomainsRouter);
+app.use(clientDomainHomepageRouter);
 app.use(actionReviewActiveRouter);
 app.use(actionReviewDecisionHotfixRouter);
 app.use(intentGovernanceRunHotfixRouter);
