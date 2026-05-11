@@ -35,7 +35,9 @@ async function findWebsiteId() {
         OR lower(settings->>'parentDomain') IN ($1, $2)
         OR lower(settings->>'publicDomain') IN ($1, $2)
         OR lower(settings->>'legacyParentDomain') = $2
-     ORDER BY updated_at DESC NULLS LAST
+     ORDER BY
+       CASE WHEN lower(domain) = $1 THEN 0 ELSE 1 END,
+       updated_at DESC NULLS LAST
      LIMIT 1`,
     [PAGES, ROOT]
   );
@@ -46,12 +48,16 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
     const h = requestHost(req);
-    if (h !== PAGES && h !== ROOT) return next();
+
+    // Critical safety fix: this hotfix must only answer the public pages host.
+    // Never capture spotonresults.com or admin/app hosts, because that can kick
+    // the admin UI into a public page URL.
+    if (h !== PAGES) return next();
+
     const path = req.path || "/";
     if (path.startsWith("/api") || path.startsWith("/assets") || path === "/favicon.ico") return next();
 
     const slug = decodeURIComponent(path.replace(/^\/+/, "").replace(/^pages\//, ""));
-    if (h === ROOT && slug) return res.redirect(301, `https://${PAGES}/${slug}`);
     if (!slug || slug === "robots.txt" || slug.endsWith(".xml")) return next();
 
     const websiteId = await findWebsiteId();
