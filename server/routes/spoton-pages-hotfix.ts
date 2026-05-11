@@ -44,18 +44,30 @@ async function findWebsiteId() {
   return result.rows[0]?.id || null;
 }
 
+function isSkippablePath(path: string) {
+  return path.startsWith("/api")
+    || path.startsWith("/assets")
+    || path.startsWith("/@vite")
+    || path.startsWith("/src/")
+    || path === "/favicon.ico";
+}
+
+async function getPublishedPage(websiteId: string, slug: string) {
+  const pageResult = await pool.query(
+    `SELECT * FROM pages WHERE website_id::text = $1::text AND slug = $2 AND status = 'published' LIMIT 1`,
+    [websiteId, slug]
+  );
+  return pageResult.rows[0] || null;
+}
+
 router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
     const h = requestHost(req);
-
-    // Critical safety fix: this hotfix must only answer the public pages host.
-    // Never capture spotonresults.com or admin/app hosts, because that can kick
-    // the admin UI into a public page URL.
-    if (h !== PAGES) return next();
+    if (h !== PAGES && h !== ROOT) return next();
 
     const path = req.path || "/";
-    if (path.startsWith("/api") || path.startsWith("/assets") || path === "/favicon.ico") return next();
+    if (isSkippablePath(path)) return next();
 
     const slug = decodeURIComponent(path.replace(/^\/+/, "").replace(/^pages\//, ""));
     if (!slug || slug === "robots.txt" || slug.endsWith(".xml")) return next();
@@ -63,12 +75,14 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const websiteId = await findWebsiteId();
     if (!websiteId) return next();
 
-    const pageResult = await pool.query(
-      `SELECT * FROM pages WHERE website_id::text = $1::text AND slug = $2 AND status = 'published' LIMIT 1`,
-      [websiteId, slug]
-    );
-    const page = pageResult.rows[0];
+    const page = await getPublishedPage(websiteId, slug);
     if (!page) return next();
+
+    // Safe root-domain migration: only redirect if this exact slug exists as a
+    // published Nexus page. This avoids hijacking login/admin/app routes.
+    if (h === ROOT) {
+      return res.redirect(301, `https://${PAGES}/${slug}`);
+    }
 
     const versionResult = await pool.query(
       `SELECT * FROM page_versions WHERE page_id::text = $1::text ORDER BY is_active DESC NULLS LAST, version DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1`,
