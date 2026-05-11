@@ -17,10 +17,10 @@ function normalizeHostname(value: unknown) {
 
 function getRequestHostname(req: Request) {
   return normalizeHostname(
-    req.headers["x-nexus-host"] ||
-    req.headers["cf-custom-hostname"] ||
+    req.headers.host ||
     req.headers["x-forwarded-host"] ||
-    req.headers.host,
+    req.headers["cf-custom-hostname"] ||
+    req.headers["x-nexus-host"],
   );
 }
 
@@ -259,7 +259,8 @@ async function serveHealth(ctx: any, host: string, res: Response) {
 }
 
 // Public hostname resolver: this is the bridge from pages.clientdomain.com to the correct Nexus website.
-// It must run before requireAuth so Cloudflare custom-hostname traffic can render public pages.
+// Cloudflare for SaaS forwards the original Host header, so Nexus resolves tenant by host and page by DB slug.
+// It must run before requireAuth so custom-hostname traffic can render public pages.
 router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (shouldIgnorePublicResolver(req)) return next();
