@@ -35,7 +35,7 @@ import PublishedPagesPage from "@/pages/published";
 import JobsPage from "@/pages/jobs";
 import SitemapsPage from "@/pages/sitemaps";
 import UsersPage from "@/pages/users";
-import GuidePage from "@/pages/guide";
+import GuidePage from "@/pages/guide-production";
 import BulkGeneratorPage from "@/pages/bulk-generator";
 import LeadsPage from "@/pages/leads";
 import SearchControlPage from "@/pages/search-control";
