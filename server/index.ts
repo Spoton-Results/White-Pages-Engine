@@ -18,6 +18,7 @@ import clientDomainHomepageRouter from "./routes/client-domain-homepage";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import websiteDomainEditRouter from "./routes/website-domain-edit";
+import spotonPagesHotfixRouter from "./routes/spoton-pages-hotfix";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -49,6 +50,11 @@ app.use(sessionMiddleware());
 // Must mount before registerRoutes() routes so the Website screen can update
 // the public SEO serving hostname for every account/site.
 app.use(websiteDomainEditRouter);
+
+// SpotOn Results one-time public serving hotfix.
+// Must mount before generic domain routers so pages.spotonresults.com/{slug}
+// can render existing content even if old DB rows still reference spotonresults.com.
+app.use(spotonPagesHotfixRouter);
 
 // IMPORTANT:
 // Legacy admin preview URLs like:
