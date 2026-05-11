@@ -18,21 +18,9 @@ function normalizeHostname(value: unknown) {
     .replace(/\.$/, "");
 }
 
-function normalizePath(value: unknown) {
-  return String(value || "")
-    .trim()
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-}
-
 function normalizeSettingsForPublicPages(domain: string, settings: any = {}) {
   const next = { ...(settings || {}) };
 
-  // One-time SpotOn Results migration:
-  // Old: https://spotonresults.com/pages/{slug}
-  // New: https://pages.spotonresults.com/{slug}
-  // Keep the same website/page ownership, but force public URLs, canonicals,
-  // sitemap URLs, preview links, and proxy-aware builders to root on the pages subdomain.
   if (domain === SPOTON_ROOT_DOMAIN || domain === SPOTON_PAGES_DOMAIN) {
     next.parentDomain = SPOTON_PAGES_DOMAIN;
     next.publicDomain = SPOTON_PAGES_DOMAIN;
@@ -48,7 +36,28 @@ function normalizeSettingsForPublicPages(domain: string, settings: any = {}) {
   return next;
 }
 
-function toWebsite(row: any) {
+function isSpotonWebsite(row: any) {
+  const settings = row?.settings || {};
+  const values = [
+    normalizeHostname(row?.domain),
+    normalizeHostname(settings.parentDomain),
+    normalizeHostname(settings.publicDomain),
+    normalizeHostname(settings.legacyParentDomain),
+  ];
+  return values.includes(SPOTON_ROOT_DOMAIN) || values.includes(SPOTON_PAGES_DOMAIN);
+}
+
+function normalizeWebsiteRow(row: any) {
+  if (!row || !isSpotonWebsite(row)) return row;
+  return {
+    ...row,
+    domain: SPOTON_PAGES_DOMAIN,
+    settings: normalizeSettingsForPublicPages(SPOTON_PAGES_DOMAIN, row.settings || {}),
+  };
+}
+
+function toWebsite(rawRow: any) {
+  const row = normalizeWebsiteRow(rawRow);
   return {
     id: row.id,
     accountId: row.account_id,
@@ -67,11 +76,34 @@ function toWebsite(row: any) {
   };
 }
 
+// Must be mounted before the main /api/websites route. This makes the Websites
+// dropdown and Published Pages URL builder receive the corrected public host,
+// even if production DB rows still contain the old spotonresults.com value.
+router.get("/api/websites", requireAuth, async (req, res, next) => {
+  try {
+    const accountId = typeof req.query.accountId === "string" ? req.query.accountId : "";
+    const result = accountId
+      ? await pool.query(`SELECT * FROM websites WHERE account_id = $1 ORDER BY created_at DESC`, [accountId])
+      : await pool.query(`SELECT * FROM websites ORDER BY created_at DESC`);
+
+    return res.json(result.rows.map(toWebsite));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get("/api/websites/:id", requireAuth, async (req, res, next) => {
+  try {
+    const result = await pool.query(`SELECT * FROM websites WHERE id = $1 LIMIT 1`, [req.params.id]);
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ message: "Website not found" });
+    return res.json(toWebsite(row));
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // System-wide website editor override.
-// Website domain = public SEO serving hostname, e.g. pages.clientdomain.com.
-// Client/root business site belongs in settings.mainWebsiteUrl.
-// When domain changes, force published URLs/canonicals/sitemaps to use it by
-// syncing settings.parentDomain and clearing any old preview/proxy path.
 router.patch("/api/websites/:id", requireAuth, async (req, res, next) => {
   try {
     const websiteId = req.params.id;
@@ -81,7 +113,7 @@ router.patch("/api/websites/:id", requireAuth, async (req, res, next) => {
     const current = currentResult.rows[0];
     if (!current) return res.status(404).json({ message: "Website not found" });
 
-    const requestedDomain = body.domain != null ? normalizeHostname(body.domain) : current.domain;
+    const requestedDomain = body.domain != null ? normalizeHostname(body.domain) : normalizeHostname(current.domain);
     const nextDomain = requestedDomain === SPOTON_ROOT_DOMAIN ? SPOTON_PAGES_DOMAIN : requestedDomain;
 
     if (!nextDomain || !nextDomain.includes(".")) {
@@ -94,7 +126,7 @@ router.patch("/api/websites/:id", requireAuth, async (req, res, next) => {
       ...incomingSettings,
     };
 
-    const normalizedSettings = body.domain != null
+    const normalizedSettings = body.domain != null || nextDomain === SPOTON_PAGES_DOMAIN
       ? normalizeSettingsForPublicPages(nextDomain, mergedSettings)
       : mergedSettings;
 
@@ -147,6 +179,7 @@ router.post("/api/websites/repair/spoton-results-pages-domain", requireAuth, asy
           OR lower(domain) = $1
           OR lower(settings->>'parentDomain') = $2
           OR lower(settings->>'parentDomain') = $1
+          OR lower(settings->>'legacyParentDomain') = $2
        RETURNING *`,
       [SPOTON_PAGES_DOMAIN, SPOTON_ROOT_DOMAIN]
     );
