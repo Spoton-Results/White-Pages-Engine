@@ -33,7 +33,7 @@ function escapeHtml(value: unknown) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -294,9 +294,9 @@ async function assertWebsiteAccess(req: Request, res: Response, websiteId: strin
 }
 
 async function cfRequest(path: string, init: RequestInit = {}) {
-  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-  if (!zoneId || !apiToken) throw new Error("Cloudflare credentials missing. Add CLOUDFLARE_ZONE_ID and CLOUDFLARE_API_TOKEN in Railway.");
+  const zoneId = process.env.CF_ZONE_ID || process.env.CLOUDFLARE_ZONE_ID;
+  const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!zoneId || !apiToken) throw new Error("Cloudflare credentials missing. Add CF_ZONE_ID and CF_API_TOKEN in Railway.");
   const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json", ...(init.headers || {}) },
@@ -326,7 +326,18 @@ async function createCloudflareHostname(hostname: string) {
   try {
     return await cfRequest(`/custom_hostnames`, {
       method: "POST",
-      body: JSON.stringify({ hostname, ssl: { method: "http", type: "dv", settings: { http2: "on", min_tls_version: "1.2", tls_1_3: "on" } } }),
+      body: JSON.stringify({
+        hostname,
+        ssl: {
+          method: process.env.CF_CUSTOM_HOSTNAME_SSL_METHOD || "txt",
+          type: "dv",
+          settings: {
+            http2: "on",
+            min_tls_version: "1.2",
+            tls_1_3: "on",
+          },
+        },
+      }),
     });
   } catch (err: any) {
     const code = err.cloudflare?.errors?.[0]?.code;
@@ -418,7 +429,12 @@ router.post("/api/websites/:websiteId/client-domains", async (req, res, next) =>
       [website.id, website.account_id, hostname, status, cfResult?.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus, cfError, status === "active" ? new Date() : null],
     )).rows[0];
 
-    res.json({ ok: true, dnsTarget: dnsTarget(), domain: row, cloudflare: cfResult ? { id: cfResult.id, status: cfResult.status, sslStatus: cfResult.ssl?.status } : null });
+    res.json({
+      ok: true,
+      dnsTarget: dnsTarget(),
+      domain: row,
+      cloudflare: cfResult ? { id: cfResult.id, status: cfResult.status, sslStatus: cfResult.ssl?.status, sslMethod: cfResult.ssl?.method || process.env.CF_CUSTOM_HOSTNAME_SSL_METHOD || "txt" } : null,
+    });
   } catch (err) { next(err); }
 });
 
