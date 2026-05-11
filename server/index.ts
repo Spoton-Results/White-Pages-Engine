@@ -16,6 +16,7 @@ import actionReviewActiveRouter from "./routes/action-review-active";
 import clientDomainsRouter from "./routes/client-domains";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
+import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -42,6 +43,14 @@ function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+
+// IMPORTANT:
+// Legacy admin preview URLs like:
+//   /sites/domain.com/slug
+// should NEVER behave like public SEO URLs.
+// Force them to redirect to the clean public hostname architecture.
+app.use(legacyPublicUrlRedirectRouter);
+
 app.use(clientDomainsRouter);
 app.use(publicWebsiteDomainsRouter);
 app.use(clientDomainHomepageRouter);
