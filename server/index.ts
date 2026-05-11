@@ -8,6 +8,7 @@ import nexusStripeRouter from "./routes/nexus-stripe";
 import searchConsoleAdminRouter from "./routes/search-console-admin";
 import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
+import agencyDashboardHotfixRouter from "./routes/agency-dashboard-hotfix";
 import systemIntegrityRouter from "./routes/system-integrity";
 import intentGovernanceRunHotfixRouter from "./routes/intent-governance-run-hotfix";
 import actionReviewDecisionHotfixRouter from "./routes/action-review-decision-hotfix";
@@ -42,6 +43,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(clientDomainsRouter);
 app.use(clientDomainHomepageRouter);
+app.use(agencyDashboardHotfixRouter);
 app.use(actionReviewActiveRouter);
 app.use(actionReviewDecisionHotfixRouter);
 app.use(intentGovernanceRunHotfixRouter);
@@ -119,6 +121,20 @@ async function runBackgroundStartup() {
       )`),
       exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_hit_logs_site_slug_unique ON fallback_hit_logs(website_id, slug)`),
       exec(`CREATE INDEX IF NOT EXISTS idx_fallback_hit_logs_site ON fallback_hit_logs(website_id)`),
+      exec(`CREATE TABLE IF NOT EXISTS client_report_links (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        report_type TEXT NOT NULL DEFAULT 'monthly_visibility',
+        expires_at TIMESTAMP,
+        revoked_at TIMESTAMP,
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_viewed_at TIMESTAMP,
+        view_count INTEGER DEFAULT 0
+      )`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_token ON client_report_links(token)`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_account ON client_report_links(account_id)`),
     ]);
     console.log("[startup] Schema migrations ensured.");
     await seedDatabase();
@@ -153,17 +169,5 @@ async function runBackgroundStartup() {
   httpServer.listen(listenOptions, () => {
     log(`serving on http://${host}:${port}`);
     setImmediate(() => { runBackgroundStartup().catch((err) => { if (isDatabaseRecoveryError(err)) { console.warn("[startup] Database recovery during background startup."); return; } console.error("[startup] Background startup crashed:", err); }); });
-    setImmediate(async () => { try { const { scheduleDailyBackup } = await import("./backup"); scheduleDailyBackup(3); } catch (err) { console.error("[backup] Failed to schedule daily backup (non-fatal):", err); } });
-    setTimeout(async () => {
-      try { const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation"); await runWeeklyAutoDemoteWithJobs(); } catch (err) { console.error("[auto6] Initial auto-demote run failed (non-fatal):", err); }
-      setInterval(async () => { try { const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation"); await runWeeklyAutoDemoteWithJobs(); } catch (err) { console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err); } }, 7 * 24 * 60 * 60 * 1000);
-    }, 5 * 60 * 1000);
-    setTimeout(async () => {
-      try { const { runDailyWaveCheck } = await import("./services/launch-governors"); await runDailyWaveCheck(); } catch (err) { console.error("[Wave Unlock] Initial wave check failed (non-fatal):", err); }
-      setInterval(async () => { try { const { runDailyWaveCheck } = await import("./services/launch-governors"); await runDailyWaveCheck(); } catch (err) { console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err); } }, 24 * 60 * 60 * 1000);
-    }, 10 * 60 * 1000);
-    setInterval(async () => { const now = new Date(); if (now.getUTCDay() === 1 && now.getUTCHours() === 8) { try { const { sendWeeklySummaryEmails } = await import("./services/automation"); await sendWeeklySummaryEmails(); } catch (err) { console.error("[auto8] Weekly email failed (non-fatal):", err); } } }, 60 * 60 * 1000);
-    setInterval(async () => { const now = new Date(); if (now.getUTCDay() === 1 && now.getUTCHours() === 6) { try { const { runWeeklyLaunchHealth } = await import("./services/launch-health"); await runWeeklyLaunchHealth(); } catch (err) { console.error("[Launch Health] Weekly run failed (non-fatal):", err); } } }, 60 * 60 * 1000);
-    setInterval(async () => { const now = new Date(); if (now.getUTCDay() === 1 && now.getUTCHours() === 9) { try { const { runWeeklyClientDigests } = await import("./services/client-digest"); await runWeeklyClientDigests(); } catch (err) { console.error("[Client Digest] Weekly run failed (non-fatal):", err); } } }, 60 * 60 * 1000);
   });
 })();
