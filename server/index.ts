@@ -17,6 +17,7 @@ import clientDomainsRouter from "./routes/client-domains";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
+import websiteDomainEditRouter from "./routes/website-domain-edit";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -43,6 +44,11 @@ function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+
+// System-wide website domain editor override.
+// Must mount before registerRoutes() routes so the Website screen can update
+// the public SEO serving hostname for every account/site.
+app.use(websiteDomainEditRouter);
 
 // IMPORTANT:
 // Legacy admin preview URLs like:
