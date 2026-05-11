@@ -11,6 +11,8 @@
     "check": "tsc",
     "smoke:agency": "tsx scripts/smoke-agency-retention.ts",
     "qa:retention": "npm run smoke:agency && npm run check",
+    "smoke:client-domains": "tsx scripts/smoke-client-domains.ts",
+    "qa:client-domains": "npm run smoke:client-domains && npm run check",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
