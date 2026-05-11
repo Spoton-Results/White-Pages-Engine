@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { pool } from "../db";
 import { requireAuth } from "../auth";
+import { resolveCname, resolve4 } from "node:dns/promises";
 
 const router = Router();
 
@@ -337,6 +338,55 @@ async function createCloudflareHostname(hostname: string) {
   }
 }
 
+async function fetchStatus(url: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
+    return { ok: res.ok, status: res.status, url: res.url };
+  } catch (err: any) {
+    return { ok: false, status: 0, error: err?.name === "AbortError" ? "Timed out" : err?.message || "Fetch failed" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function buildReadiness(row: any) {
+  const hostname = row.hostname;
+  const expectedTarget = dnsTarget().replace(/\.$/, "").toLowerCase();
+  let cnameRecords: string[] = [];
+  let aRecords: string[] = [];
+  let dnsError: string | null = null;
+  try { cnameRecords = (await resolveCname(hostname)).map((r) => r.replace(/\.$/, "").toLowerCase()); }
+  catch (err: any) { dnsError = err?.code || err?.message || "CNAME lookup failed"; }
+  try { aRecords = await resolve4(hostname); } catch { /* A records are optional when CNAME exists. */ }
+
+  const dnsDetected = cnameRecords.includes(expectedTarget) || cnameRecords.some((r) => r.endsWith(expectedTarget)) || aRecords.length > 0;
+  const cloudflareActive = row.status === "active";
+  const sslActive = row.ssl_status === "active" || row.ssl_status === "issued" || row.status === "active";
+
+  const homepageSlug = await resolveHomepageSlug({ website_id: row.website_id, website_settings: row.website_settings || {} });
+  const homepageAssigned = !!homepageSlug;
+  const [health, homepage, robots, sitemap] = await Promise.all([
+    fetchStatus(`https://${hostname}/.well-known/nexus-domain-health`),
+    fetchStatus(`https://${hostname}/`),
+    fetchStatus(`https://${hostname}/robots.txt`),
+    fetchStatus(`https://${hostname}/sitemap.xml`),
+  ]);
+
+  const checks = {
+    dns: { ok: dnsDetected, label: dnsDetected ? "DNS detected" : "DNS not detected", expectedTarget, cnameRecords, aRecords, error: dnsError },
+    cloudflare: { ok: cloudflareActive, label: cloudflareActive ? "Cloudflare active" : "Cloudflare pending", status: row.status },
+    ssl: { ok: sslActive, label: sslActive ? "SSL active" : "SSL pending", status: row.ssl_status || row.status },
+    resolver: { ok: health.ok, label: health.ok ? "Hostname resolves to Nexus" : "Hostname not resolving to Nexus", ...health },
+    homepage: { ok: homepageAssigned && homepage.ok, label: homepageAssigned ? (homepage.ok ? "Homepage reachable" : "Homepage assigned but not reachable") : "No homepage assigned", slug: homepageSlug, ...homepage },
+    robots: { ok: robots.ok, label: robots.ok ? "Robots reachable" : "Robots not reachable", ...robots },
+    sitemap: { ok: sitemap.ok, label: sitemap.ok ? "Sitemap reachable" : "Sitemap not reachable", ...sitemap },
+  };
+  const ready = Object.values(checks).every((check: any) => check.ok);
+  return { ready, hostname, checkedAt: new Date().toISOString(), checks };
+}
+
 router.get("/api/websites/:websiteId/client-domains", async (req, res, next) => {
   try {
     await ensureClientDomainsTable();
@@ -391,6 +441,24 @@ router.post("/api/client-domains/:id/check", async (req, res, next) => {
       [row.id, status, result?.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus, error],
     )).rows[0];
     res.json({ ok: true, dnsTarget: dnsTarget(), domain: updated });
+  } catch (err) { next(err); }
+});
+
+router.get("/api/client-domains/:id/readiness", async (req, res, next) => {
+  try {
+    await ensureClientDomainsTable();
+    const row = (await pool.query(
+      `SELECT cd.*, COALESCE(w.settings, '{}') AS website_settings
+       FROM client_domains cd
+       JOIN websites w ON w.id::text = cd.website_id::text
+       WHERE cd.id::text = $1::text
+       LIMIT 1`,
+      [req.params.id],
+    )).rows[0];
+    if (!row) return res.status(404).json({ message: "Client domain not found" });
+    const website = await assertWebsiteAccess(req, res, row.website_id); if (!website) return;
+    const readiness = await buildReadiness(row);
+    res.json(readiness);
   } catch (err) { next(err); }
 });
 
