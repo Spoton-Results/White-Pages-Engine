@@ -62,6 +62,37 @@ async function getPublishedPage(slug: string) {
   return pageResult.rows[0] || null;
 }
 
+router.get("/api/spoton-pages-debug/:slug", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const slug = req.params.slug;
+    const host = requestHost(req);
+    const websites = await pool.query(
+      `SELECT id, domain, settings->>'parentDomain' AS parent_domain, settings->>'publicDomain' AS public_domain, settings->>'legacyParentDomain' AS legacy_parent_domain, updated_at
+       FROM websites
+       WHERE lower(domain) IN ($1, $2)
+          OR lower(settings->>'parentDomain') IN ($1, $2)
+          OR lower(settings->>'publicDomain') IN ($1, $2)
+          OR lower(settings->>'legacyParentDomain') = $2
+       ORDER BY updated_at DESC NULLS LAST
+       LIMIT 20`,
+      [PAGES, ROOT]
+    );
+    const pages = await pool.query(
+      `SELECT p.id, p.website_id, p.slug, p.status, p.title, p.published_at, p.updated_at, w.domain
+       FROM pages p
+       LEFT JOIN websites w ON p.website_id::text = w.id::text
+       WHERE p.slug = $1
+       ORDER BY p.updated_at DESC NULLS LAST
+       LIMIT 20`,
+      [slug]
+    );
+    const page = await getPublishedPage(slug);
+    return res.json({ host, slug, spotonWebsiteCount: websites.rowCount, spotonWebsites: websites.rows, exactSlugPageCount: pages.rowCount, exactSlugPages: pages.rows, matchedPublishedPage: page ? { id: page.id, website_id: page.website_id, slug: page.slug, status: page.status, title: page.title } : null });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
