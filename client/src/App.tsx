@@ -31,7 +31,7 @@ import QueryClustersPage from "@/pages/query-clusters";
 import BlueprintsPage from "@/pages/blueprints";
 import DraftsPage from "@/pages/drafts";
 import PublishQueuePage from "@/pages/publish-queue";
-import PublishedPagesPage from "@/pages/published";
+import PublishedPagesPage from "@/pages/published-v2";
 import JobsPage from "@/pages/jobs";
 import SitemapsPage from "@/pages/sitemaps";
 import UsersPage from "@/pages/users";
