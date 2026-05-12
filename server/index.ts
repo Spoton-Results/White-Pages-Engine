@@ -46,23 +46,9 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 
-// System-wide website domain editor override.
-// Must mount before registerRoutes() routes so the Website screen can update
-// the public SEO serving hostname for every account/site.
 app.use(websiteDomainEditRouter);
-
-// SpotOn Results one-time public serving hotfix.
-// Must mount before generic domain routers so pages.spotonresults.com/{slug}
-// can render existing content even if old DB rows still reference spotonresults.com.
 app.use(spotonPagesHotfixRouter);
-
-// IMPORTANT:
-// Legacy admin preview URLs like:
-//   /sites/domain.com/slug
-// should NEVER behave like public SEO URLs.
-// Force them to redirect to the clean public hostname architecture.
 app.use(legacyPublicUrlRedirectRouter);
-
 app.use(clientDomainsRouter);
 app.use(publicWebsiteDomainsRouter);
 app.use(clientDomainHomepageRouter);
@@ -98,6 +84,45 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+async function repairSpotonResultsPagesDomain(pgPool: any) {
+  const rootDomain = "spotonresults.com";
+  const pagesDomain = "pages.spotonresults.com";
+  try {
+    const result = await pgPool.query(
+      `UPDATE websites
+       SET domain = $1,
+           settings = (
+             COALESCE(settings, '{}'::jsonb)
+             || jsonb_build_object(
+               'parentDomain', $1,
+               'publicDomain', $1,
+               'proxyPath', '',
+               'publicBasePath', '',
+               'legacyParentDomain', $2,
+               'legacyProxyPath', 'pages'
+             )
+           ),
+           updated_at = NOW()
+       WHERE lower(domain) = $2
+          OR lower(domain) = $1
+          OR lower(COALESCE(settings->>'parentDomain', '')) = $2
+          OR lower(COALESCE(settings->>'parentDomain', '')) = $1
+          OR lower(COALESCE(settings->>'publicDomain', '')) = $2
+          OR lower(COALESCE(settings->>'publicDomain', '')) = $1
+          OR lower(COALESCE(settings->>'legacyParentDomain', '')) = $2
+       RETURNING id, domain`,
+      [pagesDomain, rootDomain]
+    );
+    console.log(`[startup] SpotOn Results pages domain repair checked. Updated ${result.rowCount || 0} website row(s).`);
+  } catch (err: any) {
+    if (isDatabaseRecoveryError(err)) {
+      console.warn("[startup] Database recovering during SpotOn Results domain repair; will retry on next deploy/start.");
+      return;
+    }
+    console.error("[startup] SpotOn Results domain repair failed:", err?.message || err);
+  }
+}
 
 async function runBackgroundStartup() {
   try {
@@ -159,6 +184,7 @@ async function runBackgroundStartup() {
       exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_token ON client_report_links(token)`),
       exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_account ON client_report_links(account_id)`),
     ]);
+    await repairSpotonResultsPagesDomain(pgPool);
     console.log("[startup] Schema migrations ensured.");
     await seedDatabase();
   } catch (err) {
