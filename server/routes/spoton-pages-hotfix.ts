@@ -28,22 +28,6 @@ function render(page: any, content: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${esc(title)}</title><meta name="description" content="${esc(desc)}"/><link rel="canonical" href="${canonical}"/><style>body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc;color:#0f172a;line-height:1.65}.hero{background:linear-gradient(135deg,#2563eb,#0f172a);color:white;padding:56px 20px}.wrap{max-width:1100px;margin:0 auto}.hero h1{font-size:clamp(34px,5vw,58px);line-height:1.05;margin:0 0 16px}.hero p{font-size:20px;max-width:760px;opacity:.92}.content{max-width:1100px;margin:42px auto;padding:clamp(24px,4vw,48px);background:white;border:1px solid #e2e8f0;border-radius:24px;box-shadow:0 18px 45px rgba(15,23,42,.08)}h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}a{color:#2563eb}</style></head><body><section class="hero"><div class="wrap"><h1>${esc(page.h1 || title)}</h1>${desc ? `<p>${esc(desc)}</p>` : ""}</div></section><main class="content">${content || `<p>${esc(desc || title)}</p>`}</main></body></html>`;
 }
 
-async function findWebsiteId() {
-  const result = await pool.query(
-    `SELECT id FROM websites
-     WHERE lower(domain) IN ($1, $2)
-        OR lower(settings->>'parentDomain') IN ($1, $2)
-        OR lower(settings->>'publicDomain') IN ($1, $2)
-        OR lower(settings->>'legacyParentDomain') = $2
-     ORDER BY
-       CASE WHEN lower(domain) = $1 THEN 0 ELSE 1 END,
-       updated_at DESC NULLS LAST
-     LIMIT 1`,
-    [PAGES, ROOT]
-  );
-  return result.rows[0]?.id || null;
-}
-
 function isSkippablePath(path: string) {
   return path.startsWith("/api")
     || path.startsWith("/assets")
@@ -52,10 +36,28 @@ function isSkippablePath(path: string) {
     || path === "/favicon.ico";
 }
 
-async function getPublishedPage(websiteId: string, slug: string) {
+async function getPublishedPage(slug: string) {
   const pageResult = await pool.query(
-    `SELECT * FROM pages WHERE website_id::text = $1::text AND slug = $2 AND status = 'published' LIMIT 1`,
-    [websiteId, slug]
+    `WITH spoton_websites AS (
+       SELECT id, domain, settings, updated_at
+       FROM websites
+       WHERE lower(domain) IN ($1, $2)
+          OR lower(settings->>'parentDomain') IN ($1, $2)
+          OR lower(settings->>'publicDomain') IN ($1, $2)
+          OR lower(settings->>'legacyParentDomain') = $2
+     )
+     SELECT p.*
+     FROM pages p
+     JOIN spoton_websites w ON p.website_id::text = w.id::text
+     WHERE p.slug = $3
+       AND p.status = 'published'
+     ORDER BY
+       CASE WHEN lower(w.domain) = $1 THEN 0 ELSE 1 END,
+       p.published_at DESC NULLS LAST,
+       p.updated_at DESC NULLS LAST,
+       w.updated_at DESC NULLS LAST
+     LIMIT 1`,
+    [PAGES, ROOT, slug]
   );
   return pageResult.rows[0] || null;
 }
@@ -72,14 +74,9 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const slug = decodeURIComponent(path.replace(/^\/+/, "").replace(/^pages\//, ""));
     if (!slug || slug === "robots.txt" || slug.endsWith(".xml")) return next();
 
-    const websiteId = await findWebsiteId();
-    if (!websiteId) return next();
-
-    const page = await getPublishedPage(websiteId, slug);
+    const page = await getPublishedPage(slug);
     if (!page) return next();
 
-    // Safe root-domain migration: only redirect if this exact slug exists as a
-    // published Nexus page. This avoids hijacking login/admin/app routes.
     if (h === ROOT) {
       return res.redirect(301, `https://${PAGES}/${slug}`);
     }
