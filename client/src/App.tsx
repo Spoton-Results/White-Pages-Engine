@@ -139,4 +139,4 @@ function App() {
   return <QueryClientProvider client={queryClient}><TooltipProvider><Toaster /><ErrorBoundary><Router /></ErrorBoundary></TooltipProvider></QueryClientProvider>;
 }
 
-export default App();
+export default App;
