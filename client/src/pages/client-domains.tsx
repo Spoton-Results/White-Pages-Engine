@@ -27,7 +27,7 @@ type ClientDomain = {
 };
 type DomainResponse = { dnsTarget: string; domains: ClientDomain[] };
 
-const DEFAULT_CLIENT_CNAME_TARGET = "edge.spotonresults.com";
+const CLIENT_CNAME_TARGET = "origin.spotonresults.com";
 
 function normalizeHost(value: string) {
   return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
@@ -72,7 +72,7 @@ export default function ClientDomainsPage() {
     queryFn: () => api.get<DomainResponse>(`/api/websites/${websiteId}/client-domains`),
   });
 
-  const dnsTarget = data?.dnsTarget || DEFAULT_CLIENT_CNAME_TARGET;
+  const dnsTarget = CLIENT_CNAME_TARGET;
 
   const addDomain = useMutation({
     mutationFn: (host: string) => api.post(`/api/websites/${websiteId}/client-domains`, { hostname: host }),
@@ -121,7 +121,7 @@ export default function ClientDomainsPage() {
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2"><Globe className="size-7" /> Client Domains</h1>
-            <p className="text-muted-foreground max-w-3xl">Connect a client subdomain like <strong>pages.clientdomain.com</strong> to a Nexus website. Clients create one CNAME record pointing to your Worker edge.</p>
+            <p className="text-muted-foreground max-w-3xl">Connect a client subdomain like <strong>pages.clientdomain.com</strong> to a Nexus website. Clients create one CNAME record pointing to your origin hostname.</p>
           </div>
         </div>
 
