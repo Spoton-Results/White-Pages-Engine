@@ -31,20 +31,49 @@ function hostOnly(value: unknown): string {
     .trim();
 }
 
+function humanizeDomain(value: unknown): string {
+  const host = hostOnly(value);
+  const base = host.replace(/^pages\./i, "").split(".")[0] || "Website";
+  return base.split(/[-_]+/).map((part) => part ? part.charAt(0).toUpperCase() + part.slice(1) : "").join(" ").trim() || "Website";
+}
+
 function setting(website: any, key: string, fallback = "") {
   return String(website?.settings?.[key] || fallback || "").trim();
 }
 
 function mainWebsiteUrl(website: any): string {
-  return normalizeUrl(setting(website, "mainWebsiteUrl", "https://www.spotonresults.com"));
+  const explicit = setting(website, "mainWebsiteUrl")
+    || setting(website, "websiteUrl")
+    || setting(website, "brandWebsiteUrl")
+    || website?.brandWebsiteUrl
+    || website?.mainWebsiteUrl;
+
+  if (explicit) return normalizeUrl(explicit);
+
+  const pageHost = publicPagesHost(website);
+  if (pageHost.startsWith("pages.")) {
+    return normalizeUrl(pageHost.replace(/^pages\./i, "www."));
+  }
+
+  return normalizeUrl(pageHost || website?.domain || "");
 }
 
 function brandName(website: any): string {
-  return setting(website, "brandName", setting(website, "siteName", "SpotOn Results"));
+  const explicit = setting(website, "brandName")
+    || setting(website, "siteName")
+    || setting(website, "businessName")
+    || website?.brandName
+    || website?.websiteName
+    || website?.name;
+
+  if (explicit && !String(explicit).toLowerCase().startsWith("pages.")) return String(explicit).trim();
+
+  const main = mainWebsiteUrl(website);
+  return humanizeDomain(main || website?.domain || "Website");
 }
 
 function publicPagesHost(website: any): string {
-  return hostOnly(website?.settings?.parentDomain || website?.settings?.publicDomain || website?.domain || "pages.spotonresults.com");
+  return hostOnly(website?.settings?.parentDomain || website?.settings?.publicDomain || website?.domain || "");
 }
 
 function pageUrl(website: any, slug: string): string {
@@ -149,13 +178,13 @@ function structuredData(page: any, website: any, canonicalUrl: string) {
       url: canonicalUrl,
       name: page.title || page.h1 || page.slug,
       description: desc,
-      isPartOf: { "@id": `${main.replace(/\/+$/, "")}#website` },
+      isPartOf: main ? { "@id": `${main.replace(/\/+$/, "")}#website` } : undefined,
     },
     {
       "@type": "BreadcrumbList",
       "@id": `${canonicalUrl}#breadcrumb`,
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: brand, item: main },
+        { "@type": "ListItem", position: 1, name: brand, item: main || canonicalUrl },
         { "@type": "ListItem", position: 2, name: page.title || page.h1 || page.slug, item: canonicalUrl },
       ],
     },
@@ -163,7 +192,7 @@ function structuredData(page: any, website: any, canonicalUrl: string) {
       "@type": "LocalBusiness",
       "@id": `${canonicalUrl}#business`,
       name: brand,
-      url: main,
+      url: main || canonicalUrl,
       telephone: phone || undefined,
       areaServed: page.location_name || page.locationName || undefined,
       description: desc,
@@ -192,22 +221,22 @@ function header(website: any) {
   const main = mainWebsiteUrl(website);
   const phone = setting(website, "phone");
   const brand = brandName(website);
-  return `<header class="nexus-header"><div class="nexus-wrap"><a class="nexus-brand" href="${escapeHtml(main)}">${escapeHtml(brand)}</a><nav class="nexus-actions">${phone ? `<span class="nexus-phone-label">Phone Number</span><a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : `<a href="${escapeHtml(main)}">Visit Website</a>`}</nav></div></header>`;
+  return `<header class="nexus-header"><div class="nexus-wrap"><a class="nexus-brand" href="${escapeHtml(main || pageUrl(website, ""))}">${escapeHtml(brand)}</a><nav class="nexus-actions">${phone ? `<span class="nexus-phone-label">Phone Number</span><a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : `<a href="${escapeHtml(main || pageUrl(website, ""))}">Visit Website</a>`}</nav></div></header>`;
 }
 
 function breadcrumb(page: any, website: any, canonicalUrl: string) {
   const main = mainWebsiteUrl(website);
   const brand = brandName(website);
-  return `<nav class="nexus-wrap nexus-breadcrumb" aria-label="Breadcrumb"><a href="${escapeHtml(main)}">${escapeHtml(brand)}</a> <span>›</span> <span>${escapeHtml(page.title || page.h1 || page.slug)}</span></nav>`;
+  return `<nav class="nexus-wrap nexus-breadcrumb" aria-label="Breadcrumb"><a href="${escapeHtml(main || canonicalUrl)}">${escapeHtml(brand)}</a> <span>›</span> <span>${escapeHtml(page.title || page.h1 || page.slug)}</span></nav>`;
 }
 
 function cta(website: any) {
   const main = mainWebsiteUrl(website);
   const phone = setting(website, "phone");
-  const heading = setting(website, "ctaHeading", "Ready to Lower Your Processing Fees?");
-  const text = setting(website, "ctaText", "Get a clear look at your payment costs and see where savings may be possible.");
+  const heading = setting(website, "ctaHeading", "Ready to Get Started?");
+  const text = setting(website, "ctaText", "Get a clear look at your options and see how we can help.");
   const label = setting(website, "ctaButtonLabel", "Get a Free Quote →");
-  return `<section class="nexus-card nexus-cta"><div><p class="nexus-eyebrow">Next step</p><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(text)}</p></div><div class="nexus-cta-actions"><a class="nexus-button" href="${escapeHtml(main)}">${escapeHtml(label)}</a>${phone ? `<a class="nexus-button nexus-button-outline" href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : ""}</div></section>`;
+  return `<section class="nexus-card nexus-cta"><div><p class="nexus-eyebrow">Next step</p><h2>${escapeHtml(heading)}</h2><p>${escapeHtml(text)}</p></div><div class="nexus-cta-actions"><a class="nexus-button" href="${escapeHtml(main || "#quote")}">${escapeHtml(label)}</a>${phone ? `<a class="nexus-button nexus-button-outline" href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : ""}</div></section>`;
 }
 
 function leadForm(page: any, canonicalUrl: string) {
@@ -216,7 +245,7 @@ function leadForm(page: any, canonicalUrl: string) {
   const serviceId = page.service_id || page.serviceId || "";
   const locationId = page.location_id || page.locationId || "";
   if (!websiteId || !pageId || !serviceId) return "";
-  return `<section class="nexus-card nexus-lead" id="quote"><div><p class="nexus-eyebrow">Request pricing</p><h2>Get a Free Quote</h2><p>Send a quick note and SpotOn Results will follow up with next steps.</p></div><form class="nexus-form" method="post" action="/api/form-tracking/submit"><input type="hidden" name="websiteId" value="${escapeHtml(websiteId)}"/><input type="hidden" name="pageId" value="${escapeHtml(pageId)}"/><input type="hidden" name="serviceId" value="${escapeHtml(serviceId)}"/><input type="hidden" name="locationId" value="${escapeHtml(locationId)}"/><input type="hidden" name="formName" value="Public Page Quote Form"/><input type="hidden" name="sourcePageUrl" value="${escapeHtml(canonicalUrl)}"/><input type="hidden" name="sourcePageTitle" value="${escapeHtml(page.title || page.h1 || page.slug)}"/><label>Name<input name="submitterName" autocomplete="name" placeholder="Your name"/></label><label>Email<input name="submitterEmail" type="email" autocomplete="email" placeholder="you@example.com" required/></label><label>Phone<input name="submitterPhone" autocomplete="tel" placeholder="Best phone number"/></label><label>Message<textarea name="message" rows="4" placeholder="Tell us what you need help with"></textarea></label><button class="nexus-button" type="submit">Submit Request</button></form></section>`;
+  return `<section class="nexus-card nexus-lead" id="quote"><div><p class="nexus-eyebrow">Request pricing</p><h2>Get a Free Quote</h2><p>Send a quick note and ${escapeHtml(brandName({ settings: {} })) ? "we" : "we"} will follow up with next steps.</p></div><form class="nexus-form" method="post" action="/api/form-tracking/submit"><input type="hidden" name="websiteId" value="${escapeHtml(websiteId)}"/><input type="hidden" name="pageId" value="${escapeHtml(pageId)}"/><input type="hidden" name="serviceId" value="${escapeHtml(serviceId)}"/><input type="hidden" name="locationId" value="${escapeHtml(locationId)}"/><input type="hidden" name="formName" value="Public Page Quote Form"/><input type="hidden" name="sourcePageUrl" value="${escapeHtml(canonicalUrl)}"/><input type="hidden" name="sourcePageTitle" value="${escapeHtml(page.title || page.h1 || page.slug)}"/><label>Name<input name="submitterName" autocomplete="name" placeholder="Your name"/></label><label>Email<input name="submitterEmail" type="email" autocomplete="email" placeholder="you@example.com" required/></label><label>Phone<input name="submitterPhone" autocomplete="tel" placeholder="Best phone number"/></label><label>Message<textarea name="message" rows="4" placeholder="Tell us what you need help with"></textarea></label><button class="nexus-button" type="submit">Submit Request</button></form></section>`;
 }
 
 function internalLinks(links: PublicInternalLink[], website: any) {
@@ -228,7 +257,7 @@ function footer(website: any) {
   const main = mainWebsiteUrl(website);
   const phone = setting(website, "phone");
   const brand = brandName(website);
-  return `<footer class="nexus-footer"><div class="nexus-wrap"><p>© ${new Date().getFullYear()} ${escapeHtml(brand)}. All rights reserved.</p><div><a href="${escapeHtml(main)}">Visit ${escapeHtml(brand)}</a>${phone ? `<a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : ""}</div></div></footer>`;
+  return `<footer class="nexus-footer"><div class="nexus-wrap"><p>© ${new Date().getFullYear()} ${escapeHtml(brand)}. All rights reserved.</p><div>${main ? `<a href="${escapeHtml(main)}">Visit ${escapeHtml(brand)}</a>` : ""}${phone ? `<a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a>` : ""}</div></div></footer>`;
 }
 
 function stickyMobileCta(website: any) {
