@@ -62,6 +62,73 @@ function tierBadge(tier?: number | null) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
+function MobilePageCard({ page, liveBase, onCopyUrl }: { page: PageRow; liveBase: string; onCopyUrl: (slug: string) => void }) {
+  const liveUrl = liveBase ? `${liveBase}/${page.slug}` : "";
+
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+      <div className="space-y-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-medium leading-snug break-words">{page.title}</h3>
+            <p className="font-mono text-xs text-muted-foreground break-all">/{page.slug}</p>
+          </div>
+          <div className="shrink-0">{tierBadge(page.tier)}</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap pt-1">
+          <Badge variant="outline" className="capitalize">{(page.pageType || "").replace(/_/g, " ")}</Badge>
+          <span className="text-xs text-muted-foreground">{page.publishedAt ? `${formatDistanceToNow(new Date(page.publishedAt))} ago` : "Not dated"}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-md bg-muted/50 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Quality</div>
+          <div className={`font-semibold ${scoreClass(page.qualityScore)}`}>{page.qualityScore ?? "—"}</div>
+        </div>
+        <div className="rounded-md bg-muted/50 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Trust</div>
+          <div className={`font-semibold ${scoreClass(page.trustScore)}`}>{page.trustScore ?? "—"}</div>
+        </div>
+        <div className="rounded-md bg-muted/50 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Evidence</div>
+          <div className={`font-semibold ${scoreClass(page.evidenceScore)}`}>{page.evidenceScore ?? "—"}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <div className="text-muted-foreground">Words</div>
+          <div className="font-medium">{page.wordCount?.toLocaleString() || "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">Status</div>
+          <div className="font-medium capitalize">{page.status || "—"}</div>
+        </div>
+        <div className="col-span-2">
+          <div className="text-muted-foreground">Service</div>
+          <div className="font-medium break-words">{page.serviceName || "—"}</div>
+        </div>
+        <div className="col-span-2">
+          <div className="text-muted-foreground">Location</div>
+          <div className="font-medium break-words">{page.locationName ? `${page.locationName}${page.locationState ? `, ${page.locationState}` : ""}` : "—"}</div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <Button variant="outline" size="sm" className="flex-1" onClick={() => onCopyUrl(page.slug)}>
+          <Copy className="size-3.5 mr-2" />Copy
+        </Button>
+        {liveUrl && (
+          <Button variant="outline" size="sm" className="flex-1" asChild>
+            <a target="_blank" rel="noreferrer" href={liveUrl}><ExternalLink className="size-3.5 mr-2" />Open</a>
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PublishedPagesV2() {
   const { toast } = useToast();
   const [websiteId, setWebsiteId] = useState("");
@@ -143,20 +210,20 @@ export default function PublishedPagesV2() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Published Pages</h1>
+      <div className="space-y-4 sm:space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Published Pages</h1>
             <p className="text-sm text-muted-foreground">Server-side search across {Number(facets.all_count || total || 0).toLocaleString()} pages.</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={`size-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />Refresh
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
           <Button variant="outline" className="justify-between" onClick={() => preset("tier1")}>Tier 1 <Badge variant="secondary">{facets.tier1_count ?? "—"}</Badge></Button>
           <Button variant="outline" className="justify-between" onClick={() => preset("weak")}>Weak E-E-A-T <Badge variant="secondary">{facets.missing_eeat_count ?? "—"}</Badge></Button>
           <Button variant="outline" className="justify-between" onClick={() => preset("missing")}>Missing Scores <Badge variant="secondary">{facets.missing_eeat_count ?? "—"}</Badge></Button>
@@ -165,19 +232,19 @@ export default function PublishedPagesV2() {
         </div>
 
         <div className="rounded-lg border bg-card p-3 space-y-3">
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[16rem_1fr_9rem_7rem_auto_auto] gap-3 items-center">
             <Select value={selectedWebsite} onValueChange={(v) => { setWebsiteId(v); setPage(1); }}>
-              <SelectTrigger className="w-64"><SelectValue placeholder="Select website" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select website" /></SelectTrigger>
               <SelectContent>{(websites as any[]).map((w: any) => <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain || w.domain}</SelectItem>)}</SelectContent>
             </Select>
 
-            <div className="relative flex-1 min-w-[260px]">
+            <div className="relative min-w-0">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Search title, slug, H1, meta..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+              <Input className="pl-9 w-full" placeholder="Search title, slug, H1, meta..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
             </div>
 
             <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="published">Published</SelectItem>
                 <SelectItem value="review">Review</SelectItem>
@@ -187,7 +254,7 @@ export default function PublishedPagesV2() {
             </Select>
 
             <Select value={tier} onValueChange={(v) => { setTier(v); setPage(1); }}>
-              <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Tiers</SelectItem>
                 <SelectItem value="1">Tier 1</SelectItem>
@@ -196,14 +263,14 @@ export default function PublishedPagesV2() {
               </SelectContent>
             </Select>
 
-            <Button variant={advancedOpen ? "secondary" : "outline"} onClick={() => setAdvancedOpen(!advancedOpen)}>
+            <Button className="w-full xl:w-auto" variant={advancedOpen ? "secondary" : "outline"} onClick={() => setAdvancedOpen(!advancedOpen)}>
               <SlidersHorizontal className="size-4 mr-2" />Advanced
             </Button>
-            <Button variant="ghost" onClick={resetFilters}><X className="size-4 mr-2" />Clear</Button>
+            <Button className="w-full xl:w-auto" variant="ghost" onClick={resetFilters}><X className="size-4 mr-2" />Clear</Button>
           </div>
 
           {advancedOpen && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 border-t pt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 border-t pt-3">
               <Select value={pageType} onValueChange={(v) => { setPageType(v); setPage(1); }}>
                 <SelectTrigger><SelectValue placeholder="Page Type" /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All Types</SelectItem>{PAGE_TYPES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
@@ -243,15 +310,34 @@ export default function PublishedPagesV2() {
           )}
         </div>
 
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-muted-foreground">
           <div>{total.toLocaleString()} result{total === 1 ? "" : "s"} · page {page.toLocaleString()} of {Math.max(totalPages, 1).toLocaleString()}</div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             <Button size="sm" variant="outline" disabled={page <= 1 || isFetching} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
             <Button size="sm" variant="outline" disabled={page >= totalPages || isFetching} onClick={() => setPage((p) => p + 1)}>Next</Button>
           </div>
         </div>
 
-        <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="md:hidden space-y-3">
+          {isLoading ? Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-lg border bg-card p-4 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+              <div className="grid grid-cols-3 gap-2">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+              </div>
+              <Skeleton className="h-9 w-full" />
+            </div>
+          )) : pages.length === 0 ? (
+            <div className="rounded-lg border bg-card py-10 text-center text-muted-foreground">
+              <Filter className="size-8 mx-auto mb-2 opacity-40" />No pages match these filters.
+            </div>
+          ) : pages.map((p) => <MobilePageCard key={p.id} page={p} liveBase={liveBase} onCopyUrl={copyUrl} />)}
+        </div>
+
+        <div className="hidden md:block rounded-lg border bg-card overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>
