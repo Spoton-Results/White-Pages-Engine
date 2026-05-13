@@ -148,7 +148,7 @@ export default function WebsitesPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Websites</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">Manage target domains and deployment settings.</p>
+            <p className="text-muted-foreground text-sm mt-0.5">Manage target subdomains and deployment settings.</p>
           </div>
           <div className="flex gap-2">
             <Button
@@ -170,7 +170,7 @@ export default function WebsitesPage() {
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search domains..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-websites" />
+            <Input placeholder="Search subdomains..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-websites" />
           </div>
           <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/websites", accountIdFilter] })} disabled={websitesFetching} data-testid="button-refresh-websites">
             <RefreshCw className={`size-4 ${websitesFetching ? "animate-spin" : ""}`} />
@@ -181,7 +181,7 @@ export default function WebsitesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Domain</TableHead>
+                <TableHead>Sub-Domain</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Published</TableHead>
@@ -325,11 +325,11 @@ export default function WebsitesPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Website Name</Label>
-              <Input placeholder="My Plumbing Site" {...register("name", { required: true })} data-testid="input-website-name" />
+              <Input placeholder="Client Business Name" {...register("name", { required: true })} data-testid="input-website-name" />
             </div>
             <div className="space-y-1.5">
-              <Label>Domain</Label>
-              <Input placeholder="mysite.com" {...register("domain", { required: true })} data-testid="input-website-domain" />
+              <Label>Sub-Domain <span className="text-muted-foreground">(pages.clientdomain.com)</span></Label>
+              <Input placeholder="pages.clientdomain.com" {...register("domain", { required: true })} data-testid="input-website-domain" />
             </div>
             <div className="space-y-1.5">
               <Label>Status</Label>
@@ -381,7 +381,7 @@ export default function WebsitesPage() {
               <Input {...regEdit("name", { required: true })} data-testid="input-edit-website-name" />
             </div>
             <div className="space-y-1.5">
-              <Label>Domain</Label>
+              <Label>Sub-Domain <span className="text-muted-foreground">(pages.clientdomain.com)</span></Label>
               <Input {...regEdit("domain", { required: true })} data-testid="input-edit-website-domain" />
             </div>
             <div className="space-y-1.5">
@@ -405,7 +405,7 @@ export default function WebsitesPage() {
               <p className="text-sm font-semibold">Brand &amp; Contact <span className="text-muted-foreground font-normal">(appears on every generated page)</span></p>
               <div className="space-y-1.5">
                 <Label className="text-xs">Main Website URL <span className="text-muted-foreground">(header brand link &amp; footer)</span></Label>
-                <Input {...regEdit("mainWebsiteUrl")} placeholder="https://spotonresults.com" data-testid="input-main-website-url" />
+                <Input {...regEdit("mainWebsiteUrl")} placeholder="https://clientdomain.com" data-testid="input-main-website-url" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Phone Number <span className="text-muted-foreground">(override brand profile)</span></Label>
@@ -449,7 +449,7 @@ export default function WebsitesPage() {
               <p className="text-sm font-semibold">Demo Banner <span className="text-muted-foreground font-normal">(appears at top of every page)</span></p>
               <div className="space-y-1.5">
                 <Label className="text-xs">Demo URL <span className="text-muted-foreground">(leave blank to hide banner)</span></Label>
-                <Input {...regEdit("demoBannerUrl")} placeholder="https://sospages.replit.app" data-testid="input-demo-banner-url" />
+                <Input {...regEdit("demoBannerUrl")} placeholder="https://clientdomain.com/demo" data-testid="input-demo-banner-url" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Heading</Label>
@@ -471,11 +471,11 @@ export default function WebsitesPage() {
               <div className="flex gap-2">
                 <div className="flex-1 space-y-1.5">
                   <Label className="text-xs">Find</Label>
-                  <Input value={findText} onChange={e => setFindText(e.target.value)} placeholder="e.g. pagessubtracker.spotonresults.com" data-testid="input-content-find" />
+                  <Input value={findText} onChange={e => setFindText(e.target.value)} placeholder="Text to replace" data-testid="input-content-find" />
                 </div>
                 <div className="flex-1 space-y-1.5">
                   <Label className="text-xs">Replace with</Label>
-                  <Input value={replaceText} onChange={e => setReplaceText(e.target.value)} placeholder="e.g. subtracker.spotonresults.com" data-testid="input-content-replace" />
+                  <Input value={replaceText} onChange={e => setReplaceText(e.target.value)} placeholder="Replacement text" data-testid="input-content-replace" />
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
