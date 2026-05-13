@@ -21,6 +21,7 @@ import websiteDomainEditRouter from "./routes/website-domain-edit";
 import spotonPagesHotfixRouter from "./routes/spoton-pages-hotfix";
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 import pageIntelligenceRouter from "./routes/page-intelligence";
+import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -48,6 +49,7 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 
+app.use(bulkGenerateJobFastRouter);
 app.use(websiteDomainEditRouter);
 app.use(publishedPagesSearchRouter);
 app.use(spotonPagesHotfixRouter);
