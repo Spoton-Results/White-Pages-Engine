@@ -57,7 +57,7 @@ async function getPublishedPage(slug: string) {
           OR lower(settings->>'publicDomain') IN ($1, $2)
           OR lower(settings->>'legacyParentDomain') = $2
      )
-     SELECT p.*, w.domain, w.settings, w.name AS website_name
+     SELECT p.*, w.domain, w.settings, COALESCE(w.settings->>'brandName', w.settings->>'siteName', w.domain) AS website_name
      FROM pages p
      JOIN spoton_websites w ON p.website_id::text = w.id::text
      WHERE p.slug = $3
