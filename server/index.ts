@@ -20,6 +20,7 @@ import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import websiteDomainEditRouter from "./routes/website-domain-edit";
 import spotonPagesHotfixRouter from "./routes/spoton-pages-hotfix";
 import publishedPagesSearchRouter from "./routes/published-pages-search";
+import pageIntelligenceRouter from "./routes/page-intelligence";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -50,6 +51,7 @@ app.use(sessionMiddleware());
 app.use(websiteDomainEditRouter);
 app.use(publishedPagesSearchRouter);
 app.use(spotonPagesHotfixRouter);
+app.use(pageIntelligenceRouter);
 app.use(legacyPublicUrlRedirectRouter);
 app.use(clientDomainsRouter);
 app.use(publicWebsiteDomainsRouter);
