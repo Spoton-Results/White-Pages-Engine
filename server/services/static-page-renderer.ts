@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { pool } from "../db";
 import { isR2Configured, savePageHtml } from "./r2";
+import { buildEnhancedPublicPageHtml, getPublicInternalLinks } from "./public-page-enhancements";
 
 export interface RenderPublishedPageToR2Options {
   pageId?: string;
@@ -45,15 +46,6 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function escapeHtml(value: string | null | undefined): string {
-  return (value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function normalizeSlug(slug: string): string {
   return slug.replace(/^\/+/, "").replace(/\/+$/, "");
 }
@@ -70,29 +62,27 @@ function isFullHtmlDocument(contentHtml: string): boolean {
   return trimmed.startsWith("<!doctype") || trimmed.startsWith("<html");
 }
 
-function buildStaticHtml(row: any): string {
+async function buildStaticHtml(row: any): Promise<string> {
   const contentHtml = row.content_html ?? "";
   const canonical = buildCanonicalUrl(row.domain, row.slug, row.canonical_url);
 
-  if (isFullHtmlDocument(contentHtml)) {
+  if (isFullHtmlDocument(contentHtml) && contentHtml.includes("nexus-demo")) {
     return contentHtml;
   }
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(row.title)}</title>
-  ${row.meta_description ? `<meta name="description" content="${escapeHtml(row.meta_description)}">` : ""}
-  <link rel="canonical" href="${escapeHtml(canonical)}">
-</head>
-<body>
-  <main>
-    ${contentHtml}
-  </main>
-</body>
-</html>`;
+  const links = await getPublicInternalLinks(row.id, row.website_id);
+
+  return buildEnhancedPublicPageHtml({
+    page: row,
+    website: {
+      ...row,
+      name: row.website_name,
+      settings: row.settings || {},
+    },
+    contentHtml,
+    canonicalUrl: canonical,
+    links,
+  });
 }
 
 async function getPublishedPage(options: RenderPublishedPageToR2Options): Promise<any | null> {
@@ -132,7 +122,15 @@ async function getPublishedPage(options: RenderPublishedPageToR2Options): Promis
       p.rendered_at,
       p.status,
       p.noindex,
+      p.service_id,
+      p.location_id,
+      p.page_type,
+      p.tier,
+      p.quality_score,
+      p.published_at,
       w.domain,
+      w.name AS website_name,
+      w.settings,
       pv.content_html
     FROM pages p
     JOIN websites w ON w.id = p.website_id
@@ -188,7 +186,7 @@ export async function renderPublishedPageToR2(
     };
   }
 
-  const html = buildStaticHtml(row);
+  const html = await buildStaticHtml(row);
   const contentHash = sha256(html);
 
   if (!options.force && row.r2_key && row.content_hash === contentHash) {
