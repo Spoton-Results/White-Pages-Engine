@@ -43,6 +43,7 @@ import SearchConsolePage from "@/pages/search-console";
 import BankHealthPage from "@/pages/bank-health";
 import HubPagesPage from "@/pages/hub-pages";
 import InternalLinksPage from "@/pages/internal-links";
+import PageIntelligencePage from "@/pages/page-intelligence";
 import IntentBuildPage from "@/pages/intent-build-v2";
 import ActionReviewPage from "@/pages/action-review";
 import ClientDomainsPage from "@/pages/client-domains";
@@ -122,6 +123,7 @@ function Router() {
       <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
       <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
       <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
+      <Route path="/page-intelligence"><AuthGuard><PageIntelligencePage /></AuthGuard></Route>
       <Route path="/intent-build"><AuthGuard><IntentBuildPage /></AuthGuard></Route>
       <Route path="/action-review"><AuthGuard><ActionReviewPage /></AuthGuard></Route>
       <Route path="/client-domains"><AuthGuard><ClientDomainsPage /></AuthGuard></Route>
