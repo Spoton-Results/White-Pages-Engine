@@ -21,6 +21,32 @@ function isSkippablePath(path: string) {
     || path === "/favicon.ico";
 }
 
+function leadStatusHtml(req: Request) {
+  const lead = String(req.query.lead || "").toLowerCase();
+  if (lead === "success") {
+    return `<div class="nexus-alert nexus-alert-success" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#ecfdf5;border:1px solid #86efac;color:#166534">Thank you — your request was received. SpotOn Results will follow up shortly.</div>`;
+  }
+  if (lead === "error") {
+    return `<div class="nexus-alert nexus-alert-error" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">The form could not be submitted. Please try again or use the phone/main website link.</div>`;
+  }
+  return "";
+}
+
+function socialMetaHtml(page: any, canonical: string) {
+  const title = String(page.title || page.h1 || page.slug || "SpotOn Results");
+  const desc = String(page.meta_description || page.metaDescription || "").slice(0, 220);
+  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+  return `<meta property="og:type" content="website"/><meta property="og:url" content="${esc(canonical)}"/><meta property="og:title" content="${esc(title)}"/><meta property="og:description" content="${esc(desc)}"/><meta name="twitter:card" content="summary"/><meta name="twitter:title" content="${esc(title)}"/><meta name="twitter:description" content="${esc(desc)}"/>`;
+}
+
+function enhanceLiveHtml(html: string, page: any, canonical: string, req: Request) {
+  let out = html;
+  const status = leadStatusHtml(req);
+  if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}</head>`);
+  return out;
+}
+
 async function getPublishedPage(slug: string) {
   const pageResult = await pool.query(
     `WITH spoton_websites AS (
@@ -109,7 +135,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
 
     res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
 
-    return res.type("html").send(buildEnhancedPublicPageHtml({
+    const html = buildEnhancedPublicPageHtml({
       page,
       website: {
         ...page,
@@ -118,7 +144,9 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
       contentHtml: content,
       canonicalUrl: canonical,
       links,
-    }));
+    });
+
+    return res.type("html").send(enhanceLiveHtml(html, page, canonical, req));
   } catch (err) {
     return next(err);
   }
