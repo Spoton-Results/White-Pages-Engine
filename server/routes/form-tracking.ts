@@ -17,6 +17,33 @@ function setCachedLeads(key: string, data: unknown) {
   leadsCache.set(key, { data, exp: Date.now() + 30_000 });
 }
 
+function wantsHtmlRedirect(req: any) {
+  const accept = String(req.headers.accept || "");
+  const contentType = String(req.headers["content-type"] || "");
+  return contentType.includes("application/x-www-form-urlencoded") || accept.includes("text/html");
+}
+
+function safeReturnUrl(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (!/^https?:$/.test(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function redirectWithStatus(res: any, sourcePageUrl: unknown, status: "success" | "error") {
+  const fallback = safeReturnUrl(sourcePageUrl);
+  if (!fallback) return res.status(status === "success" ? 200 : 400).send(status === "success" ? "Thank you. Your request was received." : "Unable to submit this form.");
+  const url = new URL(fallback);
+  url.searchParams.set("lead", status);
+  url.hash = "quote";
+  return res.redirect(303, url.toString());
+}
+
 // POST /api/form-tracking/submit  (public — called from public-facing page forms)
 router.post("/submit", async (req, res) => {
   try {
@@ -35,6 +62,7 @@ router.post("/submit", async (req, res) => {
     } = req.body;
 
     if (!pageId || !websiteId || !serviceId || !submitterEmail) {
+      if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "error");
       return res.status(400).json({ error: "Missing required fields: pageId, serviceId, websiteId, submitterEmail" });
     }
 
@@ -44,17 +72,19 @@ router.post("/submit", async (req, res) => {
         websiteId,
         pageId,
         serviceId,
-        locationId: locationId ?? null,
-        formName: formName ?? "Contact Form",
-        submitterName: submitterName ?? null,
+        locationId: locationId || null,
+        formName: formName || "Contact Form",
+        submitterName: submitterName || null,
         submitterEmail,
-        submitterPhone: submitterPhone ?? null,
-        message: message ?? null,
-        sourcePageUrl: sourcePageUrl ?? null,
-        sourcePageTitle: sourcePageTitle ?? null,
+        submitterPhone: submitterPhone || null,
+        message: message || null,
+        sourcePageUrl: sourcePageUrl || null,
+        sourcePageTitle: sourcePageTitle || null,
         formTimestamp: new Date(),
       })
       .returning();
+
+    if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "success");
 
     return res.json({
       success: true,
@@ -63,6 +93,7 @@ router.post("/submit", async (req, res) => {
     });
   } catch (error) {
     console.error("Error recording form:", error);
+    if (wantsHtmlRedirect(req)) return redirectWithStatus(res, req.body?.sourcePageUrl, "error");
     return res.status(500).json({ error: "Failed to submit form" });
   }
 });
