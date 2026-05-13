@@ -14,7 +14,7 @@ function requestHost(req: Request) {
 }
 
 function isSkippablePath(path: string) {
-  return path.startsWith("/api")
+  return path === "/api" || path.startsWith("/api/")
     || path.startsWith("/assets")
     || path.startsWith("/@vite")
     || path.startsWith("/src/")
