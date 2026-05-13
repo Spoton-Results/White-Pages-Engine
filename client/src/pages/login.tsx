@@ -43,7 +43,7 @@ export default function Login() {
             <Input
               id="email"
               type="email"
-              placeholder="admin@nexus.io"
+              placeholder="Email address"
               data-testid="input-email"
               {...register("email", { required: true })}
             />
@@ -53,7 +53,7 @@ export default function Login() {
             <Input
               id="password"
               type="password"
-              placeholder="••••••••"
+              placeholder="Password"
               data-testid="input-password"
               {...register("password", { required: true })}
             />
@@ -70,10 +70,6 @@ export default function Login() {
               "Sign In"
             )}
           </Button>
-
-          <div className="text-center text-xs text-muted-foreground bg-muted/50 rounded-md p-2">
-            Demo: <span className="font-mono">admin@nexus.io</span> / <span className="font-mono">admin123</span>
-          </div>
         </form>
       </div>
     </div>
