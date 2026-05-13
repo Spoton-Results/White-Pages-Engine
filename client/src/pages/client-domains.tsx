@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { api } from "@/lib/api";
@@ -39,11 +39,18 @@ function statusVariant(status?: string) {
   return "secondary" as const;
 }
 
+function cnameName(hostname: string) {
+  const host = normalizeHost(hostname);
+  if (!host) return "pages";
+  return host.split(".")[0] || "pages";
+}
+
 export default function ClientDomainsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [websiteId, setWebsiteId] = useState<string>("");
   const [hostname, setHostname] = useState("");
+  const [hostnameTouched, setHostnameTouched] = useState(false);
 
   const { data: websites = [], isLoading: websitesLoading } = useQuery({
     queryKey: ["/api/websites"],
@@ -51,6 +58,13 @@ export default function ClientDomainsPage() {
   });
 
   const selectedWebsite = useMemo(() => (websites as Website[]).find((w) => w.id === websiteId), [websites, websiteId]);
+  const selectedWebsiteHost = selectedWebsite?.domain ? normalizeHost(selectedWebsite.domain) : "";
+  const effectiveHostname = normalizeHost(hostname || selectedWebsiteHost);
+
+  useEffect(() => {
+    if (!selectedWebsiteHost) return;
+    if (!hostnameTouched) setHostname(selectedWebsiteHost);
+  }, [selectedWebsiteHost, hostnameTouched]);
 
   const { data, isLoading: domainsLoading } = useQuery({
     queryKey: ["/api/websites", websiteId, "client-domains"],
@@ -63,7 +77,7 @@ export default function ClientDomainsPage() {
   const addDomain = useMutation({
     mutationFn: (host: string) => api.post(`/api/websites/${websiteId}/client-domains`, { hostname: host }),
     onSuccess: () => {
-      setHostname("");
+      setHostnameTouched(false);
       queryClient.invalidateQueries({ queryKey: ["/api/websites", websiteId, "client-domains"] });
       toast({ title: "Client domain added", description: "Cloudflare registration was attempted and the DNS instructions are ready." });
     },
@@ -95,7 +109,7 @@ export default function ClientDomainsPage() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const host = normalizeHost(hostname);
+    const host = normalizeHost(effectiveHostname);
     if (!websiteId) return toast({ title: "Select a website first", variant: "destructive" });
     if (!host || !host.includes(".")) return toast({ title: "Enter a valid hostname", description: "Example: pages.clientdomain.com", variant: "destructive" });
     addDomain.mutate(host);
@@ -117,7 +131,7 @@ export default function ClientDomainsPage() {
             <CardDescription>This is the website record that the client subdomain should serve.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Select value={websiteId} onValueChange={setWebsiteId} disabled={websitesLoading}>
+            <Select value={websiteId} onValueChange={(value) => { setWebsiteId(value); setHostnameTouched(false); }} disabled={websitesLoading}>
               <SelectTrigger className="max-w-xl"><SelectValue placeholder={websitesLoading ? "Loading websites..." : "Choose a website"} /></SelectTrigger>
               <SelectContent>
                 {(websites as Website[]).map((site) => <SelectItem key={site.id} value={site.id}>{site.name} — {site.domain}</SelectItem>)}
@@ -130,13 +144,14 @@ export default function ClientDomainsPage() {
         <Card>
           <CardHeader>
             <CardTitle>2. Add Client Subdomain</CardTitle>
-            <CardDescription>Use a subdomain. Do not point the client root domain unless Nexus is replacing their whole website.</CardDescription>
+            <CardDescription>The hostname is auto-filled from the selected Website domain. Only edit it if you are intentionally attaching a different hostname.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={submit} className="grid gap-3 md:grid-cols-[1fr_auto]">
               <div className="space-y-2">
                 <Label htmlFor="hostname">Client hostname</Label>
-                <Input id="hostname" value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder="pages.clientdomain.com" disabled={!websiteId || addDomain.isPending} />
+                <Input id="hostname" value={hostname} onChange={(e) => { setHostnameTouched(true); setHostname(e.target.value); }} placeholder={selectedWebsiteHost || "pages.clientdomain.com"} disabled={!websiteId || addDomain.isPending} />
+                {selectedWebsiteHost && <p className="text-xs text-muted-foreground">Default from selected website: <span className="font-mono">{selectedWebsiteHost}</span></p>}
               </div>
               <Button type="submit" className="md:self-end" disabled={!websiteId || addDomain.isPending}>{addDomain.isPending ? <Loader2 className="size-4 animate-spin mr-2" /> : null}Add Domain</Button>
             </form>
@@ -151,10 +166,10 @@ export default function ClientDomainsPage() {
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Type</div><div className="font-mono font-semibold">CNAME</div></div>
-              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Name</div><div className="font-mono font-semibold">pages</div></div>
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Name</div><div className="font-mono font-semibold">{cnameName(effectiveHostname)}</div></div>
               <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Target</div><div className="font-mono font-semibold break-all">{dnsTarget}</div></div>
             </div>
-            <Button variant="outline" size="sm" onClick={() => copy(`Type: CNAME\nName: pages\nTarget: ${dnsTarget}`, "DNS instructions copied")}><Clipboard className="size-4 mr-2" />Copy DNS Instructions</Button>
+            <Button variant="outline" size="sm" onClick={() => copy(`Type: CNAME\nName: ${cnameName(effectiveHostname)}\nTarget: ${dnsTarget}`, "DNS instructions copied")}><Clipboard className="size-4 mr-2" />Copy DNS Instructions</Button>
           </CardContent>
         </Card>
 
