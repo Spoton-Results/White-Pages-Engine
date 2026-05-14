@@ -36,7 +36,7 @@ function escapeHtml(value: unknown) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -114,13 +114,13 @@ async function serveRobots(ctx: any, host: string, res: Response) {
 }
 
 async function serveSitemap(ctx: any, host: string, slug: string, res: Response) {
-  const sitemapSlug = slug || "sitemap.xml";
+  const sitemapSlug = (slug || "sitemap.xml").replace(/\.xml$/i, "");
   const result = await pool.query(
     `SELECT slug, xml_content FROM sitemaps WHERE website_id::text = $1::text AND slug = $2 LIMIT 1`,
     [ctx.website_id, sitemapSlug],
   );
   let xml = result.rows[0]?.xml_content;
-  if (!xml && sitemapSlug === "sitemap.xml") {
+  if (!xml && sitemapSlug === "sitemap") {
     const latest = await pool.query(
       `SELECT slug, xml_content FROM sitemaps
        WHERE website_id::text = $1::text
