@@ -5,6 +5,8 @@ import { runBulkBackgroundJob, type BulkJobSettings } from "../services/bulk-bac
 
 const router = Router();
 
+type AnyJob = Record<string, any>;
+
 function normalizeProgress(services: string[]) {
   return services.map((service) => ({
     service,
@@ -35,6 +37,72 @@ function normalizeSettings(body: any): BulkJobSettings {
     progress: normalizeProgress(services),
   };
 }
+
+function progressTotals(settings: any) {
+  const progress = Array.isArray(settings?.progress) ? settings.progress : [];
+  const created = progress.reduce((sum: number, p: any) => sum + (p.created ?? 0) + (p.updated ?? 0), 0);
+  const skipped = progress.reduce((sum: number, p: any) => sum + (p.skipped ?? 0), 0);
+  const errors = progress.reduce((sum: number, p: any) => sum + (p.errors ?? 0), 0);
+  return { created, skipped, errors, processed: created + skipped + errors };
+}
+
+function mapJobForDashboard(job: AnyJob) {
+  const settings = job.settings || {};
+  const totals = progressTotals(settings);
+  const completedPages = job.completedPages ?? job.completed_pages ?? totals.created ?? 0;
+  const failedPages = job.failedPages ?? job.failed_pages ?? totals.errors ?? 0;
+  const processedPages = Math.max(
+    job.processedPages ?? job.processed_pages ?? 0,
+    totals.processed,
+    completedPages + failedPages,
+  );
+
+  return {
+    ...job,
+    name: job.name || job.jobName || `Bulk generation — ${(settings.services || []).length || 0} service(s)`,
+    websiteId: job.websiteId ?? job.website_id,
+    blueprintId: job.blueprintId ?? job.blueprint_id,
+    totalPages: job.totalPages ?? job.total_pages ?? 0,
+    completedPages,
+    failedPages,
+    processedPages,
+    passedPages: job.passedPages ?? job.passed_pages ?? completedPages,
+    createdAt: job.createdAt ?? job.created_at,
+    startedAt: job.startedAt ?? job.started_at,
+    completedAt: job.completedAt ?? job.completed_at,
+    errorLog: job.errorLog ?? job.error_log ?? [],
+  };
+}
+
+router.get("/api/jobs", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const websiteId = typeof req.query.websiteId === "string" ? req.query.websiteId : undefined;
+    const jobs = await storage.getGenerationJobs(websiteId);
+    return res.json(jobs.map((job: AnyJob) => mapJobForDashboard(job)));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/api/jobs/:jobId", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await storage.getGenerationJob(req.params.jobId);
+    if (!job) return res.status(404).json({ error: "Generation job not found." });
+    return res.json(mapJobForDashboard(job as AnyJob));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post("/api/jobs/:jobId/cancel", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await storage.updateGenerationJob(req.params.jobId, { status: "cancelled" as any, completedAt: new Date() } as any);
+    if (!job) return res.status(404).json({ error: "Generation job not found." });
+    return res.json(mapJobForDashboard(job as AnyJob));
+  } catch (error) {
+    return next(error);
+  }
+});
 
 router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
