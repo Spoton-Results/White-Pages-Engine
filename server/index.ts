@@ -22,6 +22,7 @@ import spotonPagesHotfixRouter from "./routes/spoton-pages-hotfix";
 import publicPagesEnhancedRouter from "./routes/public-pages-enhanced";
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 import pageIntelligenceRouter from "./routes/page-intelligence";
+import jobsRouter from "./routes/jobs";
 import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 import { sessionMiddleware } from "./auth";
 
@@ -50,6 +51,11 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 
+// Canonical job ownership lives here.
+// All /api/jobs/* routes must come from this router only.
+app.use(jobsRouter);
+
+// Feature-specific generators/workers
 app.use(bulkGenerateJobFastRouter);
 app.use(websiteDomainEditRouter);
 app.use(publishedPagesSearchRouter);
@@ -147,50 +153,7 @@ async function runBackgroundStartup() {
       exec(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS gsc_submitted_at TIMESTAMP, ADD COLUMN IF NOT EXISTS duplicate_flag BOOLEAN DEFAULT false, ADD COLUMN IF NOT EXISTS duplicate_of_slug VARCHAR(500), ADD COLUMN IF NOT EXISTS duplicate_similarity DECIMAL(5,4), ADD COLUMN IF NOT EXISTS trust_score INTEGER, ADD COLUMN IF NOT EXISTS evidence_score INTEGER, ADD COLUMN IF NOT EXISTS content_quality_score INTEGER`),
       exec(`ALTER TABLE websites ADD COLUMN IF NOT EXISTS protection_mode BOOLEAN DEFAULT false, ADD COLUMN IF NOT EXISTS protection_expires_at TIMESTAMP, ADD COLUMN IF NOT EXISTS warmup_day INTEGER DEFAULT 0, ADD COLUMN IF NOT EXISTS warmup_page_cap_override INTEGER`),
       exec(`ALTER TABLE onboarding_submissions ADD COLUMN IF NOT EXISTS governor_results JSONB, ADD COLUMN IF NOT EXISTS brand_input_score INTEGER, ADD COLUMN IF NOT EXISTS brand_input_result JSONB, ADD COLUMN IF NOT EXISTS gap_report JSONB`),
-      exec(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`),
-      exec(`CREATE TABLE IF NOT EXISTS client_domains (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        website_id TEXT NOT NULL,
-        account_id TEXT,
-        hostname TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL DEFAULT 'pending_dns',
-        cloudflare_hostname_id TEXT,
-        ownership_txt_name TEXT,
-        ownership_txt_value TEXT,
-        ssl_status TEXT,
-        error TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW(),
-        verified_at TIMESTAMP
-      )`),
-      exec(`CREATE INDEX IF NOT EXISTS idx_client_domains_website ON client_domains(website_id)`),
-      exec(`CREATE INDEX IF NOT EXISTS idx_client_domains_hostname ON client_domains(hostname)`),
-      exec(`CREATE TABLE IF NOT EXISTS fallback_hit_logs (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        website_id TEXT NOT NULL,
-        slug TEXT NOT NULL,
-        hit_count INTEGER NOT NULL DEFAULT 1,
-        first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        promoted BOOLEAN NOT NULL DEFAULT false,
-        promoted_at TIMESTAMP
-      )`),
-      exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_hit_logs_site_slug_unique ON fallback_hit_logs(website_id, slug)`),
-      exec(`CREATE INDEX IF NOT EXISTS idx_fallback_hit_logs_site ON fallback_hit_logs(website_id)`),
-      exec(`CREATE TABLE IF NOT EXISTS client_report_links (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        account_id TEXT NOT NULL,
-        token TEXT NOT NULL UNIQUE,
-        report_type TEXT NOT NULL DEFAULT 'monthly_visibility',
-        expires_at TIMESTAMP,
-        revoked_at TIMESTAMP,
-        created_by TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        last_viewed_at TIMESTAMP,
-        view_count INTEGER DEFAULT 0
-      )`),
-      exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_token ON client_report_links(token)`),
-      exec(`CREATE INDEX IF NOT EXISTS idx_client_report_links_account ON client_report_links(account_id)`),
+      exec(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_seo_spend NUMERIC(10,2) DEFAULT 0`)
     ]);
     await repairSpotonResultsPagesDomain(pgPool);
     console.log("[startup] Schema migrations ensured.");
@@ -218,13 +181,3 @@ async function runBackgroundStartup() {
 
   if (process.env.NODE_ENV === "production") serveStatic(app);
   else { const { setupVite } = await import("./vite"); await setupVite(httpServer, app); }
-
-  const port = parseInt(process.env.PORT || "5000", 10);
-  const host = process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
-  const listenOptions = process.env.NODE_ENV === "production" ? { port, host, reusePort: true } : { port, host };
-
-  httpServer.listen(listenOptions, () => {
-    log(`serving on http://${host}:${port}`);
-    setImmediate(() => { runBackgroundStartup().catch((err) => { if (isDatabaseRecoveryError(err)) { console.warn("[startup] Database recovery during background startup."); return; } console.error("[startup] Background startup crashed:", err); }); });
-  });
-})();
