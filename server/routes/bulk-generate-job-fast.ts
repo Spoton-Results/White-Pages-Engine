@@ -1,11 +1,17 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../auth";
+import { pool } from "../db";
 import * as storage from "../storage";
 import { runBulkBackgroundJob, type BulkJobSettings } from "../services/bulk-background";
+import { JOB_STATUS } from "../../shared/job-status";
 
 const router = Router();
 
 type AnyJob = Record<string, any>;
+const DEAD_JOB_MINUTES = Number(process.env.DEAD_JOB_MINUTES || 30);
+const DEAD_JOB_INTERVAL_MS = Number(process.env.DEAD_JOB_INTERVAL_MS || 5 * 60 * 1000);
+let deadJobRecoveryStarted = false;
+let deadJobRecoveryRunning = false;
 
 function normalizeProgress(services: string[]) {
   return services.map((service) => ({
@@ -75,6 +81,58 @@ function mapJobForDashboard(job: AnyJob) {
   };
 }
 
+async function recoverDeadGenerationJobs(minutes = DEAD_JOB_MINUTES) {
+  const thresholdMinutes = Math.max(5, Number(minutes || DEAD_JOB_MINUTES));
+  const reason = `Auto-recovered dead job: active longer than ${thresholdMinutes} minutes without terminal status.`;
+
+  const result = await pool.query(
+    `UPDATE generation_jobs
+     SET status = $1,
+         completed_at = COALESCE(completed_at, NOW()),
+         error_log = COALESCE(error_log, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+           'type', 'dead_job_recovery',
+           'message', $2,
+           'recoveredAt', NOW()
+         )),
+         settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object(
+           'fatalError', $2,
+           'deadJobRecoveredAt', NOW(),
+           'deadJobThresholdMinutes', $3
+         )
+     WHERE status IN ($4, $5, $6)
+       AND COALESCE(started_at, created_at) < NOW() - ($3::text || ' minutes')::interval
+     RETURNING *`,
+    [JOB_STATUS.FAILED, reason, thresholdMinutes, JOB_STATUS.PENDING, JOB_STATUS.QUEUED, JOB_STATUS.RUNNING],
+  );
+
+  return result.rows.map((job: AnyJob) => mapJobForDashboard(job));
+}
+
+function startDeadJobRecoveryLoop() {
+  if (deadJobRecoveryStarted || process.env.DISABLE_DEAD_JOB_RECOVERY === "true") return;
+  deadJobRecoveryStarted = true;
+
+  const run = async () => {
+    if (deadJobRecoveryRunning) return;
+    deadJobRecoveryRunning = true;
+    try {
+      const recovered = await recoverDeadGenerationJobs();
+      if (recovered.length > 0) {
+        console.warn(`[dead-job-recovery] Recovered ${recovered.length} stuck generation job(s).`);
+      }
+    } catch (error) {
+      console.error("[dead-job-recovery] Failed to recover dead jobs", error);
+    } finally {
+      deadJobRecoveryRunning = false;
+    }
+  };
+
+  setTimeout(run, 15_000).unref?.();
+  setInterval(run, DEAD_JOB_INTERVAL_MS).unref?.();
+}
+
+startDeadJobRecoveryLoop();
+
 router.get("/api/jobs", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const websiteId = typeof req.query.websiteId === "string" ? req.query.websiteId : undefined;
@@ -95,9 +153,19 @@ router.get("/api/jobs/:jobId", requireAuth, async (req: Request, res: Response, 
   }
 });
 
+router.post("/api/jobs/recover-dead", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const minutes = Number(req.body?.minutes || req.query.minutes || DEAD_JOB_MINUTES);
+    const recovered = await recoverDeadGenerationJobs(minutes);
+    return res.json({ recovered: recovered.length, jobs: recovered });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.post("/api/jobs/:jobId/cancel", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const job = await storage.updateGenerationJob(req.params.jobId, { status: "cancelled" as any, completedAt: new Date() } as any);
+    const job = await storage.updateGenerationJob(req.params.jobId, { status: JOB_STATUS.CANCELLED as any, completedAt: new Date() } as any);
     if (!job) return res.status(404).json({ error: "Generation job not found." });
     return res.json(mapJobForDashboard(job as AnyJob));
   } catch (error) {
@@ -145,7 +213,7 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
       websiteId,
       blueprintId: settings.blueprintId || null,
       name: jobName,
-      status: "pending",
+      status: JOB_STATUS.PENDING,
       totalPages: estimatedTotal,
       processedPages: 0,
       passedPages: 0,
@@ -161,7 +229,7 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
 
     res.status(202).json({
       jobId: job.id,
-      status: "pending",
+      status: JOB_STATUS.PENDING,
       message: "Bulk generation started in background.",
     });
 
@@ -171,7 +239,7 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
       } catch (error: any) {
         console.error(`[bulk-generate-job-fast] Job ${job.id} failed`, error);
         await storage.updateGenerationJob(job.id, {
-          status: "failed" as any,
+          status: JOB_STATUS.FAILED as any,
           completedAt: new Date(),
           settings: {
             ...(settings as any),
