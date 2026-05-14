@@ -60,6 +60,7 @@ function mapJobForDashboard(job: AnyJob) {
   return {
     ...job,
     name: job.name || job.jobName || `Bulk generation — ${(settings.services || []).length || 0} service(s)`,
+    accountId: job.accountId ?? job.account_id,
     websiteId: job.websiteId ?? job.website_id,
     blueprintId: job.blueprintId ?? job.blueprint_id,
     totalPages: job.totalPages ?? job.total_pages ?? 0,
@@ -121,6 +122,14 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
       return res.status(400).json({ error: "Select at least one city." });
     }
 
+    const website = await storage.getWebsite(websiteId);
+    if (!website) {
+      return res.status(404).json({ error: "Website not found." });
+    }
+    if (!website.accountId) {
+      return res.status(400).json({ error: "Website is missing an accountId; cannot create generation job." });
+    }
+
     const targetCount = settings.mode === "specific_states"
       ? settings.states?.length || 0
       : settings.mode === "specific_cities"
@@ -129,20 +138,30 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
 
     const clusterCount = settings.queryClusterIds?.length || 1;
     const estimatedTotal = settings.services.length * targetCount * clusterCount;
+    const jobName = `Bulk generation — ${settings.services.length} service(s) × ${targetCount} target(s)`;
 
     const job = await storage.createGenerationJob({
+      accountId: website.accountId,
       websiteId,
       blueprintId: settings.blueprintId || null,
-      status: "queued",
+      name: jobName,
+      status: "pending",
       totalPages: estimatedTotal,
-      completedPages: 0,
+      processedPages: 0,
+      passedPages: 0,
       failedPages: 0,
-      settings: settings as any,
+      errorLog: [],
+      settings: {
+        ...(settings as any),
+        clusterCount,
+        targetCount,
+        jobType: "bulk-background",
+      } as any,
     } as any);
 
     res.status(202).json({
       jobId: job.id,
-      status: "queued",
+      status: "pending",
       message: "Bulk generation started in background.",
     });
 
@@ -156,6 +175,9 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
           completedAt: new Date(),
           settings: {
             ...(settings as any),
+            clusterCount,
+            targetCount,
+            jobType: "bulk-background",
             fatalError: error?.message || "Unknown bulk generation failure",
           } as any,
         } as any).catch(() => {});
