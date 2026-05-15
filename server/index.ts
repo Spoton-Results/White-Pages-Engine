@@ -100,7 +100,7 @@ app.use((req, res, next) => {
     }
   });
   next();
-}
+});
 
 async function repairSpotonResultsPagesDomain(pgPool: any) {
   const rootDomain = "spotonresults.com";
