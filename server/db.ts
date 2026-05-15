@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import * as schema from "@shared/schema";
+import * as coreSchema from "@shared/schema";
+import * as contentArchitectureSchema from "@shared/content-architecture-schema";
 
 const { Pool } = pg;
 
@@ -16,4 +17,10 @@ export const pool = new Pool({
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
+
+export const schema = {
+  ...coreSchema,
+  ...contentArchitectureSchema,
+};
+
 export const db = drizzle(pool, { schema });
