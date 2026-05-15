@@ -1,7 +1,5 @@
-import { generateFirstPass, type PageContext } from "./claude";
 import { savePageArtifact, saveLog, isR2Configured } from "./r2";
 import * as db from "../storage";
-import { logApiUsage } from "./usage-logger";
 import type { Blueprint, Location, Service, Industry, Website, BrandProfile, GenerationJob } from "@shared/schema";
 
 export interface GenerationTask {
@@ -13,6 +11,32 @@ export interface GenerationTask {
   jobName: string;
   accountId: string;
 }
+
+type BankSnippet = { section: string; snippet: string };
+
+type DeterministicPage = {
+  title: string;
+  metaDescription: string;
+  h1: string;
+  slug: string;
+  contentHtml: string;
+  wordCount: number;
+  publishScore: number;
+  localSignalScore: number;
+  promptTokens: number;
+  completionTokens: number;
+  generationMode: "deterministic_bank_assembly";
+};
+
+type AssemblyContext = {
+  blueprint: Blueprint;
+  website: Website;
+  brand?: BrandProfile;
+  location?: Location;
+  service?: Service;
+  industry?: Industry;
+  bankSnippets?: BankSnippet[];
+};
 
 function sanitizePageSlug(value: string): string {
   return String(value || "")
@@ -27,19 +51,7 @@ function sanitizePageSlug(value: string): string {
     .replace(/-{2,}/g, "-");
 }
 
-function renderTemplate(template: string | undefined, ctx: PageContext): string {
-  return String(template || "")
-    .replace(/\{location\}/g, ctx.locationName || "")
-    .replace(/\{state\}/g, ctx.locationState || "")
-    .replace(/\{service\}/g, ctx.serviceName || "")
-    .replace(/\{industry\}/g, ctx.industryName || "")
-    .replace(/\{brand\}/g, ctx.brandName || "")
-    .replace(/\{keyword\}/g, ctx.primaryKeyword || "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function escapeHtml(value: string | undefined): string {
+function escapeHtml(value: string | undefined | null): string {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -48,65 +60,166 @@ function escapeHtml(value: string | undefined): string {
     .replace(/'/g, "&#39;");
 }
 
+function stripHtml(html: string): string {
+  return String(html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function countWordsInHtml(html: string): number {
-  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const text = stripHtml(html);
   return text ? text.split(" ").filter(Boolean).length : 0;
 }
 
-function buildFallbackGeneratedPage(
-  ctx: PageContext,
-  reason: string,
-): Awaited<ReturnType<typeof generateFirstPass>> {
-  const location = [ctx.locationName, ctx.locationState].filter(Boolean).join(", ") || "your service area";
-  const service = ctx.serviceName || ctx.industryName || ctx.primaryKeyword || "business services";
-  const brand = ctx.brandName || "our team";
-  const title = renderTemplate(ctx.titleTemplate, ctx) || `${service} in ${location}`;
-  const h1 = renderTemplate(ctx.h1Template, ctx) || `${service} in ${location}`;
-  const metaDescription = renderTemplate(ctx.metaDescTemplate, ctx) || `${brand} helps businesses in ${location} evaluate ${service}, compare options, and take the next step with realistic expectations.`;
-  const slug = sanitizePageSlug(renderTemplate(ctx.slugTemplate, ctx) || `${service}-${ctx.locationName || ctx.locationState || "service-area"}`);
-  const description = ctx.serviceDescription || ctx.brandDescription || `${service} helps businesses improve operations, reduce friction, and choose a practical solution without relying on generic one-size-fits-all advice.`;
-  const snippets = ctx.bankSnippets?.slice(0, 4).map((s) => `<section><h2>${escapeHtml(s.section.replace(/_/g, " "))}</h2>${s.snippet}</section>`).join("\n") || "";
+function locationLabel(location?: Location): string {
+  if (!location) return "the service area";
+  const stateName = location.stateName || location.stateCode || "";
+  const type = String((location as any).type || "").toLowerCase();
+  if (type === "state") return location.name;
+  if (stateName && location.name.toLowerCase() !== stateName.toLowerCase()) {
+    return `${location.name}, ${stateName}`;
+  }
+  return location.name;
+}
+
+function replaceTemplateVars(value: string | undefined | null, ctx: AssemblyContext): string {
+  const brandName = ctx.brand?.name || ctx.website.name || "this business";
+  const serviceName = ctx.service?.name || ctx.industry?.name || "business services";
+  const industryName = ctx.industry?.name || ctx.website.primaryIndustry || serviceName;
+  const locName = ctx.location?.name || "";
+  const stateName = ctx.location?.stateName || ctx.location?.stateCode || "";
+  const stateAbbr = ctx.location?.stateCode || stateName;
+  const population = typeof ctx.location?.population === "number" ? ctx.location.population : undefined;
+  const businessCount = population ? Math.max(25, Math.round(population / 80)).toLocaleString() : "local";
+  const culture = stateName ? `${stateName} business environment` : "local business environment";
+
+  return String(value || "")
+    .replace(/\{location\}/g, locName)
+    .replace(/\{state\}/g, stateName)
+    .replace(/\{service\}/g, serviceName)
+    .replace(/\{industry\}/g, industryName)
+    .replace(/\{brand\}/g, brandName)
+    .replace(/\{keyword\}/g, ctx.service?.keywords?.[0] || serviceName)
+    .replace(/{{\s*service\s*}}/g, serviceName)
+    .replace(/{{\s*city\s*}}/g, locName)
+    .replace(/{{\s*state\s*}}/g, stateName)
+    .replace(/{{\s*state_abbr\s*}}/g, stateAbbr)
+    .replace(/{{\s*brand\s*}}/g, brandName)
+    .replace(/{{\s*landmark\s*}}/g, locName || stateName || "the local market")
+    .replace(/{{\s*business_culture\s*}}/g, culture)
+    .replace(/{{\s*business_count\s*}}/g, businessCount)
+    .replace(/{{\s*payment_regulations\s*}}/g, stateName ? `${stateName} payment and business requirements` : "applicable payment and business requirements")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderSnippet(snippet: BankSnippet, ctx: AssemblyContext): string {
+  return replaceTemplateVars(snippet.snippet, ctx)
+    .replace(/{{\s*[\w.-]+\s*}}/g, "")
+    .trim();
+}
+
+function sectionTitle(section: string): string {
+  const clean = section.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function defaultTitle(ctx: AssemblyContext): string {
+  const service = ctx.service?.name || ctx.industry?.name || "Business Services";
+  const loc = locationLabel(ctx.location);
+  return `${service} in ${loc}`;
+}
+
+function defaultMeta(ctx: AssemblyContext): string {
+  const brand = ctx.brand?.name || ctx.website.name;
+  const service = ctx.service?.name || ctx.industry?.name || "business services";
+  const loc = locationLabel(ctx.location);
+  return `${brand} helps businesses in ${loc} compare ${service}, understand setup options, and choose a practical next step.`;
+}
+
+function buildDeterministicPage(ctx: AssemblyContext): DeterministicPage {
+  const brandName = ctx.brand?.name || ctx.website.name || "this business";
+  const serviceName = ctx.service?.name || ctx.industry?.name || "business services";
+  const loc = locationLabel(ctx.location);
+  const serviceDescription = ctx.service?.description || ctx.brand?.description || `${serviceName} support for businesses that need a practical, reliable setup.`;
+  const title = replaceTemplateVars(ctx.blueprint.titleTemplate, ctx) || defaultTitle(ctx);
+  const h1 = replaceTemplateVars(ctx.blueprint.h1Template, ctx) || title;
+  const metaDescription = replaceTemplateVars(ctx.blueprint.metaDescTemplate, ctx) || defaultMeta(ctx);
+  const slugSource = replaceTemplateVars(ctx.blueprint.slugTemplate, ctx) || `${serviceName}-${ctx.location?.slug || ctx.location?.name || ctx.location?.stateCode || "service-area"}`;
+  const slug = sanitizePageSlug(slugSource);
+
+  const renderedSnippets = (ctx.bankSnippets || [])
+    .map(snippet => ({ ...snippet, html: renderSnippet(snippet, ctx) }))
+    .filter(snippet => stripHtml(snippet.html).length > 40);
+
+  const snippetSections = renderedSnippets.map(snippet => `
+  <section class="nexus-section nexus-section--${sanitizePageSlug(snippet.section)}">
+    <h2>${escapeHtml(sectionTitle(snippet.section))}</h2>
+    ${snippet.html}
+  </section>`).join("\n");
+
+  const hasBankContent = renderedSnippets.length >= 4;
+  const keywordList = Array.isArray(ctx.service?.keywords) && ctx.service!.keywords.length
+    ? ctx.service!.keywords.slice(0, 5)
+    : [serviceName];
+
+  const processSteps = Array.isArray((ctx.service?.metadata as any)?.processSteps)
+    ? ((ctx.service?.metadata as any).processSteps as string[]).filter(Boolean)
+    : [];
+  const processHtml = processSteps.length
+    ? `<ul>${processSteps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>`
+    : `<ul>
+        <li>Review the current business setup and goals.</li>
+        <li>Identify service requirements, constraints, and support needs.</li>
+        <li>Compare practical options before making changes.</li>
+        <li>Confirm the next step, timeline, and owner responsibilities.</li>
+      </ul>`;
 
   const contentHtml = `
-<article class="nexus-page nexus-page--fallback" data-generation-fallback="missing-content-section">
-  <section>
-    <h2>What ${escapeHtml(service)} means for businesses in ${escapeHtml(location)}</h2>
-    <p>${escapeHtml(description)}</p>
-    <p>For businesses in ${escapeHtml(location)}, the right approach usually depends on transaction volume, customer expectations, software requirements, reporting needs, and how much support the team needs after setup. This page gives a practical overview so a visitor can understand the service before starting a conversation.</p>
+<article class="nexus-page nexus-page--deterministic" data-generation-mode="deterministic_bank_assembly">
+  <header class="nexus-hero">
+    <h1>${escapeHtml(h1)}</h1>
+    <p>${escapeHtml(serviceDescription)}</p>
+  </header>
+
+  <section class="nexus-section nexus-section--overview">
+    <h2>What ${escapeHtml(serviceName)} means in ${escapeHtml(loc)}</h2>
+    <p>${escapeHtml(brandName)} helps businesses evaluate ${escapeHtml(serviceName)} with a focus on fit, implementation, reporting, and long-term usability. The right solution should support how the business already operates instead of forcing owners and staff into unnecessary workarounds.</p>
+    <p>For businesses in ${escapeHtml(loc)}, the decision usually depends on service scope, customer expectations, software requirements, support needs, and the amount of operational friction the current setup creates. This page is designed to give search visitors a useful local overview before they request a more specific review.</p>
   </section>
-  <section>
-    <h2>When this service is usually needed</h2>
-    <p>${escapeHtml(service)} is usually worth evaluating when a business is growing, changing systems, opening a new location, replacing a legacy provider, or trying to reduce operational friction. The strongest fit is not always the cheapest option; it is the setup that protects cash flow, keeps work moving, and supports the way the business actually operates.</p>
-    <ul>
-      <li>Businesses comparing providers, platforms, or service options</li>
-      <li>Teams that need clearer reporting, support, or implementation guidance</li>
-      <li>Owners who want fewer manual workarounds and fewer avoidable delays</li>
-      <li>Companies expanding into new markets or adding new customer channels</li>
-    </ul>
+
+  ${snippetSections}
+
+  <section class="nexus-section nexus-section--process">
+    <h2>How the process usually works</h2>
+    <p>A strong ${escapeHtml(serviceName)} rollout should be clear before anything changes. The business should know what information is required, what the expected timeline looks like, what decisions need to be made, and how support will work after launch.</p>
+    ${processHtml}
   </section>
-  <section>
-    <h2>How ${escapeHtml(brand)} approaches the work</h2>
-    <p>${escapeHtml(brand)} focuses on fit, implementation, and long-term usability. The goal is to understand the business first, identify the actual constraints, and recommend a path that can be explained clearly before anything is changed.</p>
-    <p>A good implementation should define what is being set up, what information is required, what timeline is realistic, what the business needs to review, and how issues will be handled after launch. That keeps the process grounded instead of turning it into another generic vendor pitch.</p>
+
+  <section class="nexus-section nexus-section--local-fit">
+    <h2>Local fit and service considerations</h2>
+    <p>Businesses in ${escapeHtml(loc)} may have different needs based on size, customer mix, transaction flow, seasonal demand, staffing, and growth plans. A setup that works for one company may be too limited, too complex, or too expensive for another.</p>
+    <p>Important keywords and related search terms for this service include ${escapeHtml(keywordList.join(", "))}. These terms are included naturally so the page can match real search intent without turning into keyword-stuffed copy.</p>
   </section>
-  ${snippets}
-  <section>
-    <h2>Questions to ask before choosing a provider</h2>
-    <ul>
-      <li>Does the setup match the business model and customer flow?</li>
-      <li>What costs are fixed, variable, optional, or usage-based?</li>
-      <li>Who handles onboarding, troubleshooting, and ongoing support?</li>
-      <li>What reporting will the owner or manager see after launch?</li>
-      <li>Can the system support future growth without creating new bottlenecks?</li>
-    </ul>
+
+  <section class="nexus-section nexus-section--faq">
+    <h2>Common questions about ${escapeHtml(serviceName)} in ${escapeHtml(loc)}</h2>
+    <h3>How do I know if this service is the right fit?</h3>
+    <p>The best fit depends on the business model, current tools, customer flow, budget, and support expectations. A short review usually identifies whether the business needs a simple setup, a more advanced workflow, or a replacement for an existing provider.</p>
+    <h3>What should a business review before moving forward?</h3>
+    <p>Owners should review cost structure, setup timeline, reporting access, contract terms, support responsibilities, and any integrations required to keep daily operations running smoothly.</p>
+    <h3>Can this support future growth?</h3>
+    <p>That depends on whether the setup can handle additional locations, higher volume, new users, more reporting requirements, and changes in how customers interact with the business.</p>
   </section>
-  <section>
+
+  <section class="nexus-section nexus-section--cta">
     <h2>Next step</h2>
-    <p>Businesses looking at ${escapeHtml(service)} in ${escapeHtml(location)} can use this page as a starting point, then request a more specific review based on their current setup, transaction flow, software stack, and goals.</p>
+    <p>Businesses comparing ${escapeHtml(serviceName)} in ${escapeHtml(loc)} can use this page as a starting point, then request a more specific review based on their current setup, goals, software stack, and customer flow.</p>
   </section>
 </article>`;
 
-  console.warn(`[generation] Used deterministic content fallback for ${slug || service}: ${reason}`);
+  const wordCount = countWordsInHtml(contentHtml);
+  const bankCoverageScore = Math.min(1, renderedSnippets.length / 8);
+  const publishScore = hasBankContent ? Math.min(0.92, 0.68 + bankCoverageScore * 0.22) : 0.55;
+  const localSignalScore = ctx.location ? Math.min(0.9, 0.62 + (ctx.location.population ? 0.08 : 0) + (hasBankContent ? 0.08 : 0)) : 0.45;
 
   return {
     title,
@@ -114,77 +227,17 @@ function buildFallbackGeneratedPage(
     h1,
     slug,
     contentHtml,
-    wordCount: countWordsInHtml(contentHtml),
-    publishScore: 0.62,
-    localSignalScore: ctx.locationName || ctx.locationState ? 0.58 : 0.45,
-    faqItems: [],
+    wordCount,
+    publishScore,
+    localSignalScore,
     promptTokens: 0,
     completionTokens: 0,
-  };
-}
-
-function shouldUseContentFallback(err: any): boolean {
-  const msg = String(err?.message || err || "").toLowerCase();
-  return (
-    msg.includes("no content section") ||
-    msg.includes("cannot complete") ||
-    msg.includes("cannot proceed") ||
-    msg.includes("assignment is incomplete") ||
-    msg.includes("missing required") ||
-    msg.includes("input validation error") ||
-    msg.includes("editorial analysis") ||
-    msg.includes("clarification needed")
-  );
-}
-
-function buildPageContext(
-  blueprint: Blueprint,
-  website: Website,
-  brand: BrandProfile | undefined,
-  location?: Location,
-  service?: Service,
-  industry?: Industry,
-  bankSnippets?: Array<{ section: string; snippet: string }>,
-): PageContext {
-  const cf = (brand?.customFields as any) ?? {};
-  const sm = (service?.metadata as any) ?? {};
-  return {
-    blueprintName: blueprint.name,
-    pageType: blueprint.pageType,
-    titleTemplate: blueprint.titleTemplate,
-    metaDescTemplate: blueprint.metaDescTemplate,
-    h1Template: blueprint.h1Template,
-    slugTemplate: blueprint.slugTemplate,
-    sections: (blueprint.sections as any[]) || [],
-    requiredWordCount: blueprint.requiredWordCount,
-    promptFamily: blueprint.promptFamily,
-    faqEnabled: blueprint.faqEnabled,
-    locationName: location?.name,
-    locationState: location?.stateName || location?.stateCode || undefined,
-    locationSlug: location?.slug,
-    serviceName: service?.name,
-    serviceSlug: service?.slug,
-    industryName: industry?.name,
-    brandName: brand?.name || website.name,
-    brandLegalName: cf.legalBusinessName || undefined,
-    brandDescription: brand?.description || undefined,
-    brandPhone: brand?.phone || undefined,
-    brandTagline: brand?.tagline || undefined,
-    brandVoiceAndTone: brand?.voiceAndTone || undefined,
-    brandYearsInBusiness: cf.yearsInBusiness || undefined,
-    brandLicenses: Array.isArray(cf.licensesCerts) && cf.licensesCerts.length ? cf.licensesCerts : undefined,
-    brandReviewSummary: cf.reviewSummary || undefined,
-    serviceDescription: service?.description || undefined,
-    serviceProcessSteps: Array.isArray(sm.processSteps) && sm.processSteps.length ? sm.processSteps : undefined,
-    serviceTimeline: sm.typicalTimeline || undefined,
-    bankSnippets: bankSnippets?.length ? bankSnippets : undefined,
-    primaryKeyword: service?.keywords?.[0] || service?.name,
-    secondaryKeywords: service?.keywords?.slice(1) || [],
+    generationMode: "deterministic_bank_assembly",
   };
 }
 
 function runRuleQA(
-  generated: Awaited<ReturnType<typeof generateFirstPass>>,
+  generated: DeterministicPage,
   blueprint: Blueprint,
 ): { passed: boolean; report: any } {
   const issues: string[] = [];
@@ -215,8 +268,45 @@ function runRuleQA(
 
   return {
     passed: issues.length === 0,
-    report: { issues, checked: new Date().toISOString() },
+    report: {
+      issues,
+      checked: new Date().toISOString(),
+      generationMode: generated.generationMode,
+      aiCallsUsed: 0,
+    },
   };
+}
+
+async function pickBankSnippets(websiteId: string, serviceName?: string): Promise<BankSnippet[] | undefined> {
+  if (!serviceName) return undefined;
+  const banks = await db.getVariationBanks(websiteId, serviceName);
+  if (!banks.length) return undefined;
+
+  const preferredOrder = [
+    "intro",
+    "local_context",
+    "pain_point",
+    "how_it_works",
+    "benefits",
+    "use_case",
+    "proof_trust",
+    "local_stat",
+    "faq",
+    "cta",
+  ];
+
+  const bySection = new Map<string, any>();
+  for (const bank of banks) bySection.set(bank.sectionName, bank);
+
+  return preferredOrder
+    .map(section => bySection.get(section))
+    .filter(Boolean)
+    .filter(bank => Array.isArray(bank.variations) && (bank.variations as string[]).length > 0)
+    .map(bank => {
+      const vars = bank.variations as string[];
+      const snippet = vars[Math.floor(Math.random() * vars.length)];
+      return { section: bank.sectionName, snippet };
+    });
 }
 
 export async function runGenerationJob(
@@ -229,7 +319,8 @@ export async function runGenerationJob(
   };
 
   try {
-    log(`Starting generation job: ${job.id}`);
+    log(`Starting deterministic generation job: ${job.id}`);
+    log("Bulk generation mode: deterministic_bank_assembly; AI calls disabled for page generation");
 
     await db.updateGenerationJob(job.id, {
       status: "running",
@@ -294,7 +385,7 @@ export async function runGenerationJob(
     const total = combinations.length;
     await db.updateGenerationJob(job.id, { totalPages: total });
 
-    log(`Processing ${total} page combinations`);
+    log(`Processing ${total} page combinations with 0 page-level AI calls`);
 
     let processed = 0;
     let passed = 0;
@@ -303,51 +394,22 @@ export async function runGenerationJob(
 
     const processCombo = async (combo: typeof combinations[number]): Promise<void> => {
       try {
-        let bankSnippets: Array<{ section: string; snippet: string }> | undefined;
-        if (combo.service) {
-          try {
-            const banks = await db.getVariationBanks(task.websiteId, combo.service.name);
-            if (banks.length > 0) {
-              bankSnippets = banks
-                .filter(b => Array.isArray(b.variations) && (b.variations as string[]).length > 0)
-                .map(b => {
-                  const vars = b.variations as string[];
-                  const snippet = vars[Math.floor(Math.random() * vars.length)];
-                  return { section: b.sectionName, snippet };
-                })
-                .slice(0, 6);
-            }
-          } catch { /* bank load failure is non-fatal */ }
-        }
+        const bankSnippets = await pickBankSnippets(task.websiteId, combo.service?.name);
+        const generated = buildDeterministicPage({
+          blueprint,
+          website,
+          brand,
+          location: combo.location,
+          service: combo.service,
+          industry: combo.industry,
+          bankSnippets,
+        });
 
-        const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry, bankSnippets);
-        log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
-
-        let generated: Awaited<ReturnType<typeof generateFirstPass>>;
-        try {
-          generated = await generateFirstPass(ctx);
-        } catch (err: any) {
-          if (!shouldUseContentFallback(err)) throw err;
-          log(`AI content parse failed; using deterministic fallback: ${err.message}`);
-          generated = buildFallbackGeneratedPage(ctx, err.message);
-        }
-
-        try {
-          await logApiUsage({
-            accountId: task.accountId,
-            websiteId: task.websiteId,
-            generationType: "page_generation",
-            modelUsed: "claude-haiku-4-5-20251001",
-            inputTokens: generated.promptTokens,
-            outputTokens: generated.completionTokens,
-          });
-        } catch (logErr: any) {
-          console.warn("[usage-logger] page_generation log failed (non-fatal):", logErr?.message);
-        }
+        log(`Assembled: ${combo.location?.name || ""} x ${combo.service?.name || combo.industry?.name || "hub"}`);
 
         const qaResult = runRuleQA(generated, blueprint);
         const finalHtml = generated.contentHtml;
-        const reviewNotes = "";
+        const reviewNotes = "Generated by deterministic bank assembly; page-level AI calls disabled.";
         const finalScore = generated.publishScore;
         const finalSlug = sanitizePageSlug(generated.slug);
 
@@ -390,8 +452,8 @@ export async function runGenerationJob(
           pageId: page.id,
           version: 1,
           contentHtml: finalHtml,
-          promptTokens: generated.promptTokens,
-          completionTokens: generated.completionTokens,
+          promptTokens: 0,
+          completionTokens: 0,
           reviewNotes,
           isActive: true,
         });
@@ -406,7 +468,7 @@ export async function runGenerationJob(
 
         passed++;
         processed++;
-        log(`✓ Page created: ${finalSlug} (score: ${finalScore}, qa: ${qaResult.passed})`);
+        log(`✓ Page created: ${finalSlug} (score: ${finalScore}, qa: ${qaResult.passed}, aiCalls: 0)`);
       } catch (err: any) {
         failed++;
         processed++;
@@ -415,7 +477,7 @@ export async function runGenerationJob(
       }
     };
 
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 10;
     for (let i = 0; i < combinations.length; i += BATCH_SIZE) {
       const batch = combinations.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(processCombo));
@@ -427,10 +489,10 @@ export async function runGenerationJob(
         errorLog: errors,
       });
 
-      if (i + BATCH_SIZE < combinations.length) await new Promise((r) => setTimeout(r, 1000));
+      if (i + BATCH_SIZE < combinations.length) await new Promise((r) => setTimeout(r, 250));
     }
 
-    log(`Job completed: ${passed} passed, ${failed} failed out of ${total} total`);
+    log(`Job completed: ${passed} passed, ${failed} failed out of ${total} total. Page-level AI calls used: 0`);
 
     if (passed > 0) {
       const freshWebsite = await db.getWebsite(task.websiteId);
