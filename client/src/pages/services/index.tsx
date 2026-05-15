@@ -442,7 +442,7 @@ export default function ServicesPage() {
                         </Button>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <Info className="size-3" />
-                          1 Claude API call per service creates all 5 core banks; bulk pages use 0 AI calls after
+                          1 Claude API call per service creates all 10 banks: 5 core + 5 extended; bulk pages use 0 AI calls after
                         </p>
                       </div>
                     )}
