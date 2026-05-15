@@ -3,8 +3,8 @@ import { logApiUsage } from "./usage-logger";
 import { callAI } from "./ai-provider";
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
-const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
-const SECTIONS = [...CORE_SECTIONS, ...EXTENDED_SECTIONS] as const;
+export const VARIATION_BANK_SECTION_COUNT = CORE_SECTIONS.length;
+const SECTIONS = CORE_SECTIONS;
 type Section = typeof SECTIONS[number];
 
 export interface BrandContext {
@@ -180,131 +180,6 @@ Format EXACTLY as shown — no text outside delimiters:
 <p>...</p>
 ====VARIATION_5====
 <p>...</p>`,
-
-  local_context: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct local market context paragraphs for a "${service}" service page.
-
-Each paragraph = 2-3 sentences (~80-100 words) that establish why this service matters in this local market. Use EXACTLY:
-{{service}} {{city}} {{state}} {{state_abbr}} {{business_count}} {{business_culture}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should take a different angle: market size, growth, local economy, competitive landscape, or regional demand.
-${ctx?.industryName ? `Tie it to the ${ctx.industryName} industry context.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-====VARIATION_5====
-<p>...</p>`,
-
-  use_case: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct use case scenario sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~120-150 words) describing a real-world scenario where a business needed this service and how it was solved. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{business_culture}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should feature a different business type or problem scenario. Write from the customer's perspective.
-${ctx?.industryName ? `Focus on use cases relevant to the ${ctx.industryName} industry.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  proof_trust: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct proof and trust sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~100-130 words) that establish credibility through social proof, credentials, or trust signals. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should emphasize different trust signals: client results, years of experience, certifications, guarantees, or industry recognition. Write in third person or testimonial style.
-${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  pain_point: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct pain point / problem-agitation sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~100-130 words) that describe the frustrations, risks, or costs of NOT having this service. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should surface a different pain: financial loss, compliance risk, operational inefficiency, competitive disadvantage, or customer dissatisfaction.
-${ctx?.industryName ? `Make the pain points specific to ${ctx.industryName} businesses.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  local_stat: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct local market statistics sections for a "${service}" service page.
-
-Each section = 1-2 HTML paragraphs (~80-100 words) that reference compelling, plausible statistics about the local market, business adoption rates, or industry growth to support why this service matters. Use EXACTLY:
-{{service}} {{city}} {{state}} {{state_abbr}} {{business_count}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. Do NOT fabricate specific named studies or real organizations — keep stats general and plausible.
-
-Each variation should emphasize a different type of stat: market size, adoption rate, ROI, cost savings, or growth trend.
-${ctx?.industryName ? `Frame the statistics around the ${ctx.industryName} industry.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-====VARIATION_5====
-<p>...</p>`,
 };
 
 function parseVariations(raw: string): string[] {
@@ -341,10 +216,12 @@ async function writeSingleSection(
   } catch (logErr: any) {
     console.warn("[usage-logger] variation_writing log failed (non-fatal):", logErr?.message);
   }
+
   const variations = parseVariations(raw);
   if (variations.length === 0) {
     throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
   }
+
   await db.createVariationBank({ accountId, websiteId, service: serviceName, sectionName: section, variations });
 }
 
@@ -368,15 +245,15 @@ export async function writeVariationsForService(
   }
 
   if (written.length === 0) {
-    const firstError = Object.values(errors)[0] ?? "All sections failed";
-    throw new Error(`All 10 sections failed for "${serviceName}": ${firstError}`);
+    const firstError = Object.values(errors)[0] ?? "All core sections failed";
+    throw new Error(`All ${VARIATION_BANK_SECTION_COUNT} core sections failed for "${serviceName}": ${firstError}`);
   }
 
   return { written, errors };
 }
 
 /**
- * Write only the sections that are currently missing for this service.
+ * Write only the core sections that are currently missing for this service.
  * Sections that already have variations are skipped.
  * Returns which sections were filled and which were skipped.
  */
