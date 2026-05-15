@@ -47,6 +47,13 @@ function byPopulationThenName(a: any, b: any) {
   return String(a.name).localeCompare(String(b.name)) || String(a.stateCode).localeCompare(String(b.stateCode));
 }
 
+function cityPayload(cities: any[]) {
+  return {
+    mode: "specific_cities",
+    cities: cities.map((loc: any) => ({ name: loc.name, stateAbbr: loc.stateCode })).filter((c: any) => c.name && c.stateAbbr),
+  };
+}
+
 export default function BulkGeneratorPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -133,6 +140,19 @@ export default function BulkGeneratorPage() {
     if (cityLimit === "all") return filteredCitiesAll;
     return filteredCitiesAll.slice(0, Number(cityLimit));
   }, [filteredCitiesAll, cityLimit]);
+
+  const expandedStateCities = useMemo(() => {
+    if (!runBothLocations) return [];
+    const selectedStates = new Set(Array.from(selectedStateCodes).map((s) => s.toUpperCase()));
+    const selectedCities = new Set(selectedCitySlugs);
+    return dbCities.filter((city: any) => {
+      if (selectedCities.has(city.slug)) return true;
+      const stateCode = String(city.stateCode || "").toUpperCase();
+      if (selectedStates.size > 0) return selectedStates.has(stateCode);
+      if (mode === "all_states") return true;
+      return false;
+    });
+  }, [dbCities, mode, runBothLocations, selectedCitySlugs, selectedStateCodes]);
 
   const filteredClusters = useMemo(() => {
     const q = clusterSearch.trim().toLowerCase();
@@ -233,7 +253,11 @@ export default function BulkGeneratorPage() {
 
   function buildCityPayload() {
     const source = Array.from(selectedCitySlugs).map((slug) => dbCities.find((l: any) => l.slug === slug)).filter(Boolean);
-    return { mode: "specific_cities", cities: source.map((loc: any) => ({ name: loc.name, stateAbbr: loc.stateCode })) };
+    return cityPayload(source);
+  }
+
+  function buildExpandedCityPayload() {
+    return cityPayload(expandedStateCities);
   }
 
   function buildLocationPayload() {
@@ -314,7 +338,7 @@ export default function BulkGeneratorPage() {
     const queue: QueueItem[] = [];
     if (runBothLocations) {
       const hasStateSelection = selectedStateCodes.size > 0 || mode === "all_states";
-      const hasCitySelection = selectedCitySlugs.size > 0;
+      const hasCitySelection = expandedStateCities.length > 0;
       if (!hasStateSelection && !hasCitySelection) {
         toast({ title: "Choose locations", description: "Select at least one state or city before running both location types.", variant: "destructive" });
         return;
@@ -322,7 +346,7 @@ export default function BulkGeneratorPage() {
       for (const id of bpIds) {
         const bpIndex = bpIds.indexOf(id) + 1;
         if (hasStateSelection) queue.push({ bpId: id, locPayload: buildStatePayload(), label: `State pages ${bpIndex}/${bpIds.length}` });
-        if (hasCitySelection) queue.push({ bpId: id, locPayload: buildCityPayload(), label: `City pages ${bpIndex}/${bpIds.length}` });
+        if (hasCitySelection) queue.push({ bpId: id, locPayload: buildExpandedCityPayload(), label: `City pages ${bpIndex}/${bpIds.length}` });
       }
     } else {
       queue.push(...bpIds.map((id, i) => ({ bpId: id, locPayload: buildLocationPayload(), label: `Blueprint ${i + 1}/${bpIds.length}` })));
@@ -342,7 +366,7 @@ export default function BulkGeneratorPage() {
   }
 
   const stateTargetCount = selectedStateCodes.size > 0 ? selectedStateCodes.size : mode === "all_states" ? (dbStates.length || 50) : 0;
-  const cityTargetCount = selectedCitySlugs.size;
+  const cityTargetCount = runBothLocations ? expandedStateCities.length : selectedCitySlugs.size;
   const singleModeTargetCount = mode === "all_states" ? (dbStates.length || 50) : mode === "specific_states" ? selectedStateCodes.size : selectedCitySlugs.size;
   const effectiveTargetCount = runBothLocations ? stateTargetCount + cityTargetCount : singleModeTargetCount;
   const blueprintMultiplier = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
@@ -389,7 +413,7 @@ export default function BulkGeneratorPage() {
         {websiteId && <Card>
           <CardHeader>
             <CardTitle>Configure</CardTitle>
-            <CardDescription>{estimatedPages.toLocaleString()} estimated page(s){clusterMode !== "none" ? ` · base ${baseEstimatedPages.toLocaleString()} × ${clusterMultiplier.toLocaleString()} cluster intent(s)` : ""}</CardDescription>
+            <CardDescription>{estimatedPages.toLocaleString()} estimated page(s){clusterMode !== "none" ? ` · base ${baseEstimatedPages.toLocaleString()} x ${clusterMultiplier.toLocaleString()} cluster intent(s)` : ""}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
@@ -451,6 +475,7 @@ export default function BulkGeneratorPage() {
             </div>
 
             <label className="flex gap-2 items-center text-sm rounded border px-3 py-2 w-fit"><Checkbox checked={runBothLocations} onCheckedChange={(v) => setRunBothLocations(!!v)} />Generate both state and city pages in one sequence</label>
+            {runBothLocations && <p className="text-xs text-muted-foreground">Selected state(s) now automatically include every imported city in those state(s). City picker selections are added on top.</p>}
 
             {showStatePicker && <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap"><Label>State pages ({selectedStateCodes.size} selected)</Label><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={selectVisibleStates}>Select visible</Button><Button type="button" size="sm" variant="ghost" onClick={clearStates}>Clear</Button></div></div>
@@ -459,7 +484,7 @@ export default function BulkGeneratorPage() {
             </div>}
 
             {showCityPicker && <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3 flex-wrap"><Label>City pages ({selectedCitySlugs.size} selected / {filteredCities.length.toLocaleString()} visible / {filteredCitiesAll.length.toLocaleString()} matched)</Label><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={selectVisibleCities}>Select visible</Button><Button type="button" size="sm" variant="ghost" onClick={clearCities}>Clear</Button></div></div>
+              <div className="flex items-center justify-between gap-3 flex-wrap"><Label>City pages ({selectedCitySlugs.size} manually selected / {runBothLocations ? expandedStateCities.length.toLocaleString() : filteredCities.length.toLocaleString()} queued / {filteredCitiesAll.length.toLocaleString()} matched)</Label><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={selectVisibleCities}>Select visible</Button><Button type="button" size="sm" variant="ghost" onClick={clearCities}>Clear</Button></div></div>
               <div className="flex gap-2 flex-wrap"><Input placeholder="Search cities, e.g. St George" value={citySearch} onChange={(e) => setCitySearch(e.target.value)} className="max-w-sm" /><Select value={cityLimit} onValueChange={(v: CityLimit) => setCityLimit(v)}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="100">Top 100 cities</SelectItem><SelectItem value="500">Top 500 cities</SelectItem><SelectItem value="1000">Top 1,000 cities</SelectItem><SelectItem value="5000">Top 5,000 cities</SelectItem><SelectItem value="all">All matched cities</SelectItem></SelectContent></Select></div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1 max-h-64 overflow-y-auto border rounded p-2">{filteredCities.map((loc: any) => <label key={loc.slug} className="flex gap-2 text-sm"><Checkbox checked={selectedCitySlugs.has(loc.slug)} onCheckedChange={(checked) => setSelectedCitySlugs((prev) => { const next = new Set(prev); checked ? next.add(loc.slug) : next.delete(loc.slug); return next; })} />{loc.name}, {loc.stateCode}{loc.population ? <span className="text-xs text-muted-foreground">pop. {Number(loc.population).toLocaleString()}</span> : null}</label>)}</div>
             </div>}
@@ -468,7 +493,7 @@ export default function BulkGeneratorPage() {
           </CardContent>
         </Card>}
 
-        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? "Will queue selected state page job(s), then selected city page job(s)." : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || !isClusterReady || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
+        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? `Will queue selected state page job(s), then ${expandedStateCities.length.toLocaleString()} selected-state city target(s).` : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || !isClusterReady || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
       </div>
     </DashboardLayout>
   );
