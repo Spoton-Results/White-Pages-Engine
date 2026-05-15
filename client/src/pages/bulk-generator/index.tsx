@@ -14,6 +14,8 @@ import { api } from "@/lib/api";
 type QueueItem = { bpId: string; locPayload: Record<string, any>; label: string };
 type ProgressRow = { service: string; status: string; created: number; updated: number; skipped: number; errors: number };
 type CityLimit = "100" | "500" | "1000" | "5000" | "all";
+type QueryCluster = { id: string; serviceId?: string | null; name: string; intentType: string; primaryKeyword: string; secondaryKeywords?: string[] };
+type ClusterMode = "none" | "selected" | "all";
 
 async function apiFetch<T = any>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...opts });
@@ -58,6 +60,9 @@ export default function BulkGeneratorPage() {
   const [citySearch, setCitySearch] = useState("");
   const [cityLimit, setCityLimit] = useState<CityLimit>("100");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  const [clusterMode, setClusterMode] = useState<ClusterMode>("none");
+  const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set());
+  const [clusterSearch, setClusterSearch] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [cycleBlueprints, setCycleBlueprints] = useState(false);
   const [runBothLocations, setRunBothLocations] = useState(false);
@@ -82,6 +87,7 @@ export default function BulkGeneratorPage() {
   const bankServicesQ = useQuery<string[]>({ queryKey: ["/api/websites", websiteId, "bank-services"], queryFn: () => apiFetch(`/api/websites/${websiteId}/bank-services`), enabled: !!websiteId });
   const locationsQ = useQuery<any[]>({ queryKey: ["/api/websites", websiteId, "locations"], queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/locations`), enabled: !!websiteId });
   const blueprintsQ = useQuery<any[]>({ queryKey: ["/api/accounts", accountId, "blueprints"], queryFn: () => api.get<any[]>(`/api/accounts/${accountId}/blueprints`), enabled: !!accountId });
+  const queryClustersQ = useQuery<QueryCluster[]>({ queryKey: ["/api/accounts", accountId, "query-clusters"], queryFn: () => api.get<QueryCluster[]>(`/api/accounts/${accountId}/query-clusters`), enabled: !!accountId });
 
   const activeJobQ = useQuery<any>({
     queryKey: ["/api/jobs/active", activeJobId],
@@ -96,6 +102,7 @@ export default function BulkGeneratorPage() {
   const bankServicesSet = new Set(bankedServices);
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
+  const queryClusters = queryClustersQ.data ?? [];
   const selectedBlueprint = blueprints.find((bp: any) => bp.id === blueprintId);
 
   const dbStates = useMemo(() => {
@@ -127,11 +134,26 @@ export default function BulkGeneratorPage() {
     return filteredCitiesAll.slice(0, Number(cityLimit));
   }, [filteredCitiesAll, cityLimit]);
 
+  const filteredClusters = useMemo(() => {
+    const q = clusterSearch.trim().toLowerCase();
+    return queryClusters.filter((cluster) => {
+      if (!q) return true;
+      return [cluster.name, cluster.intentType, cluster.primaryKeyword, ...(cluster.secondaryKeywords || [])]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [queryClusters, clusterSearch]);
+
   useEffect(() => {
     const defaultId = selectedWebsite?.settings?.defaultBlueprintId;
     if (defaultId) setBlueprintId(defaultId);
     else if (!blueprintId && blueprints.length > 0) setBlueprintId(blueprints[0].id);
   }, [selectedWebsite?.id, blueprints.length]);
+
+  useEffect(() => {
+    if (clusterMode !== "selected") return;
+    setSelectedClusterIds((prev) => new Set(Array.from(prev).filter((id) => queryClusters.some((cluster) => cluster.id === id))));
+  }, [queryClusters, clusterMode]);
 
   useEffect(() => {
     const job = activeJobQ.data;
@@ -188,6 +210,9 @@ export default function BulkGeneratorPage() {
     setStateSearch("");
     setCitySearch("");
     setCityLimit("100");
+    setClusterMode("none");
+    setSelectedClusterIds(new Set());
+    setClusterSearch("");
     setServiceProgress([]);
     setLastResult(null);
     setLastFailure("");
@@ -225,6 +250,14 @@ export default function BulkGeneratorPage() {
     });
   }
 
+  function toggleCluster(clusterId: string, checked: boolean) {
+    setSelectedClusterIds((prev) => {
+      const next = new Set(prev);
+      checked ? next.add(clusterId) : next.delete(clusterId);
+      return next;
+    });
+  }
+
   function selectAllServices() { setSelectedServices(new Set(services)); }
   function selectBankedServices() { setSelectedServices(new Set(services.filter(s => bankServicesSet.has(s)))); }
   function clearServices() { setSelectedServices(new Set()); }
@@ -232,11 +265,21 @@ export default function BulkGeneratorPage() {
   function clearStates() { setSelectedStateCodes(new Set()); }
   function selectVisibleCities() { setSelectedCitySlugs(new Set(filteredCities.map((loc: any) => loc.slug).filter(Boolean))); }
   function clearCities() { setSelectedCitySlugs(new Set()); }
+  function selectVisibleClusters() { setSelectedClusterIds(new Set(filteredClusters.map((cluster) => cluster.id))); }
+  function clearClusters() { setSelectedClusterIds(new Set()); }
+
+  function selectedQueryClusterIds() {
+    if (clusterMode === "all") return queryClusters.map((cluster) => cluster.id);
+    if (clusterMode === "selected") return Array.from(selectedClusterIds);
+    return [];
+  }
 
   async function submitJobForBlueprint(item: QueueItem) {
     try {
+      const queryClusterIds = selectedQueryClusterIds();
       const payload: Record<string, any> = { services: Array.from(selectedServices), ...item.locPayload, overwrite };
       if (item.bpId) payload.blueprintId = item.bpId;
+      if (queryClusterIds.length > 0) payload.queryClusterIds = queryClusterIds;
       const data = await apiFetch<{ jobId: string }>(`/api/websites/${websiteId}/bulk-generate-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       handledTerminalJobRef.current = "";
       setActiveJobId(data.jobId);
@@ -253,6 +296,15 @@ export default function BulkGeneratorPage() {
 
   async function runAllServices() {
     if (!websiteId || selectedServices.size === 0) return;
+    if (clusterMode === "selected" && selectedClusterIds.size === 0) {
+      toast({ title: "Choose query clusters", description: "Select at least one query cluster or switch cluster mode to none.", variant: "destructive" });
+      return;
+    }
+    if (clusterMode === "all" && queryClusters.length === 0) {
+      toast({ title: "No query clusters found", description: "Create query clusters first or switch cluster mode to none.", variant: "destructive" });
+      return;
+    }
+
     const bpIds = cycleBlueprints && blueprints.length > 1 ? blueprints.map((bp: any) => bp.id) : [blueprintId].filter(Boolean);
     if (bpIds.length === 0) {
       toast({ title: "Choose a blueprint", description: "Select a blueprint before generating pages.", variant: "destructive" });
@@ -294,9 +346,12 @@ export default function BulkGeneratorPage() {
   const singleModeTargetCount = mode === "all_states" ? (dbStates.length || 50) : mode === "specific_states" ? selectedStateCodes.size : selectedCitySlugs.size;
   const effectiveTargetCount = runBothLocations ? stateTargetCount + cityTargetCount : singleModeTargetCount;
   const blueprintMultiplier = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
-  const estimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier;
+  const clusterMultiplier = clusterMode === "all" ? Math.max(queryClusters.length, 0) : clusterMode === "selected" ? selectedClusterIds.size : 1;
+  const estimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier * Math.max(clusterMultiplier, 1);
+  const baseEstimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier;
   const showStatePicker = runBothLocations || mode === "specific_states";
   const showCityPicker = runBothLocations || mode === "specific_cities";
+  const isClusterReady = clusterMode === "none" || (clusterMode === "all" && queryClusters.length > 0) || (clusterMode === "selected" && selectedClusterIds.size > 0);
 
   return (
     <DashboardLayout>
@@ -305,7 +360,7 @@ export default function BulkGeneratorPage() {
           <div className="p-2 rounded-lg bg-primary/10"><Zap className="size-5 text-primary" /></div>
           <div>
             <h1 className="text-2xl font-bold">Hybrid Bulk Generator</h1>
-            <p className="text-muted-foreground text-sm">Generate pages from service banks with 0 page-level AI calls.</p>
+            <p className="text-muted-foreground text-sm">Generate pages from service banks with optional query-cluster intent expansion.</p>
           </div>
         </div>
 
@@ -332,7 +387,10 @@ export default function BulkGeneratorPage() {
         </Card>}
 
         {websiteId && <Card>
-          <CardHeader><CardTitle>Configure</CardTitle><CardDescription>{estimatedPages.toLocaleString()} estimated page(s)</CardDescription></CardHeader>
+          <CardHeader>
+            <CardTitle>Configure</CardTitle>
+            <CardDescription>{estimatedPages.toLocaleString()} estimated page(s){clusterMode !== "none" ? ` · base ${baseEstimatedPages.toLocaleString()} × ${clusterMultiplier.toLocaleString()} cluster intent(s)` : ""}</CardDescription>
+          </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -347,6 +405,42 @@ export default function BulkGeneratorPage() {
                 {services.map((service) => <label key={service} className="flex gap-2 items-center py-1 text-sm"><Checkbox checked={selectedServices.has(service)} onCheckedChange={(checked) => toggleService(service, !!checked)} />{service}{!bankServicesSet.has(service) && <span className="text-xs text-amber-600">No banks</span>}</label>)}
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label>Query cluster mode</Label>
+              <Select value={clusterMode} onValueChange={(v: ClusterMode) => setClusterMode(v)}>
+                <SelectTrigger className="max-w-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No cluster expansion</SelectItem>
+                  <SelectItem value="selected">Use selected clusters</SelectItem>
+                  <SelectItem value="all">Use all clusters ({queryClusters.length})</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Clusters create one additional intent page per selected service/location/blueprint combination. Use this only for high-value intent coverage.</p>
+            </div>
+
+            {clusterMode === "selected" && <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <Label>Query clusters ({selectedClusterIds.size} selected / {filteredClusters.length.toLocaleString()} visible / {queryClusters.length.toLocaleString()} total)</Label>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={selectVisibleClusters}>Select visible</Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={clearClusters}>Clear</Button>
+                </div>
+              </div>
+              <Input placeholder="Search clusters, e.g. high-risk, analytics, healthcare" value={clusterSearch} onChange={(e) => setClusterSearch(e.target.value)} className="max-w-md" />
+              <div className="border rounded-md p-2 max-h-64 overflow-y-auto grid md:grid-cols-2 gap-x-4">
+                {filteredClusters.map((cluster) => (
+                  <label key={cluster.id} className="flex gap-2 items-start py-1 text-sm">
+                    <Checkbox checked={selectedClusterIds.has(cluster.id)} onCheckedChange={(checked) => toggleCluster(cluster.id, !!checked)} />
+                    <span>
+                      <span className="font-medium">{cluster.name}</span>
+                      <span className="block text-xs text-muted-foreground">{cluster.intentType} · {cluster.primaryKeyword}</span>
+                    </span>
+                  </label>
+                ))}
+                {filteredClusters.length === 0 && <p className="text-sm text-muted-foreground">No query clusters found for this account.</p>}
+              </div>
+            </div>}
 
             <div className="space-y-2">
               <Label>Location scope</Label>
@@ -374,7 +468,7 @@ export default function BulkGeneratorPage() {
           </CardContent>
         </Card>}
 
-        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? "Will queue selected state page job(s), then selected city page job(s)." : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
+        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? "Will queue selected state page job(s), then selected city page job(s)." : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || !isClusterReady || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
       </div>
     </DashboardLayout>
   );
