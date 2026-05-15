@@ -4,49 +4,116 @@ import { runBulkBackgroundJob as runUnlockedBulkBackgroundJob } from "./bulk-bac
 
 const lockPool = new pg.Pool({
   connectionString: process.env.DATABASE_URL!,
-  max: 2,
+  max: 3,
   idleTimeoutMillis: 60000,
   connectionTimeoutMillis: 30000,
 });
 
+const MAX_CONCURRENT_BULK_JOBS = Math.max(1, Number(process.env.MAX_CONCURRENT_BULK_JOBS || 2));
+const MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE = Math.max(1, Number(process.env.MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE || 1));
+const GLOBAL_SLOT_LOCK_START = 811_000;
+const WEBSITE_SLOT_LOCK_START = 812_000;
+
+async function tryAcquireOneOf(client: pg.PoolClient, namespace: string, start: number, count: number, key?: string): Promise<number | null> {
+  for (let i = 0; i < count; i++) {
+    const lockKey = key ? `${namespace}:${key}:${i}` : `${namespace}:${i}`;
+    const result = await client.query(
+      `SELECT pg_try_advisory_lock($1, hashtext($2)) AS locked`,
+      [start, lockKey],
+    );
+    if (result.rows[0]?.locked === true) return i;
+  }
+  return null;
+}
+
+async function releaseSlot(client: pg.PoolClient, namespace: string, start: number, slot: number | null, key?: string) {
+  if (slot === null) return;
+  const lockKey = key ? `${namespace}:${key}:${slot}` : `${namespace}:${slot}`;
+  await client.query(`SELECT pg_advisory_unlock($1, hashtext($2))`, [start, lockKey]).catch((error) => {
+    console.error(`[bulk-lock] Failed to release ${namespace} slot ${slot}`, error);
+  });
+}
+
+async function markJobDeferred(jobId: string, reason: string) {
+  const job = await storage.getGenerationJob(jobId).catch(() => null);
+  await storage.updateGenerationJob(jobId, {
+    status: "pending" as any,
+    settings: {
+      ...(job as any)?.settings,
+      deferredReason: reason,
+      deferredAt: new Date().toISOString(),
+      maxConcurrentBulkJobs: MAX_CONCURRENT_BULK_JOBS,
+      maxConcurrentBulkJobsPerWebsite: MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE,
+    } as any,
+  } as any).catch(() => {});
+}
+
 /**
- * Runs a bulk background job under a PostgreSQL advisory lock.
+ * Runs a bulk background job under PostgreSQL advisory locks.
  *
- * This prevents duplicate or overlapping execution of the same job during:
- * - Railway restarts
- * - redeploy windows
- * - double-clicks / duplicate requests
- * - retry collisions
- *
- * Lock scope is session-level and held for the full duration of the worker.
+ * Guardrails:
+ * 1. Per-job lock prevents duplicate execution of the same job.
+ * 2. Global slot lock limits total concurrent bulk jobs across all Railway instances.
+ * 3. Per-website slot lock prevents one website from running multiple heavy jobs at once.
  */
 export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const client = await lockPool.connect();
-  let locked = false;
+  let jobLocked = false;
+  let globalSlot: number | null = null;
+  let websiteSlot: number | null = null;
+  let websiteId: string | null = null;
 
   try {
-    const result = await client.query(
+    const jobLockResult = await client.query(
       `SELECT pg_try_advisory_lock(hashtext('bulk-background-job'), hashtext($1)) AS locked`,
       [jobId],
     );
 
-    locked = result.rows[0]?.locked === true;
+    jobLocked = jobLockResult.rows[0]?.locked === true;
 
-    if (!locked) {
+    if (!jobLocked) {
       console.warn(`[bulk-lock] Job ${jobId} is already owned by another worker. Exiting duplicate runner.`);
       return;
     }
 
+    const job = await storage.getGenerationJob(jobId);
+    websiteId = (job as any)?.websiteId || (job as any)?.website_id || null;
+
+    globalSlot = await tryAcquireOneOf(client, "bulk-global-slot", GLOBAL_SLOT_LOCK_START, MAX_CONCURRENT_BULK_JOBS);
+    if (globalSlot === null) {
+      const reason = `Bulk generation deferred: global concurrency limit reached (${MAX_CONCURRENT_BULK_JOBS}).`;
+      console.warn(`[bulk-lock] ${reason} Job ${jobId}.`);
+      await markJobDeferred(jobId, reason);
+      return;
+    }
+
+    if (websiteId) {
+      websiteSlot = await tryAcquireOneOf(client, "bulk-website-slot", WEBSITE_SLOT_LOCK_START, MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE, websiteId);
+      if (websiteSlot === null) {
+        const reason = `Bulk generation deferred: website concurrency limit reached (${MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE}).`;
+        console.warn(`[bulk-lock] ${reason} Job ${jobId}.`);
+        await markJobDeferred(jobId, reason);
+        return;
+      }
+    }
+
     await storage.updateGenerationJob(jobId, {
       settings: {
-        ...(await storage.getGenerationJob(jobId))?.settings,
+        ...(job as any)?.settings,
         workerLockAcquiredAt: new Date().toISOString(),
+        globalConcurrencySlot: globalSlot,
+        websiteConcurrencySlot: websiteSlot,
+        maxConcurrentBulkJobs: MAX_CONCURRENT_BULK_JOBS,
+        maxConcurrentBulkJobsPerWebsite: MAX_CONCURRENT_BULK_JOBS_PER_WEBSITE,
       } as any,
     } as any).catch(() => {});
 
     await runUnlockedBulkBackgroundJob(jobId);
   } finally {
-    if (locked) {
+    await releaseSlot(client, "bulk-website-slot", WEBSITE_SLOT_LOCK_START, websiteSlot, websiteId || undefined);
+    await releaseSlot(client, "bulk-global-slot", GLOBAL_SLOT_LOCK_START, globalSlot);
+
+    if (jobLocked) {
       await client.query(
         `SELECT pg_advisory_unlock(hashtext('bulk-background-job'), hashtext($1))`,
         [jobId],
