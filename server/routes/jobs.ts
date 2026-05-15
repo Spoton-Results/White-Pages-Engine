@@ -53,8 +53,8 @@ export async function recoverDeadGenerationJobs(minutes = STALE_JOB_MINUTES) {
     `UPDATE generation_jobs
      SET status = $1::job_status,
          completed_at = COALESCE(completed_at, NOW()),
-         error_log = COALESCE(error_log, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('type', 'stale_job_recovery', 'message', $2, 'recoveredAt', NOW())),
-         settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('fatalError', $2, 'staleJobRecoveredAt', NOW(), 'staleJobThresholdMinutes', $3)
+         error_log = COALESCE(error_log, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('type', 'stale_job_recovery', 'message', $2::text, 'recoveredAt', NOW())),
+         settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('fatalError', $2::text, 'staleJobRecoveredAt', NOW(), 'staleJobThresholdMinutes', $3::int)
      WHERE status IN ($4::job_status, $5::job_status)
        AND COALESCE(started_at, created_at) < NOW() - ($3::text || ' minutes')::interval
      RETURNING *`,
