@@ -123,6 +123,21 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
+async function repairAdminPasswordIfEnvMatches(email: string, password: string, user: any): Promise<boolean> {
+  const adminEmail = String(process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || "");
+
+  if (!adminEmail || !adminPassword) return false;
+  if (email !== adminEmail) return false;
+  if (password !== adminPassword) return false;
+  if (!user?.isSuperAdmin) return false;
+
+  const nextHash = await hashPassword(adminPassword);
+  await storage.updateUser(user.id, { password: nextHash } as any);
+  console.warn(`[auth] Repaired super admin password hash from ADMIN_PASSWORD for ${adminEmail}`);
+  return true;
+}
+
 export async function loginUser(req: Request, email: string, password: string) {
   if (!hasSession(req)) {
     throw new Error("Session middleware not initialized");
@@ -132,7 +147,8 @@ export async function loginUser(req: Request, email: string, password: string) {
   if (!user) return null;
 
   const valid = await verifyPassword(password, user.password);
-  if (!valid) return null;
+  const repaired = valid ? false : await repairAdminPasswordIfEnvMatches(email, password, user);
+  if (!valid && !repaired) return null;
 
   req.session.userId = user.id;
   req.session.isSuperAdmin = user.isSuperAdmin;
