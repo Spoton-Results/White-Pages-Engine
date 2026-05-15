@@ -25,6 +25,7 @@ import publishedPagesSearchRouter from "./routes/published-pages-search";
 import pageIntelligenceRouter from "./routes/page-intelligence";
 import jobsRouter from "./routes/jobs";
 import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
+import autonomousControlPlaneRouter from "./routes/autonomous-control-plane";
 import { sessionMiddleware } from "./auth";
 
 const app = express();
@@ -77,6 +78,7 @@ app.use(searchConsoleAdminRouter);
 app.use(agencyRoiDashboardRouter);
 app.use(agencyMonthlyReportRouter);
 app.use(systemIntegrityRouter);
+app.use(autonomousControlPlaneRouter);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true });
@@ -98,7 +100,7 @@ app.use((req, res, next) => {
     }
   });
   next();
-});
+}
 
 async function repairSpotonResultsPagesDomain(pgPool: any) {
   const rootDomain = "spotonresults.com";
@@ -218,33 +220,18 @@ async function runBackgroundStartup() {
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (isDatabaseRecoveryError(err)) {
       console.warn("[db] Database recovery guard handled 57P03 for", req.method, req.originalUrl || req.url);
-      if (res.headersSent) return next(err);
       return sendDatabaseRecoveryResponse(req, res);
     }
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-    console.error("Internal Server Error:", err);
-    if (res.headersSent) return next(err);
-    return res.status(status).json({ message });
+    res.status(status).json({ message });
   });
 
-  if (process.env.NODE_ENV === "production") serveStatic(app);
-  else { const { setupVite } = await import("./vite"); await setupVite(httpServer, app); }
+  serveStatic(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  const host = process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
-  const listenOptions = process.env.NODE_ENV === "production" ? { port, host, reusePort: true } : { port, host };
-
-  httpServer.listen(listenOptions, () => {
-    log(`serving on http://${host}:${port}`);
-    setImmediate(() => {
-      runBackgroundStartup().catch((err) => {
-        if (isDatabaseRecoveryError(err)) {
-          console.warn("[startup] Database recovery during background startup.");
-          return;
-        }
-        console.error("[startup] Background startup crashed:", err);
-      });
-    });
+  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, async () => {
+    log(`serving on port ${port}`);
+    runBackgroundStartup();
   });
 })();
