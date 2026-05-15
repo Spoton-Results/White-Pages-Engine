@@ -18,6 +18,8 @@
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "content-arch:migrate": "tsx scripts/migrate-content-architecture-phase1.ts",
+    "content-arch:generate": "drizzle-kit generate",
     "intent:migrate": "tsx scripts/migrate-intent-ownership-phase1.ts",
     "intent:backfill": "tsx scripts/backfill-intent-ownership-phase1.ts",
     "intent:audit": "tsx scripts/audit-intent-ownership-phase1.ts",
