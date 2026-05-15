@@ -27,6 +27,116 @@ function sanitizePageSlug(value: string): string {
     .replace(/-{2,}/g, "-");
 }
 
+function renderTemplate(template: string | undefined, ctx: PageContext): string {
+  return String(template || "")
+    .replace(/\{location\}/g, ctx.locationName || "")
+    .replace(/\{state\}/g, ctx.locationState || "")
+    .replace(/\{service\}/g, ctx.serviceName || "")
+    .replace(/\{industry\}/g, ctx.industryName || "")
+    .replace(/\{brand\}/g, ctx.brandName || "")
+    .replace(/\{keyword\}/g, ctx.primaryKeyword || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeHtml(value: string | undefined): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function countWordsInHtml(html: string): number {
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return text ? text.split(" ").filter(Boolean).length : 0;
+}
+
+function buildFallbackGeneratedPage(
+  ctx: PageContext,
+  reason: string,
+): Awaited<ReturnType<typeof generateFirstPass>> {
+  const location = [ctx.locationName, ctx.locationState].filter(Boolean).join(", ") || "your service area";
+  const service = ctx.serviceName || ctx.industryName || ctx.primaryKeyword || "business services";
+  const brand = ctx.brandName || "our team";
+  const title = renderTemplate(ctx.titleTemplate, ctx) || `${service} in ${location}`;
+  const h1 = renderTemplate(ctx.h1Template, ctx) || `${service} in ${location}`;
+  const metaDescription = renderTemplate(ctx.metaDescTemplate, ctx) || `${brand} helps businesses in ${location} evaluate ${service}, compare options, and take the next step with realistic expectations.`;
+  const slug = sanitizePageSlug(renderTemplate(ctx.slugTemplate, ctx) || `${service}-${ctx.locationName || ctx.locationState || "service-area"}`);
+  const description = ctx.serviceDescription || ctx.brandDescription || `${service} helps businesses improve operations, reduce friction, and choose a practical solution without relying on generic one-size-fits-all advice.`;
+  const snippets = ctx.bankSnippets?.slice(0, 4).map((s) => `<section><h2>${escapeHtml(s.section.replace(/_/g, " "))}</h2>${s.snippet}</section>`).join("\n") || "";
+
+  const contentHtml = `
+<article class="nexus-page nexus-page--fallback" data-generation-fallback="missing-content-section">
+  <section>
+    <h2>What ${escapeHtml(service)} means for businesses in ${escapeHtml(location)}</h2>
+    <p>${escapeHtml(description)}</p>
+    <p>For businesses in ${escapeHtml(location)}, the right approach usually depends on transaction volume, customer expectations, software requirements, reporting needs, and how much support the team needs after setup. This page gives a practical overview so a visitor can understand the service before starting a conversation.</p>
+  </section>
+  <section>
+    <h2>When this service is usually needed</h2>
+    <p>${escapeHtml(service)} is usually worth evaluating when a business is growing, changing systems, opening a new location, replacing a legacy provider, or trying to reduce operational friction. The strongest fit is not always the cheapest option; it is the setup that protects cash flow, keeps work moving, and supports the way the business actually operates.</p>
+    <ul>
+      <li>Businesses comparing providers, platforms, or service options</li>
+      <li>Teams that need clearer reporting, support, or implementation guidance</li>
+      <li>Owners who want fewer manual workarounds and fewer avoidable delays</li>
+      <li>Companies expanding into new markets or adding new customer channels</li>
+    </ul>
+  </section>
+  <section>
+    <h2>How ${escapeHtml(brand)} approaches the work</h2>
+    <p>${escapeHtml(brand)} focuses on fit, implementation, and long-term usability. The goal is to understand the business first, identify the actual constraints, and recommend a path that can be explained clearly before anything is changed.</p>
+    <p>A good implementation should define what is being set up, what information is required, what timeline is realistic, what the business needs to review, and how issues will be handled after launch. That keeps the process grounded instead of turning it into another generic vendor pitch.</p>
+  </section>
+  ${snippets}
+  <section>
+    <h2>Questions to ask before choosing a provider</h2>
+    <ul>
+      <li>Does the setup match the business model and customer flow?</li>
+      <li>What costs are fixed, variable, optional, or usage-based?</li>
+      <li>Who handles onboarding, troubleshooting, and ongoing support?</li>
+      <li>What reporting will the owner or manager see after launch?</li>
+      <li>Can the system support future growth without creating new bottlenecks?</li>
+    </ul>
+  </section>
+  <section>
+    <h2>Next step</h2>
+    <p>Businesses looking at ${escapeHtml(service)} in ${escapeHtml(location)} can use this page as a starting point, then request a more specific review based on their current setup, transaction flow, software stack, and goals.</p>
+  </section>
+</article>`;
+
+  console.warn(`[generation] Used deterministic content fallback for ${slug || service}: ${reason}`);
+
+  return {
+    title,
+    metaDescription,
+    h1,
+    slug,
+    contentHtml,
+    wordCount: countWordsInHtml(contentHtml),
+    publishScore: 0.62,
+    localSignalScore: ctx.locationName || ctx.locationState ? 0.58 : 0.45,
+    faqItems: [],
+    promptTokens: 0,
+    completionTokens: 0,
+  };
+}
+
+function shouldUseContentFallback(err: any): boolean {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    msg.includes("no content section") ||
+    msg.includes("cannot complete") ||
+    msg.includes("cannot proceed") ||
+    msg.includes("assignment is incomplete") ||
+    msg.includes("missing required") ||
+    msg.includes("input validation error") ||
+    msg.includes("editorial analysis") ||
+    msg.includes("clarification needed")
+  );
+}
+
 function buildPageContext(
   blueprint: Blueprint,
   website: Website,
@@ -213,7 +323,14 @@ export async function runGenerationJob(
         const ctx = buildPageContext(blueprint, website, brand, combo.location, combo.service, combo.industry, bankSnippets);
         log(`Generating: ${ctx.locationName || ""} x ${ctx.serviceName || ctx.industryName || "hub"}`);
 
-        const generated = await generateFirstPass(ctx);
+        let generated: Awaited<ReturnType<typeof generateFirstPass>>;
+        try {
+          generated = await generateFirstPass(ctx);
+        } catch (err: any) {
+          if (!shouldUseContentFallback(err)) throw err;
+          log(`AI content parse failed; using deterministic fallback: ${err.message}`);
+          generated = buildFallbackGeneratedPage(ctx, err.message);
+        }
 
         try {
           await logApiUsage({
