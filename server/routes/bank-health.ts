@@ -9,7 +9,7 @@ import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
 
-async function ensureVariationBankConflictTarget() {
+async function ensureBankConflictTargets() {
   try {
     await pool.query(`
       WITH ranked AS (
@@ -28,15 +28,33 @@ async function ensureVariationBankConflictTarget() {
       CREATE UNIQUE INDEX IF NOT EXISTS content_variation_banks_site_service_section_unique
       ON content_variation_banks (website_id, service, section_name)
     `);
+
+    await pool.query(`
+      WITH ranked AS (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY website_id, service
+                 ORDER BY last_computed_at DESC NULLS LAST, id DESC
+               ) AS rn
+        FROM variation_bank_completeness
+      )
+      DELETE FROM variation_bank_completeness
+      WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS variation_bank_completeness_site_service_unique
+      ON variation_bank_completeness (website_id, service)
+    `);
   } catch (err: any) {
-    console.error("[bank-health] Failed to ensure variation bank conflict target:", err?.message || err);
+    console.error("[bank-health] Failed to ensure bank conflict targets:", err?.message || err);
   }
 }
 
 const globalAny = globalThis as any;
-if (!globalAny.__nexusVariationBankConflictTargetEnsured) {
-  globalAny.__nexusVariationBankConflictTargetEnsured = true;
-  ensureVariationBankConflictTarget();
+if (!globalAny.__nexusBankConflictTargetsEnsured) {
+  globalAny.__nexusBankConflictTargetsEnsured = true;
+  ensureBankConflictTargets();
 }
 
 router.use((req, _res, next) => {
