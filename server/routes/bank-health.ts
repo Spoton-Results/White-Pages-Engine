@@ -9,6 +9,36 @@ import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 
 const router = Router();
 
+async function ensureVariationBankConflictTarget() {
+  try {
+    await pool.query(`
+      WITH ranked AS (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY website_id, service, section_name
+                 ORDER BY created_at DESC NULLS LAST, id DESC
+               ) AS rn
+        FROM content_variation_banks
+      )
+      DELETE FROM content_variation_banks
+      WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS content_variation_banks_site_service_section_unique
+      ON content_variation_banks (website_id, service, section_name)
+    `);
+  } catch (err: any) {
+    console.error("[bank-health] Failed to ensure variation bank conflict target:", err?.message || err);
+  }
+}
+
+const globalAny = globalThis as any;
+if (!globalAny.__nexusVariationBankConflictTargetEnsured) {
+  globalAny.__nexusVariationBankConflictTargetEnsured = true;
+  ensureVariationBankConflictTarget();
+}
+
 router.use((req, _res, next) => {
   if (req.path.startsWith("/api/auth")) return next("router");
   if (!req.path.startsWith("/api") && !req.path.startsWith("/r/")) return next("router");
@@ -21,7 +51,6 @@ router.use(onboardingLiveRouter);
 router.use(agencyRoiDashboardRouter);
 router.use(agencyMonthlyReportRouter);
 
-const globalAny = globalThis as any;
 if (!globalAny.__nexusIntentJobWorkerScheduled) {
   globalAny.__nexusIntentJobWorkerScheduled = true;
   scheduleIntentJobWorker();
