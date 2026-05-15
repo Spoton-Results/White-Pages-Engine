@@ -5,7 +5,7 @@
  * On startup the server resumes any interrupted jobs automatically.
  */
 import * as storage from "../storage";
-import { writeVariationsForService, fillMissingSectionsForService } from "./variation-writer";
+import { writeVariationsForService, fillMissingSectionsForService, VARIATION_BANK_SECTION_COUNT } from "./variation-writer";
 import type { BrandContext } from "./variation-writer";
 
 export interface BankWriteSettings {
@@ -38,8 +38,8 @@ export async function startBankWriteJob(
     accountId,
     websiteId,
     name: mode === "fill_missing"
-      ? `Fill missing sections (${services.length} services)`
-      : `Write variation banks (${services.length} services)`,
+      ? `Fill missing core bank sections (${services.length} services)`
+      : `Write variation banks (${services.length} services × ${VARIATION_BANK_SECTION_COUNT} Claude calls)`,
     status: "pending",
     totalPages: services.length,
     processedPages: 0,
@@ -68,7 +68,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   if (settings?.type !== "bank_write") { console.error("[bank-write] Not a bank_write job:", jobId); return; }
 
   await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
-  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services`);
+  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services; ${VARIATION_BANK_SECTION_COUNT} Claude calls per unbanked service`);
 
   const { ctx, progress, mode } = settings;
   const isFillMissing = mode === "fill_missing";
@@ -81,7 +81,8 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
     else if (entry.status === "error") failed++;
   }
 
-  // Process 3 services at a time (same as the previous non-persistent implementation)
+  // Process 3 services at a time. With the 5-core-section bank contract,
+  // this is at most 15 Claude calls active across the current batch.
   const CONCURRENCY = 3;
   const pending = progress
     .map((entry, i) => ({ entry, i }))
@@ -101,7 +102,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
         if (isFillMissing) {
           const result = await fillMissingSectionsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
           if (result.errors.length > 0) {
-            console.warn(`[bank-write] fill-missing "${entry.serviceName}" filled ${result.filled.length} sections; ${result.errors.length} error(s)`);
+            console.warn(`[bank-write] fill-missing "${entry.serviceName}" filled ${result.filled.length} core sections; ${result.errors.length} error(s)`);
           }
           // Recompute completeness after filling
           try {
@@ -128,7 +129,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
           const result = await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
           const partialErrors = Object.keys(result.errors).length;
           if (partialErrors > 0) {
-            console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/10 sections; ${partialErrors} section(s) failed`);
+            console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/${VARIATION_BANK_SECTION_COUNT} core sections; ${partialErrors} section(s) failed`);
           }
         }
         progress[i] = { ...entry, status: "done" };
