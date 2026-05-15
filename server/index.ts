@@ -49,9 +49,52 @@ function sendDatabaseRecoveryResponse(_req: Request, res: Response) {
   return res.status(503).json({ message: "Database is waking up or recovering. Please retry in a moment.", code: "DATABASE_RECOVERY", retryAfterSeconds: 10 });
 }
 
+function normalizeHost(value: unknown) {
+  return String(value || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .replace(/\.$/, "");
+}
+
+function isAdminHost(host: string) {
+  const landingDomain = normalizeHost(process.env.LANDING_DOMAIN || "spotonnexus.com");
+  const appBaseHost = normalizeHost(process.env.APP_BASE_URL || "");
+  const configuredAdminHost = normalizeHost(process.env.ADMIN_HOST || "admin.spotonnexus.com");
+  const adminHosts = new Set([
+    configuredAdminHost,
+    `admin.${landingDomain}`,
+    appBaseHost,
+  ].filter(Boolean));
+
+  return adminHosts.has(host) || host.endsWith(".up.railway.app") || host.endsWith(".railway.app");
+}
+
+function normalizeAdminHostHeaders(req: Request, _res: Response, next: NextFunction) {
+  const host = normalizeHost(
+    req.headers["x-nexus-host"] ||
+    req.headers["cf-custom-hostname"] ||
+    req.headers["x-forwarded-host"] ||
+    req.headers.host,
+  );
+
+  if (isAdminHost(host)) {
+    const landingDomain = normalizeHost(process.env.LANDING_DOMAIN || "spotonnexus.com");
+    req.headers["x-nexus-host"] = landingDomain;
+    req.headers["x-forwarded-host"] = landingDomain;
+    delete req.headers["cf-custom-hostname"];
+  }
+
+  next();
+}
+
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
+app.use(normalizeAdminHostHeaders);
 
 // Canonical job ownership lives here.
 // All /api/jobs/* routes must come from this router only.
