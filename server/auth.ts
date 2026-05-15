@@ -3,6 +3,7 @@ import session from "express-session";
 import connectPg from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import * as storage from "./storage";
+import { pool } from "./db";
 
 declare module "express-session" {
   interface SessionData {
@@ -123,19 +124,41 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-async function repairAdminPasswordIfEnvMatches(email: string, password: string, user: any): Promise<boolean> {
+function envAdminMatches(email: string, password: string): boolean {
   const adminEmail = String(process.env.ADMIN_EMAIL || "").toLowerCase().trim();
   const adminPassword = String(process.env.ADMIN_PASSWORD || "");
+  return !!adminEmail && !!adminPassword && email === adminEmail && password === adminPassword;
+}
 
-  if (!adminEmail || !adminPassword) return false;
-  if (email !== adminEmail) return false;
-  if (password !== adminPassword) return false;
-  if (!user?.isSuperAdmin) return false;
+async function upsertAdminFromEnv(email: string, password: string) {
+  if (!envAdminMatches(email, password)) return null;
 
-  const nextHash = await hashPassword(adminPassword);
-  await storage.updateUser(user.id, { password: nextHash } as any);
-  console.warn(`[auth] Repaired super admin password hash from ADMIN_PASSWORD for ${adminEmail}`);
-  return true;
+  const nextHash = await hashPassword(password);
+  const username = email.split("@")[0] || "admin";
+
+  const result = await pool.query(
+    `INSERT INTO users (id, username, email, password, role, is_super_admin, account_id, created_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, 'admin', true, NULL, NOW())
+     ON CONFLICT (email)
+     DO UPDATE SET
+       password = EXCLUDED.password,
+       role = 'admin',
+       is_super_admin = true,
+       account_id = NULL
+     RETURNING
+       id,
+       account_id AS "accountId",
+       username,
+       email,
+       password,
+       role,
+       is_super_admin AS "isSuperAdmin",
+       created_at AS "createdAt"`,
+    [username, email, nextHash],
+  );
+
+  console.warn(`[auth] Upserted super admin from ADMIN_EMAIL/ADMIN_PASSWORD for ${email}`);
+  return result.rows[0];
 }
 
 export async function loginUser(req: Request, email: string, password: string) {
@@ -143,12 +166,17 @@ export async function loginUser(req: Request, email: string, password: string) {
     throw new Error("Session middleware not initialized");
   }
 
-  const user = await storage.getUserByEmail(email);
-  if (!user) return null;
+  let user = await storage.getUserByEmail(email);
+  let valid = user ? await verifyPassword(password, user.password) : false;
 
-  const valid = await verifyPassword(password, user.password);
-  const repaired = valid ? false : await repairAdminPasswordIfEnvMatches(email, password, user);
-  if (!valid && !repaired) return null;
+  if (!valid) {
+    const repairedUser = await upsertAdminFromEnv(email, password);
+    if (!repairedUser) return null;
+    user = repairedUser;
+    valid = true;
+  }
+
+  if (!user || !valid) return null;
 
   req.session.userId = user.id;
   req.session.isSuperAdmin = user.isSuperAdmin;
