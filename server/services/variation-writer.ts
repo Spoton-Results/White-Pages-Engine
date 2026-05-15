@@ -4,8 +4,13 @@ import { callAI } from "./ai-provider";
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
 const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
-const SECTIONS = [...CORE_SECTIONS, ...EXTENDED_SECTIONS] as const;
+const SEO_EXPANSION_SECTIONS = ["comparison", "pricing_factors", "best_fit", "software_integration"] as const;
+const SECTIONS = [...CORE_SECTIONS, ...EXTENDED_SECTIONS, ...SEO_EXPANSION_SECTIONS] as const;
+export const VARIATION_BANK_SECTION_COUNT = SECTIONS.length;
+export const VARIATION_BANK_AI_CALLS_PER_SERVICE = 1;
 type Section = typeof SECTIONS[number];
+
+type BankPayload = Record<Section, string[]>;
 
 export interface BrandContext {
   brandName?: string;
@@ -16,336 +21,139 @@ export interface BrandContext {
 }
 
 function buildContextBlock(service: string, ctx?: BrandContext): string {
-  if (!ctx || (!ctx.brandName && !ctx.industryName)) return "";
-  const lines: string[] = ["BUSINESS CONTEXT (use this to write accurate, branded content):"];
-  if (ctx.brandName) lines.push(`- Brand: ${ctx.brandName}`);
-  if (ctx.brandDescription) lines.push(`- About: ${ctx.brandDescription}`);
-  if (ctx.voiceAndTone) lines.push(`- Voice & Tone: ${ctx.voiceAndTone}`);
-  if (ctx.industryName) lines.push(`- Industry: ${ctx.industryName}`);
-  if (ctx.industryDescription) lines.push(`- Industry Description: ${ctx.industryDescription}`);
+  const lines: string[] = ["BUSINESS CONTEXT:"];
+  if (ctx?.brandName) lines.push(`- Brand: ${ctx.brandName}`);
+  if (ctx?.brandDescription) lines.push(`- About: ${ctx.brandDescription}`);
+  if (ctx?.voiceAndTone) lines.push(`- Voice & Tone: ${ctx.voiceAndTone}`);
+  if (ctx?.industryName) lines.push(`- Industry: ${ctx.industryName}`);
+  if (ctx?.industryDescription) lines.push(`- Industry Description: ${ctx.industryDescription}`);
   lines.push(`- Service being promoted: ${service}`);
-  lines.push("");
   return lines.join("\n");
 }
 
-const SECTION_PROMPTS: Record<Section, (service: string, ctx?: BrandContext) => string> = {
-  intro: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct intro sections for a local SEO page about "${service}".
+function buildBankPrompt(service: string, ctx?: BrandContext): string {
+  return `${buildContextBlock(service, ctx)}
 
-Each intro = 2 HTML paragraphs (~120-150 words total). Use EXACTLY these placeholders:
-{{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}}
+You are writing reusable SEO variation-bank content for a white-pages/local SEO publishing engine.
 
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced. Do not mention any real city, state, region, or landmark by name — always use {{city}}, {{state}}, {{state_abbr}}, or {{landmark}} instead.
+IMPORTANT CONTRACT:
+- This is ONE paid Claude call for the service.
+- Generate ALL 14 variation-bank sections in this single response: 5 core, 5 extended, and 4 SEO expansion sections.
+- Each section must contain exactly 5 reusable variations.
+- Content must be location-agnostic and use placeholders only.
+- Never use literal city names, state names, regions, landmarks, or geographic references.
+- Do not return markdown or code fences.
+- Return valid JSON only.
 
-Each variation must open differently: vary tone, hook, and angle. No filler phrases like "In today's world".
-${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}
+ALLOWED PLACEHOLDERS:
+{{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}} {{brand}} {{business_count}} {{payment_regulations}}
 
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
+CORE SECTION REQUIREMENTS:
+1. intro — 5 variations, each 2 HTML paragraphs, 120-150 words total, use {{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}}.
+2. how_it_works — 5 variations, each 3 HTML paragraphs, 180-220 words total, use {{service}} {{city}} {{state}} {{brand}} {{business_count}}.
+3. benefits — 5 variations, each 4 HTML paragraphs with bold lead sentences, 200-240 words total, use {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}.
+4. faq — 5 variations, each 5 Q&A pairs, 240-280 words total, use {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}. Format each pair as <p><strong>Q: Question?</strong></p><p>Answer.</p>.
+5. cta — 5 variations, each 1 HTML paragraph, 60-80 words, use {{service}} {{city}} {{state}} {{brand}}.
 
-  how_it_works: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct "how it works" sections for a "${service}" service page.
+EXTENDED SECTION REQUIREMENTS:
+6. local_context — 5 variations, each 1 HTML paragraph, 80-110 words, use {{service}} {{city}} {{state}} {{state_abbr}} {{business_count}} {{business_culture}}.
+7. use_case — 5 variations, each 2 HTML paragraphs, 120-150 words total, use {{service}} {{city}} {{state}} {{brand}} {{business_culture}}.
+8. proof_trust — 5 variations, each 2 HTML paragraphs, 100-130 words total, use {{service}} {{city}} {{state}} {{brand}}. Establish credibility without inventing awards, guarantees, licenses, reviews, or certifications.
+9. pain_point — 5 variations, each 2 HTML paragraphs, 100-130 words total, use {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}.
+10. local_stat — 5 variations, each 1 HTML paragraph, 80-100 words, use {{service}} {{city}} {{state}} {{state_abbr}} {{business_count}}. Discuss general market pressure or operational impact; do not cite fake named studies.
 
-Each section = 3 HTML paragraphs (~180-220 words total). Use EXACTLY these placeholders:
-{{service}} {{city}} {{state}} {{brand}} {{business_count}}
+SEO EXPANSION SECTION REQUIREMENTS:
+11. comparison — 5 variations, each 2 HTML paragraphs, 120-160 words total, use {{service}} {{city}} {{state}} {{brand}}. Compare the service against common alternatives, DIY, outdated systems, or generic providers without naming competitors.
+12. pricing_factors — 5 variations, each 2 HTML paragraphs, 120-160 words total, use {{service}} {{city}} {{state}} {{brand}}. Explain cost drivers, fee variables, and value considerations. Do not provide fake prices or guaranteed savings.
+13. best_fit — 5 variations, each 2 HTML paragraphs, 100-140 words total, use {{service}} {{city}} {{state}} {{brand}}. Explain who the service is best for, who may not need it yet, and what conditions make it a strong fit.
+14. software_integration — 5 variations, each 2 HTML paragraphs, 120-160 words total, use {{service}} {{city}} {{state}} {{brand}}. Discuss system compatibility, software workflow, reporting, POS/CRM/accounting/ecommerce considerations without inventing exact supported integrations.
 
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
+QUALITY RULES:
+- No filler phrases like "In today's world", "top-notch", "look no further", "your trusted partner", or "comprehensive solutions".
+- Do not invent specific awards, reviews, guarantees, certifications, licenses, integrations, exact prices, or statistics.
+- Use direct, practical, business-owner language.
+- Keep HTML clean: only <p>, <strong>, and simple text inside each variation.
+${ctx?.voiceAndTone ? `- Match this voice and tone: ${ctx.voiceAndTone}` : ""}
+${ctx?.industryName ? `- Make the content accurate for the ${ctx.industryName} industry.` : ""}
 
-Describe the process from first contact to implementation. Each variation must use a different structure or emphasis.
-${ctx?.industryName ? `This is for the ${ctx.industryName} industry — make the process steps accurate for this industry.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>
-<p>...</p>`,
-
-  benefits: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct "benefits" sections for a "${service}" service page.
-
-Each section = 4 HTML paragraphs with bold lead sentences (~200-240 words total). Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
-
-Each paragraph should highlight a different benefit. Vary which benefits are featured.
-${ctx?.industryName ? `Focus on benefits that matter most to ${ctx.industryName} businesses.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p><strong>Benefit one.</strong> ...</p>
-<p><strong>Benefit two.</strong> ...</p>
-<p><strong>Benefit three.</strong> ...</p>
-<p><strong>Benefit four.</strong> ...</p>
-====VARIATION_2====
-<p><strong>Benefit one.</strong> ...</p>
-<p><strong>Benefit two.</strong> ...</p>
-<p><strong>Benefit three.</strong> ...</p>
-<p><strong>Benefit four.</strong> ...</p>
-====VARIATION_3====
-<p><strong>Benefit one.</strong> ...</p>
-<p><strong>Benefit two.</strong> ...</p>
-<p><strong>Benefit three.</strong> ...</p>
-<p><strong>Benefit four.</strong> ...</p>
-====VARIATION_4====
-<p><strong>Benefit one.</strong> ...</p>
-<p><strong>Benefit two.</strong> ...</p>
-<p><strong>Benefit three.</strong> ...</p>
-<p><strong>Benefit four.</strong> ...</p>
-====VARIATION_5====
-<p><strong>Benefit one.</strong> ...</p>
-<p><strong>Benefit two.</strong> ...</p>
-<p><strong>Benefit three.</strong> ...</p>
-<p><strong>Benefit four.</strong> ...</p>`,
-
-  faq: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct FAQ sections for a "${service}" service page, each with 5 Q&A pairs.
-
-Each FAQ section = 5 questions with answers (~240-280 words total). Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
-
-Use different questions across variations. Format each pair as:
-<p><strong>Q: Question?</strong></p>
-<p>Answer.</p>
-${ctx?.industryName ? `Write questions that ${ctx.industryName} business owners actually ask.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p><strong>Q: ...</strong></p>
-<p>...</p>
-... (5 pairs)
-====VARIATION_2====
-<p><strong>Q: ...</strong></p>
-<p>...</p>
-... (5 pairs)
-====VARIATION_3====
-<p><strong>Q: ...</strong></p>
-<p>...</p>
-... (5 pairs)
-====VARIATION_4====
-<p><strong>Q: ...</strong></p>
-<p>...</p>
-... (5 pairs)
-====VARIATION_5====
-<p><strong>Q: ...</strong></p>
-<p>...</p>
-... (5 pairs)`,
-
-  cta: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct CTA (call-to-action) closing paragraphs for a "${service}" service page.
-
-Each CTA = 1 HTML paragraph (~60-80 words). Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. The content must be location-agnostic so it works for ANY city/state when placeholders are replaced.
-
-Each must end with a strong action prompt. Vary the angle: urgency, trust, value, ease, results.
-${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-====VARIATION_5====
-<p>...</p>`,
-
-  local_context: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct local market context paragraphs for a "${service}" service page.
-
-Each paragraph = 2-3 sentences (~80-100 words) that establish why this service matters in this local market. Use EXACTLY:
-{{service}} {{city}} {{state}} {{state_abbr}} {{business_count}} {{business_culture}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should take a different angle: market size, growth, local economy, competitive landscape, or regional demand.
-${ctx?.industryName ? `Tie it to the ${ctx.industryName} industry context.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-====VARIATION_5====
-<p>...</p>`,
-
-  use_case: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct use case scenario sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~120-150 words) describing a real-world scenario where a business needed this service and how it was solved. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{business_culture}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should feature a different business type or problem scenario. Write from the customer's perspective.
-${ctx?.industryName ? `Focus on use cases relevant to the ${ctx.industryName} industry.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  proof_trust: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct proof and trust sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~100-130 words) that establish credibility through social proof, credentials, or trust signals. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should emphasize different trust signals: client results, years of experience, certifications, guarantees, or industry recognition. Write in third person or testimonial style.
-${ctx?.voiceAndTone ? `Match this voice and tone: ${ctx.voiceAndTone}` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  pain_point: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct pain point / problem-agitation sections for a "${service}" service page.
-
-Each section = 2 HTML paragraphs (~100-130 words) that describe the frustrations, risks, or costs of NOT having this service. Use EXACTLY:
-{{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above.
-
-Each variation should surface a different pain: financial loss, compliance risk, operational inefficiency, competitive disadvantage, or customer dissatisfaction.
-${ctx?.industryName ? `Make the pain points specific to ${ctx.industryName} businesses.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-<p>...</p>
-====VARIATION_5====
-<p>...</p>
-<p>...</p>`,
-
-  local_stat: (service, ctx) => `${buildContextBlock(service, ctx)}Write 5 distinct local market statistics sections for a "${service}" service page.
-
-Each section = 1-2 HTML paragraphs (~80-100 words) that reference compelling, plausible statistics about the local market, business adoption rates, or industry growth to support why this service matters. Use EXACTLY:
-{{service}} {{city}} {{state}} {{state_abbr}} {{business_count}}
-
-CRITICAL: NEVER use literal city names, state names, or specific geographic references. ONLY use the {{placeholders}} above. Do NOT fabricate specific named studies or real organizations — keep stats general and plausible.
-
-Each variation should emphasize a different type of stat: market size, adoption rate, ROI, cost savings, or growth trend.
-${ctx?.industryName ? `Frame the statistics around the ${ctx.industryName} industry.` : ""}
-
-Format EXACTLY as shown — no text outside delimiters:
-====VARIATION_1====
-<p>...</p>
-====VARIATION_2====
-<p>...</p>
-====VARIATION_3====
-<p>...</p>
-====VARIATION_4====
-<p>...</p>
-====VARIATION_5====
-<p>...</p>`,
-};
-
-function parseVariations(raw: string): string[] {
-  const results: string[] = [];
-  for (let i = 1; i <= 5; i++) {
-    const start = raw.indexOf(`====VARIATION_${i}====`);
-    const end = i < 5 ? raw.indexOf(`====VARIATION_${i + 1}====`) : raw.length;
-    if (start === -1) continue;
-    const content = raw.slice(start + `====VARIATION_${i}====`.length, end).trim();
-    if (content) results.push(content);
-  }
-  return results;
+OUTPUT JSON SHAPE:
+{
+  "intro": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "how_it_works": ["<p>...</p><p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "benefits": ["<p><strong>...</strong> ...</p><p><strong>...</strong> ...</p><p><strong>...</strong> ...</p><p><strong>...</strong> ...</p>", "...", "...", "...", "..."],
+  "faq": ["<p><strong>Q: ...?</strong></p><p>...</p>...", "...", "...", "...", "..."],
+  "cta": ["<p>...</p>", "...", "...", "...", "..."],
+  "local_context": ["<p>...</p>", "...", "...", "...", "..."],
+  "use_case": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "proof_trust": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "pain_point": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "local_stat": ["<p>...</p>", "...", "...", "...", "..."],
+  "comparison": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "pricing_factors": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "best_fit": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "software_integration": ["<p>...</p><p>...</p>", "...", "...", "...", "..."]
+}`;
 }
 
-async function writeSingleSection(
-  section: Section,
+function extractBalancedJson(raw: string): string | null {
+  const stripped = raw.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return stripped.slice(start, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function normalizeVariations(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(v => String(v || "").trim()).filter(v => v.length > 0).slice(0, 5);
+}
+
+function validatePayload(parsed: any): BankPayload {
+  const payload = {} as BankPayload;
+  for (const section of SECTIONS) payload[section] = normalizeVariations(parsed?.[section]);
+  return payload;
+}
+
+async function writeBankPayload(
+  payload: BankPayload,
   serviceName: string,
   accountId: string,
   websiteId: string,
-  ctx?: BrandContext,
-): Promise<void> {
-  const prompt = SECTION_PROMPTS[section](serviceName, ctx);
-  const { text: raw, provider, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 2500 });
+): Promise<{ written: string[]; errors: Record<string, string> }> {
+  const written: string[] = [];
+  const errors: Record<string, string> = {};
 
-  try {
-    await logApiUsage({
-      accountId,
-      websiteId,
-      generationType: `variation_writing:${section}`,
-      modelUsed: provider,
-      inputTokens: promptTokens,
-      outputTokens: completionTokens,
-    });
-  } catch (logErr: any) {
-    console.warn("[usage-logger] variation_writing log failed (non-fatal):", logErr?.message);
+  for (const section of SECTIONS) {
+    const variations = payload[section];
+    if (!variations.length) {
+      errors[section] = `No variations returned for ${section}`;
+      continue;
+    }
+    try {
+      await db.createVariationBank({ accountId, websiteId, service: serviceName, sectionName: section, variations });
+      written.push(section);
+    } catch (err: any) {
+      errors[section] = err?.message ?? String(err);
+    }
   }
-  const variations = parseVariations(raw);
-  if (variations.length === 0) {
-    throw new Error(`No variations parsed for section "${section}" of service "${serviceName}"`);
-  }
-  await db.createVariationBank({ accountId, websiteId, service: serviceName, sectionName: section, variations });
+  return { written, errors };
 }
 
 export async function writeVariationsForService(
@@ -354,31 +162,39 @@ export async function writeVariationsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<{ written: string[]; errors: Record<string, string> }> {
-  const written: string[] = [];
-  const errors: Record<string, string> = {};
+  const prompt = buildBankPrompt(serviceName, ctx);
+  const { text: raw, provider, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 22000, temperature: 0.7 });
 
-  for (const section of SECTIONS) {
-    try {
-      await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
-      written.push(section);
-    } catch (err: any) {
-      errors[section] = err?.message ?? String(err);
-      console.error(`[variation-writer] Section "${section}" failed for "${serviceName}":`, errors[section]);
-    }
+  try {
+    await logApiUsage({
+      accountId,
+      websiteId,
+      generationType: "variation_writing:full_14_section_bank",
+      modelUsed: provider,
+      inputTokens: promptTokens,
+      outputTokens: completionTokens,
+    });
+  } catch (logErr: any) {
+    console.warn("[usage-logger] variation_writing log failed (non-fatal):", logErr?.message);
   }
 
-  if (written.length === 0) {
-    const firstError = Object.values(errors)[0] ?? "All sections failed";
-    throw new Error(`All 10 sections failed for "${serviceName}": ${firstError}`);
-  }
+  const json = extractBalancedJson(raw);
+  if (!json) throw new Error(`Claude did not return valid JSON for full 14-section variation bank. Response starts: ${raw.slice(0, 300)}`);
 
-  return { written, errors };
+  let parsed: any;
+  try { parsed = JSON.parse(json); } catch (err: any) { throw new Error(`Variation bank JSON parse failed: ${err?.message ?? String(err)}`); }
+
+  const result = await writeBankPayload(validatePayload(parsed), serviceName, accountId, websiteId);
+  if (result.written.length === 0) {
+    const firstError = Object.values(result.errors)[0] ?? "No variation bank sections written";
+    throw new Error(`Full 14-section bank write failed for "${serviceName}": ${firstError}`);
+  }
+  return result;
 }
 
 /**
- * Write only the sections that are currently missing for this service.
- * Sections that already have variations are skipped.
- * Returns which sections were filled and which were skipped.
+ * Fill missing bank sections. This still uses one Claude call per service:
+ * it regenerates the full 14-section bank, then saves only sections that are missing.
  */
 export async function fillMissingSectionsForService(
   serviceName: string,
@@ -388,20 +204,49 @@ export async function fillMissingSectionsForService(
 ): Promise<{ filled: string[]; skipped: string[]; errors: string[] }> {
   const existing = await db.getVariationBanks(websiteId, serviceName);
   const existingSet = new Set(existing.map((b: any) => b.sectionName));
-
-  const toFill = SECTIONS.filter(s => !existingSet.has(s));
   const skipped = SECTIONS.filter(s => existingSet.has(s));
+  const missing = SECTIONS.filter(s => !existingSet.has(s));
+
+  if (missing.length === 0) return { filled: [], skipped: skipped as string[], errors: [] };
+
+  const prompt = buildBankPrompt(serviceName, ctx);
+  const { text: raw, provider, promptTokens, completionTokens } = await callAI({ prompt, maxTokens: 22000, temperature: 0.7 });
+
+  try {
+    await logApiUsage({
+      accountId,
+      websiteId,
+      generationType: "variation_writing:fill_missing_full_14_section_bank",
+      modelUsed: provider,
+      inputTokens: promptTokens,
+      outputTokens: completionTokens,
+    });
+  } catch (logErr: any) {
+    console.warn("[usage-logger] variation_writing fill_missing log failed (non-fatal):", logErr?.message);
+  }
+
+  const json = extractBalancedJson(raw);
+  if (!json) throw new Error(`Claude did not return valid JSON for fill-missing 14-section variation bank. Response starts: ${raw.slice(0, 300)}`);
+
+  let parsed: any;
+  try { parsed = JSON.parse(json); } catch (err: any) { throw new Error(`Fill-missing variation bank JSON parse failed: ${err?.message ?? String(err)}`); }
+
+  const payload = validatePayload(parsed);
   const filled: string[] = [];
   const errors: string[] = [];
 
-  for (const section of toFill) {
+  for (const section of missing) {
+    const variations = payload[section];
+    if (!variations.length) {
+      errors.push(`${section}: no variations returned`);
+      continue;
+    }
     try {
-      await writeSingleSection(section, serviceName, accountId, websiteId, ctx);
+      await db.createVariationBank({ accountId, websiteId, service: serviceName, sectionName: section, variations });
       filled.push(section);
     } catch (err: any) {
       errors.push(`${section}: ${err?.message ?? "unknown error"}`);
     }
   }
-
   return { filled, skipped: skipped as string[], errors };
 }

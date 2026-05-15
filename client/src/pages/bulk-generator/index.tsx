@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 
 type QueueItem = { bpId: string; locPayload: Record<string, any>; label: string };
 type ProgressRow = { service: string; status: string; created: number; updated: number; skipped: number; errors: number };
+type CityLimit = "100" | "500" | "1000" | "5000" | "all";
 
 async function apiFetch<T = any>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...opts });
@@ -37,6 +38,13 @@ function summarizeProgress(progress?: ProgressRow[]) {
   }, { created: 0, skipped: 0, errors: 0 });
 }
 
+function byPopulationThenName(a: any, b: any) {
+  const ap = Number(a.population || 0);
+  const bp = Number(b.population || 0);
+  if (bp !== ap) return bp - ap;
+  return String(a.name).localeCompare(String(b.name)) || String(a.stateCode).localeCompare(String(b.stateCode));
+}
+
 export default function BulkGeneratorPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -48,9 +56,10 @@ export default function BulkGeneratorPage() {
   const [selectedCitySlugs, setSelectedCitySlugs] = useState<Set<string>>(new Set());
   const [stateSearch, setStateSearch] = useState("");
   const [citySearch, setCitySearch] = useState("");
+  const [cityLimit, setCityLimit] = useState<CityLimit>("100");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
-  const [cycleBlueprints, setCycleBlueprints] = useState(true);
+  const [cycleBlueprints, setCycleBlueprints] = useState(false);
   const [runBothLocations, setRunBothLocations] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [activeJobId, setActiveJobId] = useState("");
@@ -83,9 +92,11 @@ export default function BulkGeneratorPage() {
   });
 
   const services = servicesQ.data ?? [];
-  const bankServicesSet = new Set(bankServicesQ.data ?? []);
+  const bankedServices = bankServicesQ.data ?? [];
+  const bankServicesSet = new Set(bankedServices);
   const allLocations = locationsQ.data ?? [];
   const blueprints = blueprintsQ.data ?? [];
+  const selectedBlueprint = blueprints.find((bp: any) => bp.id === blueprintId);
 
   const dbStates = useMemo(() => {
     const seen = new Set<string>();
@@ -98,7 +109,7 @@ export default function BulkGeneratorPage() {
     const seen = new Set<string>();
     return allLocations
       .filter((l: any) => l.type === "city" && l.slug && !seen.has(l.slug) && (seen.add(l.slug), true))
-      .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)) || String(a.stateCode).localeCompare(String(b.stateCode)));
+      .sort(byPopulationThenName);
   }, [allLocations]);
 
   const filteredStates = useMemo(() => {
@@ -106,15 +117,21 @@ export default function BulkGeneratorPage() {
     return dbStates.filter((loc: any) => !q || String(loc.name).toLowerCase().includes(q) || String(loc.stateCode || "").toLowerCase().includes(q));
   }, [dbStates, stateSearch]);
 
-  const filteredCities = useMemo(() => {
+  const filteredCitiesAll = useMemo(() => {
     const q = citySearch.trim().toLowerCase();
     return dbCities.filter((loc: any) => !q || String(loc.name).toLowerCase().includes(q) || String(loc.stateCode || "").toLowerCase().includes(q));
   }, [dbCities, citySearch]);
 
+  const filteredCities = useMemo(() => {
+    if (cityLimit === "all") return filteredCitiesAll;
+    return filteredCitiesAll.slice(0, Number(cityLimit));
+  }, [filteredCitiesAll, cityLimit]);
+
   useEffect(() => {
     const defaultId = selectedWebsite?.settings?.defaultBlueprintId;
     if (defaultId) setBlueprintId(defaultId);
-  }, [selectedWebsite?.id]);
+    else if (!blueprintId && blueprints.length > 0) setBlueprintId(blueprints[0].id);
+  }, [selectedWebsite?.id, blueprints.length]);
 
   useEffect(() => {
     const job = activeJobQ.data;
@@ -170,11 +187,13 @@ export default function BulkGeneratorPage() {
     setSelectedCitySlugs(new Set());
     setStateSearch("");
     setCitySearch("");
+    setCityLimit("100");
     setServiceProgress([]);
     setLastResult(null);
     setLastFailure("");
     setActiveJobId("");
     setIsRunningAll(false);
+    setCycleBlueprints(false);
     bpQueueRef.current = [];
     bpQueueIdxRef.current = 0;
     handledTerminalJobRef.current = "";
@@ -198,6 +217,22 @@ export default function BulkGeneratorPage() {
     return buildCityPayload();
   }
 
+  function toggleService(service: string, checked: boolean) {
+    setSelectedServices((prev) => {
+      const next = new Set(prev);
+      checked ? next.add(service) : next.delete(service);
+      return next;
+    });
+  }
+
+  function selectAllServices() { setSelectedServices(new Set(services)); }
+  function selectBankedServices() { setSelectedServices(new Set(services.filter(s => bankServicesSet.has(s)))); }
+  function clearServices() { setSelectedServices(new Set()); }
+  function selectVisibleStates() { setSelectedStateCodes(new Set(filteredStates.map((loc: any) => loc.stateCode).filter(Boolean))); }
+  function clearStates() { setSelectedStateCodes(new Set()); }
+  function selectVisibleCities() { setSelectedCitySlugs(new Set(filteredCities.map((loc: any) => loc.slug).filter(Boolean))); }
+  function clearCities() { setSelectedCitySlugs(new Set()); }
+
   async function submitJobForBlueprint(item: QueueItem) {
     try {
       const payload: Record<string, any> = { services: Array.from(selectedServices), ...item.locPayload, overwrite };
@@ -218,18 +253,20 @@ export default function BulkGeneratorPage() {
 
   async function runAllServices() {
     if (!websiteId || selectedServices.size === 0) return;
-    const bpIds = cycleBlueprints && blueprints.length > 1 ? blueprints.map((bp: any) => bp.id) : [blueprintId];
-    const queue: QueueItem[] = [];
+    const bpIds = cycleBlueprints && blueprints.length > 1 ? blueprints.map((bp: any) => bp.id) : [blueprintId].filter(Boolean);
+    if (bpIds.length === 0) {
+      toast({ title: "Choose a blueprint", description: "Select a blueprint before generating pages.", variant: "destructive" });
+      return;
+    }
 
+    const queue: QueueItem[] = [];
     if (runBothLocations) {
       const hasStateSelection = selectedStateCodes.size > 0 || mode === "all_states";
       const hasCitySelection = selectedCitySlugs.size > 0;
-
       if (!hasStateSelection && !hasCitySelection) {
         toast({ title: "Choose locations", description: "Select at least one state or city before running both location types.", variant: "destructive" });
         return;
       }
-
       for (const id of bpIds) {
         const bpIndex = bpIds.indexOf(id) + 1;
         if (hasStateSelection) queue.push({ bpId: id, locPayload: buildStatePayload(), label: `State pages ${bpIndex}/${bpIds.length}` });
@@ -240,7 +277,6 @@ export default function BulkGeneratorPage() {
     }
 
     if (queue.length === 0) return;
-
     bpQueueRef.current = queue;
     bpQueueIdxRef.current = 0;
     accumulatedRef.current = { created: 0, skipped: 0, errors: 0 };
@@ -257,22 +293,88 @@ export default function BulkGeneratorPage() {
   const cityTargetCount = selectedCitySlugs.size;
   const singleModeTargetCount = mode === "all_states" ? (dbStates.length || 50) : mode === "specific_states" ? selectedStateCodes.size : selectedCitySlugs.size;
   const effectiveTargetCount = runBothLocations ? stateTargetCount + cityTargetCount : singleModeTargetCount;
-  const estimatedPages = selectedServices.size * effectiveTargetCount * (cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1);
+  const blueprintMultiplier = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
+  const estimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier;
   const showStatePicker = runBothLocations || mode === "specific_states";
   const showCityPicker = runBothLocations || mode === "specific_cities";
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-start gap-3"><div className="p-2 rounded-lg bg-primary/10"><Zap className="size-5 text-primary" /></div><div><h1 className="text-2xl font-bold">Hybrid Bulk Generator</h1><p className="text-muted-foreground text-sm">Generate state pages and city pages together when needed.</p></div></div>
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-primary/10"><Zap className="size-5 text-primary" /></div>
+          <div>
+            <h1 className="text-2xl font-bold">Hybrid Bulk Generator</h1>
+            <p className="text-muted-foreground text-sm">Generate pages from service banks with 0 page-level AI calls.</p>
+          </div>
+        </div>
 
-        <Card><CardHeader><CardTitle>Select Website</CardTitle></CardHeader><CardContent><Select value={websiteId} onValueChange={resetForWebsite}><SelectTrigger className="max-w-md"><SelectValue placeholder="Choose a website..." /></SelectTrigger><SelectContent>{websites.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ""}` : w.domain}</SelectItem>)}</SelectContent></Select></CardContent></Card>
+        <Card>
+          <CardHeader><CardTitle>Select Website</CardTitle></CardHeader>
+          <CardContent>
+            <Select value={websiteId} onValueChange={resetForWebsite}>
+              <SelectTrigger className="max-w-md"><SelectValue placeholder="Choose a website..." /></SelectTrigger>
+              <SelectContent>{websites.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ""}` : w.domain}</SelectItem>)}</SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
 
-        {websiteId && <Card><CardHeader><CardTitle>Blueprint</CardTitle></CardHeader><CardContent className="space-y-3">{blueprints.map((bp: any) => <Button key={bp.id} variant={blueprintId === bp.id ? "default" : "outline"} size="sm" onClick={() => setBlueprintId(blueprintId === bp.id ? "" : bp.id)}>{bp.name}</Button>)}{blueprints.length > 1 && <label className="flex gap-2 items-center text-sm"><Checkbox checked={cycleBlueprints} onCheckedChange={(v) => setCycleBlueprints(!!v)} />Run all blueprints</label>}</CardContent></Card>}
+        {websiteId && <Card>
+          <CardHeader><CardTitle>Blueprint</CardTitle><CardDescription>Choose one blueprint or run every blueprint in sequence.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <Select value={blueprintId} onValueChange={setBlueprintId} disabled={cycleBlueprints}>
+              <SelectTrigger className="max-w-xl"><SelectValue placeholder="Select blueprint" /></SelectTrigger>
+              <SelectContent>{blueprints.map((bp: any) => <SelectItem key={bp.id} value={bp.id}>{bp.name} · {bp.pageType}</SelectItem>)}</SelectContent>
+            </Select>
+            {selectedBlueprint && !cycleBlueprints && <p className="text-xs text-muted-foreground">Selected: {selectedBlueprint.name}</p>}
+            {blueprints.length > 1 && <label className="flex gap-2 items-center text-sm"><Checkbox checked={cycleBlueprints} onCheckedChange={(v) => setCycleBlueprints(!!v)} />Run all {blueprints.length} blueprints</label>}
+          </CardContent>
+        </Card>}
 
-        {websiteId && <Card><CardHeader><CardTitle>Configure</CardTitle><CardDescription>{estimatedPages.toLocaleString()} estimated page(s)</CardDescription></CardHeader><CardContent className="space-y-4"><div><Label>Services</Label><div className="border rounded-md p-2 max-h-48 overflow-y-auto">{services.map((service) => <label key={service} className="flex gap-2 items-center py-1 text-sm"><Checkbox checked={selectedServices.has(service)} onCheckedChange={(checked) => setSelectedServices((prev) => { const next = new Set(prev); checked ? next.add(service) : next.delete(service); return next; })} />{service}{!bankServicesSet.has(service) && <span className="text-xs text-amber-600">No banks</span>}</label>)}</div></div><div><Label>Location scope</Label><Select value={mode} onValueChange={(v: any) => setMode(v)}><SelectTrigger className="max-w-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all_states">All states</SelectItem><SelectItem value="specific_states">Specific states</SelectItem><SelectItem value="specific_cities">Specific cities</SelectItem></SelectContent></Select></div><label className="flex gap-2 items-center text-sm rounded border px-3 py-2 w-fit"><Checkbox checked={runBothLocations} onCheckedChange={(v) => setRunBothLocations(!!v)} />Generate both state and city pages in one sequence</label>{showStatePicker && <div className="space-y-2"><Label>State pages ({selectedStateCodes.size || (mode === "all_states" ? dbStates.length : 0)} selected)</Label><Input placeholder="Search states, e.g. Utah" value={stateSearch} onChange={(e) => setStateSearch(e.target.value)} className="max-w-sm" /><div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border rounded p-2">{filteredStates.map((loc: any) => <label key={loc.slug || loc.stateCode} className="flex gap-2 text-sm"><Checkbox checked={selectedStateCodes.has(loc.stateCode)} onCheckedChange={(checked) => setSelectedStateCodes((prev) => { const next = new Set(prev); checked ? next.add(loc.stateCode) : next.delete(loc.stateCode); return next; })} />{loc.name} <span className="text-xs text-muted-foreground">{loc.stateCode}</span></label>)}</div></div>}{showCityPicker && <div className="space-y-2"><Label>City pages ({selectedCitySlugs.size} selected)</Label><Input placeholder="Search cities, e.g. St George" value={citySearch} onChange={(e) => setCitySearch(e.target.value)} className="max-w-sm" /><div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border rounded p-2">{filteredCities.slice(0, 1000).map((loc: any) => <label key={loc.slug} className="flex gap-2 text-sm"><Checkbox checked={selectedCitySlugs.has(loc.slug)} onCheckedChange={(checked) => setSelectedCitySlugs((prev) => { const next = new Set(prev); checked ? next.add(loc.slug) : next.delete(loc.slug); return next; })} />{loc.name}, {loc.stateCode}</label>)}</div></div>}<label className="flex gap-2 items-center text-sm"><Checkbox checked={overwrite} onCheckedChange={(v) => setOverwrite(!!v)} />Overwrite existing pages</label></CardContent></Card>}
+        {websiteId && <Card>
+          <CardHeader><CardTitle>Configure</CardTitle><CardDescription>{estimatedPages.toLocaleString()} estimated page(s)</CardDescription></CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <Label>Services ({selectedServices.size} selected / {services.length} total)</Label>
+                <div className="flex gap-2 flex-wrap">
+                  <Button type="button" size="sm" variant="outline" onClick={selectAllServices}>Select all</Button>
+                  <Button type="button" size="sm" variant="outline" onClick={selectBankedServices}>Select banked only ({bankedServices.length})</Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={clearServices}>Clear</Button>
+                </div>
+              </div>
+              <div className="border rounded-md p-2 max-h-64 overflow-y-auto grid md:grid-cols-2 gap-x-4">
+                {services.map((service) => <label key={service} className="flex gap-2 items-center py-1 text-sm"><Checkbox checked={selectedServices.has(service)} onCheckedChange={(checked) => toggleService(service, !!checked)} />{service}{!bankServicesSet.has(service) && <span className="text-xs text-amber-600">No banks</span>}</label>)}
+              </div>
+            </div>
 
-        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? "Will queue selected state page job(s), then selected city page job(s). Example: Utah + St. George works in one run." : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
+            <div className="space-y-2">
+              <Label>Location scope</Label>
+              <Select value={mode} onValueChange={(v: any) => setMode(v)}>
+                <SelectTrigger className="max-w-xs"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="all_states">All states</SelectItem><SelectItem value="specific_states">Specific states</SelectItem><SelectItem value="specific_cities">Specific cities</SelectItem></SelectContent>
+              </Select>
+            </div>
+
+            <label className="flex gap-2 items-center text-sm rounded border px-3 py-2 w-fit"><Checkbox checked={runBothLocations} onCheckedChange={(v) => setRunBothLocations(!!v)} />Generate both state and city pages in one sequence</label>
+
+            {showStatePicker && <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap"><Label>State pages ({selectedStateCodes.size} selected)</Label><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={selectVisibleStates}>Select visible</Button><Button type="button" size="sm" variant="ghost" onClick={clearStates}>Clear</Button></div></div>
+              <Input placeholder="Search states, e.g. Utah" value={stateSearch} onChange={(e) => setStateSearch(e.target.value)} className="max-w-sm" />
+              <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border rounded p-2">{filteredStates.map((loc: any) => <label key={loc.slug || loc.stateCode} className="flex gap-2 text-sm"><Checkbox checked={selectedStateCodes.has(loc.stateCode)} onCheckedChange={(checked) => setSelectedStateCodes((prev) => { const next = new Set(prev); checked ? next.add(loc.stateCode) : next.delete(loc.stateCode); return next; })} />{loc.name} <span className="text-xs text-muted-foreground">{loc.stateCode}</span></label>)}</div>
+            </div>}
+
+            {showCityPicker && <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap"><Label>City pages ({selectedCitySlugs.size} selected / {filteredCities.length.toLocaleString()} visible / {filteredCitiesAll.length.toLocaleString()} matched)</Label><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={selectVisibleCities}>Select visible</Button><Button type="button" size="sm" variant="ghost" onClick={clearCities}>Clear</Button></div></div>
+              <div className="flex gap-2 flex-wrap"><Input placeholder="Search cities, e.g. St George" value={citySearch} onChange={(e) => setCitySearch(e.target.value)} className="max-w-sm" /><Select value={cityLimit} onValueChange={(v: CityLimit) => setCityLimit(v)}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="100">Top 100 cities</SelectItem><SelectItem value="500">Top 500 cities</SelectItem><SelectItem value="1000">Top 1,000 cities</SelectItem><SelectItem value="5000">Top 5,000 cities</SelectItem><SelectItem value="all">All matched cities</SelectItem></SelectContent></Select></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1 max-h-64 overflow-y-auto border rounded p-2">{filteredCities.map((loc: any) => <label key={loc.slug} className="flex gap-2 text-sm"><Checkbox checked={selectedCitySlugs.has(loc.slug)} onCheckedChange={(checked) => setSelectedCitySlugs((prev) => { const next = new Set(prev); checked ? next.add(loc.slug) : next.delete(loc.slug); return next; })} />{loc.name}, {loc.stateCode}{loc.population ? <span className="text-xs text-muted-foreground">pop. {Number(loc.population).toLocaleString()}</span> : null}</label>)}</div>
+            </div>}
+
+            <label className="flex gap-2 items-center text-sm"><Checkbox checked={overwrite} onCheckedChange={(v) => setOverwrite(!!v)} />Overwrite existing pages</label>
+          </CardContent>
+        </Card>}
+
+        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? "Will queue selected state page job(s), then selected city page job(s)." : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
       </div>
     </DashboardLayout>
   );

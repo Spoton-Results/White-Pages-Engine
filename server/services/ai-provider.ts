@@ -24,6 +24,19 @@ const PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-chat";
 
 const RETRY_DELAYS = [3000, 6000, 12000];
 
+type ProviderName = "anthropic" | "openai" | "perplexity";
+
+function getProviderKey(name: ProviderName): string | undefined {
+  switch (name) {
+    case "anthropic":
+      return process.env.ANTHROPIC_API_KEY;
+    case "openai":
+      return process.env.OPENAI_API_KEY;
+    case "perplexity":
+      return process.env.PERPLEXITY_API_KEY;
+  }
+}
+
 /** True if the error means this provider is out of credits / quota — not retryable */
 function isCreditError(err: any): boolean {
   const msg = (err?.message || "").toLowerCase();
@@ -59,13 +72,21 @@ async function sleep(ms: number) {
 
 // ─── Anthropic ────────────────────────────────────────────────────────────────
 
-const _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _anthropic: Anthropic | null = null;
+
+function getAnthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+  if (!_anthropic) _anthropic = new Anthropic({ apiKey });
+  return _anthropic;
+}
 
 async function callAnthropic(req: AIRequest): Promise<AIResponse> {
+  const anthropic = getAnthropicClient();
   let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const msg = await _anthropic.messages.create({
+      const msg = await anthropic.messages.create({
         model: ANTHROPIC_MODEL,
         max_tokens: req.maxTokens ?? 4096,
         messages: [{ role: "user", content: req.prompt }],
@@ -187,24 +208,31 @@ async function callPerplexity(req: AIRequest): Promise<AIResponse> {
 
 // ─── Public: unified call with automatic provider fallback ───────────────────
 
-let _activeProvider: "anthropic" | "openai" | "perplexity" = "anthropic";
+let _activeProvider: ProviderName = "anthropic";
 
 export function getActiveProvider() {
   return _activeProvider;
 }
 
 export async function callAI(req: AIRequest): Promise<AIResponse> {
-  const providers: Array<{ name: "anthropic" | "openai" | "perplexity"; fn: () => Promise<AIResponse> }> = [
-    { name: "anthropic", fn: () => callAnthropic(req) },
-    { name: "openai",    fn: () => callOpenAI(req)    },
-    { name: "perplexity",fn: () => callPerplexity(req)},
-  ];
+  const providerFns: Record<ProviderName, () => Promise<AIResponse>> = {
+    anthropic: () => callAnthropic(req),
+    openai: () => callOpenAI(req),
+    perplexity: () => callPerplexity(req),
+  };
+
+  const providers: ProviderName[] = ["anthropic", "openai", "perplexity"];
+  const configuredProviders = providers.filter((name) => Boolean(getProviderKey(name)));
+
+  if (configuredProviders.length === 0) {
+    throw new Error("No AI providers configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or PERPLEXITY_API_KEY.");
+  }
 
   let lastErr: any;
 
-  for (const { name, fn } of providers) {
+  for (const name of configuredProviders) {
     try {
-      const result = await fn();
+      const result = await providerFns[name]();
       if (_activeProvider !== name) {
         console.log(`[ai-provider] Switched to ${name} (was ${_activeProvider})`);
         _activeProvider = name;
@@ -213,18 +241,17 @@ export async function callAI(req: AIRequest): Promise<AIResponse> {
     } catch (err: any) {
       lastErr = err;
       if (isCreditError(err)) {
-        console.warn(`[ai-provider] ${name} out of credits — trying next provider`);
+        console.warn(`[ai-provider] ${name} out of credits — trying next configured provider`);
         continue;
       }
-      // For non-credit errors from Anthropic, try next only if key is the issue
       const msg = (err?.message || "").toLowerCase();
       if (msg.includes("not configured") || msg.includes("api_key")) {
+        console.warn(`[ai-provider] ${name} unavailable — trying next configured provider`);
         continue;
       }
-      // Non-retryable non-credit error — throw immediately
       throw err;
     }
   }
 
-  throw lastErr ?? new Error("All AI providers exhausted");
+  throw lastErr ?? new Error("All configured AI providers exhausted");
 }

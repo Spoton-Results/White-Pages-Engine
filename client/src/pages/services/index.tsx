@@ -442,7 +442,7 @@ export default function ServicesPage() {
                         </Button>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <Info className="size-3" />
-                          5 Claude API calls per service (paid once, generates instantly after)
+                          1 Claude API call per service creates all 10 banks: 5 core + 5 extended; bulk pages use 0 AI calls after
                         </p>
                       </div>
                     )}
@@ -618,73 +618,71 @@ export default function ServicesPage() {
                     </div>
                   </div>
                   <div className={`size-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    selectedSuggestions.has(i) ? "bg-primary text-primary-foreground" : "border border-muted-foreground/30"
+                    selectedSuggestions.has(i) ? "bg-primary text-primary-foreground" : "bg-muted"
                   }`}>
-                    {selectedSuggestions.has(i) && <Check className="size-3" />}
+                    {selectedSuggestions.has(i) ? <Check className="size-3" /> : <X className="size-3 text-muted-foreground" />}
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setShowReview(false); setShowAI(true); }}>
-              ← Regenerate
-            </Button>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReview(false)}>Cancel</Button>
             <Button
               onClick={() => bulkCreateMutation.mutate()}
               disabled={bulkCreateMutation.isPending || selectedSuggestions.size === 0}
-              className="gap-2"
               data-testid="button-import-services"
             >
-              <Plus className="size-4" />
-              {bulkCreateMutation.isPending
-                ? "Importing…"
-                : `Import ${selectedSuggestions.size} Service${selectedSuggestions.size !== 1 ? "s" : ""}`}
+              {bulkCreateMutation.isPending ? "Adding…" : `Add ${selectedSuggestions.size} Services`}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Manual Add Dialog */}
+      {/* Create Service Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add Service Manually</DialogTitle></DialogHeader>
-          <form onSubmit={handleSubmit(d => create.mutate(d))} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Service Name</Label>
-              <Input placeholder="Credit Card Processing" {...register("name", { required: true })} />
+          <DialogHeader>
+            <DialogTitle>Add Service</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit((data) => create.mutate(data))} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input {...register("name", { required: true })} placeholder="Emergency Plumbing" data-testid="input-service-name" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Slug</Label>
-              <Input placeholder="credit-card-processing" {...register("slug", { required: true })} />
+              <Input {...register("slug", { required: true })} placeholder="emergency-plumbing" data-testid="input-service-slug" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Description</Label>
-              <Textarea rows={2} placeholder="Service description..." {...register("description")} />
+              <Textarea {...register("description")} placeholder="Brief description..." data-testid="input-service-description" />
             </div>
-            <div className="space-y-1.5">
-              <Label>Keywords (comma separated)</Label>
-              <Input placeholder="credit card processing, merchant services, payment processing" {...register("keywords")} />
+            <div className="space-y-2">
+              <Label>Keywords (comma-separated)</Label>
+              <Input {...register("keywords")} placeholder="emergency plumber, 24 hour plumbing" />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={create.isPending}>Add</Button>
+              <Button type="submit" disabled={create.isPending}>{create.isPending ? "Adding…" : "Add Service"}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation dialog — replaces confirm() which is blocked on mobile browsers */}
-      <Dialog open={!!confirmDeleteId} onOpenChange={v => { if (!v) setConfirmDeleteId(null); }}>
+      {/* Confirm Delete Dialog */}
+      <Dialog open={!!confirmDeleteId} onOpenChange={(open) => !open && setConfirmDeleteId(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete service?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">This will remove the service. Pages referencing it will retain their content but lose the service association.</p>
-          <DialogFooter className="gap-2">
+          <p className="text-sm text-muted-foreground">
+            This will permanently remove the service. Any existing pages using this service may need to be reviewed.
+          </p>
+          <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
-            <Button variant="destructive" disabled={remove.isPending} onClick={() => confirmDeleteId && remove.mutate(confirmDeleteId)}>
+            <Button variant="destructive" onClick={() => confirmDeleteId && remove.mutate(confirmDeleteId)} disabled={remove.isPending}>
               {remove.isPending ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
