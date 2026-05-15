@@ -1,5 +1,8 @@
 import { getContentArchitectureQueueHealth, runContentArchitectureQueue } from "./content-architecture-queue";
-import { runSemanticContentAudit } from "./semantic-content-intelligence";
+import {
+  auditPageCannibalizationRisk,
+  auditVariationSemanticRisk,
+} from "./semantic-content-intelligence";
 import { runAutonomousSeoStrategy } from "./autonomous-seo-strategy";
 import { runAutonomousExecutionEngine } from "./autonomous-execution-engine";
 import { runPerformanceFeedbackLoop } from "./performance-feedback-loop";
@@ -20,6 +23,8 @@ export interface ContinuousOrchestrationCycleResult {
   cycle: number;
   queueHealthBefore: Awaited<ReturnType<typeof getContentArchitectureQueueHealth>>;
   queueResult: Awaited<ReturnType<typeof runContentArchitectureQueue>>;
+  semanticVariationResult: Awaited<ReturnType<typeof auditVariationSemanticRisk>>;
+  semanticPageResult: Awaited<ReturnType<typeof auditPageCannibalizationRisk>>;
   performanceResult: Awaited<ReturnType<typeof runPerformanceFeedbackLoop>>;
   strategyResult: Awaited<ReturnType<typeof runAutonomousSeoStrategy>>;
   executionResult?: Awaited<ReturnType<typeof runAutonomousExecutionEngine>>;
@@ -46,7 +51,13 @@ async function runSingleCycle(
     dryRun: options.dryRun,
   });
 
-  await runSemanticContentAudit({
+  const semanticVariationResult = await auditVariationSemanticRisk({
+    websiteId: options.websiteId,
+    limit: options.auditLimit ?? 100,
+    dryRun: options.dryRun,
+  });
+
+  const semanticPageResult = await auditPageCannibalizationRisk({
     websiteId: options.websiteId,
     limit: options.auditLimit ?? 100,
     dryRun: options.dryRun,
@@ -80,6 +91,8 @@ async function runSingleCycle(
     cycle,
     queueHealthBefore,
     queueResult,
+    semanticVariationResult,
+    semanticPageResult,
     performanceResult,
     strategyResult,
     executionResult,
