@@ -38,7 +38,7 @@ export async function startBankWriteJob(
     accountId,
     websiteId,
     name: mode === "fill_missing"
-      ? `Fill missing core bank sections (${services.length} services × ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call)`
+      ? `Fill missing variation banks (${services.length} services × ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call)`
       : `Write variation banks (${services.length} services × ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call)`,
     status: "pending",
     totalPages: services.length,
@@ -68,7 +68,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   if (settings?.type !== "bank_write") { console.error("[bank-write] Not a bank_write job:", jobId); return; }
 
   await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
-  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services; ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call per unbanked service; ${VARIATION_BANK_SECTION_COUNT} core sections per bank`);
+  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services; ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call per unbanked service; ${VARIATION_BANK_SECTION_COUNT} total sections per bank (core + extended)`);
 
   const { ctx, progress, mode } = settings;
   const isFillMissing = mode === "fill_missing";
@@ -102,7 +102,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
         if (isFillMissing) {
           const result = await fillMissingSectionsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
           if (result.errors.length > 0) {
-            console.warn(`[bank-write] fill-missing "${entry.serviceName}" filled ${result.filled.length} core sections; ${result.errors.length} error(s)`);
+            console.warn(`[bank-write] fill-missing "${entry.serviceName}" filled ${result.filled.length} sections; ${result.errors.length} error(s)`);
           }
           // Recompute completeness after filling
           try {
@@ -129,7 +129,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
           const result = await writeVariationsForService(entry.serviceName, job.accountId, job.websiteId, ctx);
           const partialErrors = Object.keys(result.errors).length;
           if (partialErrors > 0) {
-            console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/${VARIATION_BANK_SECTION_COUNT} core sections; ${partialErrors} section(s) failed`);
+            console.warn(`[bank-write] "${entry.serviceName}" wrote ${result.written.length}/${VARIATION_BANK_SECTION_COUNT} sections; ${partialErrors} section(s) failed`);
           }
         }
         progress[i] = { ...entry, status: "done" };
