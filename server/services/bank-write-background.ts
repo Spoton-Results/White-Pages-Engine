@@ -5,7 +5,7 @@
  * On startup the server resumes any interrupted jobs automatically.
  */
 import * as storage from "../storage";
-import { writeVariationsForService, fillMissingSectionsForService, VARIATION_BANK_SECTION_COUNT } from "./variation-writer";
+import { writeVariationsForService, fillMissingSectionsForService, VARIATION_BANK_AI_CALLS_PER_SERVICE, VARIATION_BANK_SECTION_COUNT } from "./variation-writer";
 import type { BrandContext } from "./variation-writer";
 
 export interface BankWriteSettings {
@@ -38,8 +38,8 @@ export async function startBankWriteJob(
     accountId,
     websiteId,
     name: mode === "fill_missing"
-      ? `Fill missing core bank sections (${services.length} services)`
-      : `Write variation banks (${services.length} services × ${VARIATION_BANK_SECTION_COUNT} Claude calls)`,
+      ? `Fill missing core bank sections (${services.length} services × ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call)`
+      : `Write variation banks (${services.length} services × ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call)`,
     status: "pending",
     totalPages: services.length,
     processedPages: 0,
@@ -68,7 +68,7 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
   if (settings?.type !== "bank_write") { console.error("[bank-write] Not a bank_write job:", jobId); return; }
 
   await storage.updateGenerationJob(jobId, { status: "running", startedAt: new Date() });
-  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services; ${VARIATION_BANK_SECTION_COUNT} Claude calls per unbanked service`);
+  console.log(`[bank-write] Starting job ${jobId} — ${settings.progress.length} services; ${VARIATION_BANK_AI_CALLS_PER_SERVICE} Claude call per unbanked service; ${VARIATION_BANK_SECTION_COUNT} core sections per bank`);
 
   const { ctx, progress, mode } = settings;
   const isFillMissing = mode === "fill_missing";
@@ -81,8 +81,8 @@ export async function runBankWriteJob(jobId: string): Promise<void> {
     else if (entry.status === "error") failed++;
   }
 
-  // Process 3 services at a time. With the 5-core-section bank contract,
-  // this is at most 15 Claude calls active across the current batch.
+  // Process 3 services at a time. With the consolidated bank writer,
+  // this is at most 3 Claude calls active across the current batch.
   const CONCURRENCY = 3;
   const pending = progress
     .map((entry, i) => ({ entry, i }))
