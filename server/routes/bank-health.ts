@@ -10,12 +10,8 @@ import { scheduleIntentJobWorker } from "../services/intent-job-worker";
 const router = Router();
 
 router.use((req, _res, next) => {
-  if (req.path.startsWith("/api/auth")) {
-    return next("router");
-  }
-  if (!req.path.startsWith("/api") && !req.path.startsWith("/r/")) {
-    return next("router");
-  }
+  if (req.path.startsWith("/api/auth")) return next("router");
+  if (!req.path.startsWith("/api") && !req.path.startsWith("/r/")) return next("router");
   next();
 });
 
@@ -31,35 +27,36 @@ if (!globalAny.__nexusIntentJobWorkerScheduled) {
   scheduleIntentJobWorker();
 }
 
+const CORE_KEYS = ["has_intro", "has_how_it_works", "has_benefits", "has_faq", "has_cta"];
+const EXTENDED_KEYS = ["has_local_context", "has_use_case", "has_proof_trust", "has_pain_point", "has_local_stat"];
+const SEO_EXPANSION_KEYS = ["has_comparison", "has_pricing_factors", "has_best_fit", "has_software_integration"];
+const ALL_KEYS = [...CORE_KEYS, ...EXTENDED_KEYS, ...SEO_EXPANSION_KEYS];
+
 const SECTION_ALIASES: Record<string, string[]> = {
   has_intro: ["intro", "introduction", "introduction paragraph", "hero headline", "hero"],
   has_how_it_works: ["how it works", "process", "process how it works", "how_it_works"],
   has_benefits: ["benefits", "why choose us", "why_choose_us"],
   has_faq: ["faq", "faqs", "frequently asked questions"],
   has_cta: ["cta", "call to action", "call_to_action"],
-  has_local_context: ["local context", "service area", "service_area"],
+  has_local_context: ["local context", "service area", "service_area", "local_context"],
   has_use_case: ["use case", "use_case", "service details", "service_details"],
   has_proof_trust: ["proof trust", "proof & trust", "proof_trust"],
   has_pain_point: ["pain point", "pain_point", "problem intent", "problem_intent"],
   has_local_stat: ["local stat", "local_stat"],
+  has_comparison: ["comparison", "compare", "alternatives"],
+  has_pricing_factors: ["pricing factors", "pricing_factors", "cost factors", "cost_factors", "pricing"],
+  has_best_fit: ["best fit", "best_fit", "who it is for", "fit checklist"],
+  has_software_integration: ["software integration", "software_integration", "integrations", "software compatibility"],
 };
 
 function normalizeSectionName(value: unknown): string {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/&/g, " ")
-    .replace(/[^a-z0-9\s]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return String(value ?? "").toLowerCase().replace(/[_-]+/g, " ").replace(/&/g, " ").replace(/[^a-z0-9\s]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function isUsefulVariation(value: unknown): boolean {
   if (typeof value === "string") return value.trim().length > 0;
   if (!value || typeof value !== "object") return false;
-  return Object.values(value as Record<string, unknown>).some((v) =>
-    typeof v === "string" && v.trim().length > 0,
-  );
+  return Object.values(value as Record<string, unknown>).some((v) => typeof v === "string" && v.trim().length > 0);
 }
 
 function validVariationCount(raw: unknown): number {
@@ -75,7 +72,7 @@ function sectionKey(sectionName: unknown): string | null {
   return null;
 }
 
-function mapBankRow(row: any) {
+function baseMapBankRow(row: any) {
   return {
     id: row.id,
     websiteId: row.website_id,
@@ -90,6 +87,10 @@ function mapBankRow(row: any) {
     hasProofTrust: row.has_proof_trust,
     hasPainPoint: row.has_pain_point,
     hasLocalStat: row.has_local_stat,
+    hasComparison: false,
+    hasPricingFactors: false,
+    hasBestFit: false,
+    hasSoftwareIntegration: false,
     totalVariations: row.total_variations,
     avgVariationsPerSection: row.avg_variations_per_section,
     completenessScore: row.completeness_score,
@@ -98,13 +99,71 @@ function mapBankRow(row: any) {
   };
 }
 
+function buildFlagsFromBanks(banks: any[]) {
+  const flags: Record<string, boolean> = Object.fromEntries(ALL_KEYS.map(k => [k, false]));
+  let totalVariations = 0;
+  for (const bank of banks) {
+    const key = sectionKey(bank.section_name);
+    const count = validVariationCount(bank.variations);
+    if (key && count > 0) flags[key] = true;
+    totalVariations += count;
+  }
+  const filledCount = ALL_KEYS.filter(k => flags[k]).length;
+  const completenessScore = Math.round((filledCount / ALL_KEYS.length) * 100);
+  const avgVariationsPerSection = Math.round(totalVariations / ALL_KEYS.length);
+  const isEligibleForTier1 = CORE_KEYS.every(k => flags[k]) && avgVariationsPerSection >= 5;
+  return { flags, totalVariations, avgVariationsPerSection, completenessScore, isEligibleForTier1 };
+}
+
+function camelExpansion(flags: Record<string, boolean>) {
+  return {
+    hasComparison: flags.has_comparison,
+    hasPricingFactors: flags.has_pricing_factors,
+    hasBestFit: flags.has_best_fit,
+    hasSoftwareIntegration: flags.has_software_integration,
+  };
+}
+
 router.get("/api/websites/:websiteId/bank-completeness", async (req, res, next) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM variation_bank_completeness WHERE website_id = $1 ORDER BY service ASC`,
-      [req.params.websiteId],
-    );
-    res.json(result.rows.map(mapBankRow));
+    const [completenessResult, banksResult] = await Promise.all([
+      pool.query(`SELECT * FROM variation_bank_completeness WHERE website_id = $1 ORDER BY service ASC`, [req.params.websiteId]),
+      pool.query(`SELECT service, section_name, variations FROM content_variation_banks WHERE website_id = $1`, [req.params.websiteId]),
+    ]);
+
+    const banksByService = new Map<string, any[]>();
+    for (const bank of banksResult.rows) {
+      const serviceName = String(bank.service ?? "").trim();
+      if (!serviceName) continue;
+      const rows = banksByService.get(serviceName) ?? [];
+      rows.push(bank);
+      banksByService.set(serviceName, rows);
+    }
+
+    const rows = completenessResult.rows.map((row: any) => {
+      const mapped = baseMapBankRow(row);
+      const live = buildFlagsFromBanks(banksByService.get(mapped.service) ?? []);
+      return {
+        ...mapped,
+        hasIntro: live.flags.has_intro,
+        hasHowItWorks: live.flags.has_how_it_works,
+        hasBenefits: live.flags.has_benefits,
+        hasFaq: live.flags.has_faq,
+        hasCta: live.flags.has_cta,
+        hasLocalContext: live.flags.has_local_context,
+        hasUseCase: live.flags.has_use_case,
+        hasProofTrust: live.flags.has_proof_trust,
+        hasPainPoint: live.flags.has_pain_point,
+        hasLocalStat: live.flags.has_local_stat,
+        ...camelExpansion(live.flags),
+        totalVariations: live.totalVariations,
+        avgVariationsPerSection: live.avgVariationsPerSection,
+        completenessScore: live.completenessScore,
+        isEligibleForTier1: live.isEligibleForTier1,
+      };
+    });
+
+    res.json(rows);
   } catch (err) {
     next(err);
   }
@@ -116,24 +175,15 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
     const { websiteId } = req.params;
     await client.query("BEGIN");
 
-    const websiteResult = await client.query(
-      `SELECT id, account_id FROM websites WHERE id = $1 LIMIT 1`,
-      [websiteId],
-    );
+    const websiteResult = await client.query(`SELECT id, account_id FROM websites WHERE id = $1 LIMIT 1`, [websiteId]);
     const website = websiteResult.rows[0];
     if (!website) {
       await client.query("ROLLBACK");
       return res.status(404).json({ message: "Website not found" });
     }
 
-    const servicesResult = await client.query(
-      `SELECT id, name FROM services WHERE account_id = $1 ORDER BY name ASC`,
-      [website.account_id],
-    );
-    const banksResult = await client.query(
-      `SELECT service, section_name, variations FROM content_variation_banks WHERE website_id = $1`,
-      [websiteId],
-    );
+    const servicesResult = await client.query(`SELECT id, name FROM services WHERE account_id = $1 ORDER BY name ASC`, [website.account_id]);
+    const banksResult = await client.query(`SELECT service, section_name, variations FROM content_variation_banks WHERE website_id = $1`, [websiteId]);
 
     const banksByService = new Map<string, any[]>();
     for (const bank of banksResult.rows) {
@@ -148,38 +198,8 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
 
     for (const service of servicesResult.rows) {
       const serviceName = String(service.name ?? "").trim();
-      const sectionFlags: Record<string, boolean> = {
-        has_intro: false,
-        has_how_it_works: false,
-        has_benefits: false,
-        has_faq: false,
-        has_cta: false,
-        has_local_context: false,
-        has_use_case: false,
-        has_proof_trust: false,
-        has_pain_point: false,
-        has_local_stat: false,
-      };
-      let totalVariations = 0;
-
-      for (const bank of banksByService.get(serviceName) ?? []) {
-        const key = sectionKey(bank.section_name);
-        const count = validVariationCount(bank.variations);
-        if (key && count > 0) sectionFlags[key] = true;
-        totalVariations += count;
-      }
-
-      const filledCount = Object.values(sectionFlags).filter(Boolean).length;
-      const completenessScore = Math.round((filledCount / 10) * 100);
-      const avgVariationsPerSection = Math.round(totalVariations / 10);
-      const isEligibleForTier1 = Boolean(
-        sectionFlags.has_intro &&
-        sectionFlags.has_how_it_works &&
-        sectionFlags.has_benefits &&
-        sectionFlags.has_faq &&
-        sectionFlags.has_cta &&
-        completenessScore >= 70,
-      );
+      const live = buildFlagsFromBanks(banksByService.get(serviceName) ?? []);
+      const f = live.flags;
 
       await client.query(
         `INSERT INTO variation_bank_completeness (
@@ -198,26 +218,26 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
         [
           websiteId,
           serviceName,
-          sectionFlags.has_intro,
-          sectionFlags.has_how_it_works,
-          sectionFlags.has_benefits,
-          sectionFlags.has_faq,
-          sectionFlags.has_cta,
-          sectionFlags.has_local_context,
-          sectionFlags.has_use_case,
-          sectionFlags.has_proof_trust,
-          sectionFlags.has_pain_point,
-          sectionFlags.has_local_stat,
-          totalVariations,
-          avgVariationsPerSection,
-          completenessScore,
-          isEligibleForTier1,
+          f.has_intro,
+          f.has_how_it_works,
+          f.has_benefits,
+          f.has_faq,
+          f.has_cta,
+          f.has_local_context,
+          f.has_use_case,
+          f.has_proof_trust,
+          f.has_pain_point,
+          f.has_local_stat,
+          live.totalVariations,
+          live.avgVariationsPerSection,
+          live.completenessScore,
+          live.isEligibleForTier1,
         ],
       );
     }
 
     await client.query("COMMIT");
-    res.json({ computed: servicesResult.rows.length, websiteId, services: servicesResult.rows.length });
+    res.json({ computed: servicesResult.rows.length, websiteId, services: servicesResult.rows.length, sectionCount: ALL_KEYS.length });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     next(err);
