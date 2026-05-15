@@ -3,9 +3,10 @@ import { logApiUsage } from "./usage-logger";
 import { callAI } from "./ai-provider";
 
 const CORE_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta"] as const;
-export const VARIATION_BANK_SECTION_COUNT = CORE_SECTIONS.length;
+const EXTENDED_SECTIONS = ["local_context", "use_case", "proof_trust", "pain_point", "local_stat"] as const;
+const SECTIONS = [...CORE_SECTIONS, ...EXTENDED_SECTIONS] as const;
+export const VARIATION_BANK_SECTION_COUNT = SECTIONS.length;
 export const VARIATION_BANK_AI_CALLS_PER_SERVICE = 1;
-const SECTIONS = CORE_SECTIONS;
 type Section = typeof SECTIONS[number];
 
 type BankPayload = Record<Section, string[]>;
@@ -36,7 +37,7 @@ You are writing reusable SEO variation-bank content for a white-pages/local SEO 
 
 IMPORTANT CONTRACT:
 - This is ONE paid Claude call for the service.
-- Generate ALL 5 core variation-bank sections in this single response.
+- Generate ALL 10 variation-bank sections in this single response: 5 core sections and 5 extended sections.
 - Each section must contain exactly 5 reusable variations.
 - Content must be location-agnostic and use placeholders only.
 - Never use literal city names, state names, regions, landmarks, or geographic references.
@@ -46,7 +47,7 @@ IMPORTANT CONTRACT:
 ALLOWED PLACEHOLDERS:
 {{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}} {{brand}} {{business_count}} {{payment_regulations}}
 
-SECTION REQUIREMENTS:
+CORE SECTION REQUIREMENTS:
 1. intro
    - 5 variations
    - each variation: 2 HTML paragraphs, about 120-150 words total
@@ -77,6 +78,37 @@ SECTION REQUIREMENTS:
    - use: {{service}} {{city}} {{state}} {{brand}}
    - vary the angle: urgency, trust, value, ease, results
 
+EXTENDED SECTION REQUIREMENTS:
+6. local_context
+   - 5 variations
+   - each variation: 1 HTML paragraph, about 80-110 words
+   - use: {{service}} {{city}} {{state}} {{state_abbr}} {{business_count}} {{business_culture}}
+   - explain why the service matters in the local market without naming real places
+
+7. use_case
+   - 5 variations
+   - each variation: 2 HTML paragraphs, about 120-150 words total
+   - use: {{service}} {{city}} {{state}} {{brand}} {{business_culture}}
+   - describe a realistic business scenario and how the service helps
+
+8. proof_trust
+   - 5 variations
+   - each variation: 2 HTML paragraphs, about 100-130 words total
+   - use: {{service}} {{city}} {{state}} {{brand}}
+   - establish credibility without inventing awards, guarantees, licenses, reviews, or certifications
+
+9. pain_point
+   - 5 variations
+   - each variation: 2 HTML paragraphs, about 100-130 words total
+   - use: {{service}} {{city}} {{state}} {{brand}} {{payment_regulations}}
+   - surface realistic risks, costs, or friction of not solving the problem
+
+10. local_stat
+   - 5 variations
+   - each variation: 1 HTML paragraph, about 80-100 words
+   - use: {{service}} {{city}} {{state}} {{state_abbr}} {{business_count}}
+   - discuss general market pressure, adoption trends, or operational impact; do not cite fake named studies
+
 QUALITY RULES:
 - No filler phrases like "In today's world", "top-notch", "look no further", "your trusted partner", or "comprehensive solutions".
 - Do not invent specific awards, reviews, guarantees, certifications, licenses, or statistics.
@@ -91,7 +123,12 @@ OUTPUT JSON SHAPE:
   "how_it_works": ["<p>...</p><p>...</p><p>...</p>", "...", "...", "...", "..."],
   "benefits": ["<p><strong>...</strong> ...</p><p><strong>...</strong> ...</p><p><strong>...</strong> ...</p><p><strong>...</strong> ...</p>", "...", "...", "...", "..."],
   "faq": ["<p><strong>Q: ...?</strong></p><p>...</p>...", "...", "...", "...", "..."],
-  "cta": ["<p>...</p>", "...", "...", "...", "..."]
+  "cta": ["<p>...</p>", "...", "...", "...", "..."],
+  "local_context": ["<p>...</p>", "...", "...", "...", "..."],
+  "use_case": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "proof_trust": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "pain_point": ["<p>...</p><p>...</p>", "...", "...", "...", "..."],
+  "local_stat": ["<p>...</p>", "...", "...", "...", "..."]
 }`;
 }
 
@@ -178,7 +215,7 @@ export async function writeVariationsForService(
   const prompt = buildBankPrompt(serviceName, ctx);
   const { text: raw, provider, promptTokens, completionTokens } = await callAI({
     prompt,
-    maxTokens: 9000,
+    maxTokens: 16000,
     temperature: 0.7,
   });
 
@@ -186,7 +223,7 @@ export async function writeVariationsForService(
     await logApiUsage({
       accountId,
       websiteId,
-      generationType: "variation_writing:full_core_bank",
+      generationType: "variation_writing:full_10_section_bank",
       modelUsed: provider,
       inputTokens: promptTokens,
       outputTokens: completionTokens,
@@ -197,7 +234,7 @@ export async function writeVariationsForService(
 
   const json = extractBalancedJson(raw);
   if (!json) {
-    throw new Error(`Claude did not return valid JSON for full variation bank. Response starts: ${raw.slice(0, 300)}`);
+    throw new Error(`Claude did not return valid JSON for full 10-section variation bank. Response starts: ${raw.slice(0, 300)}`);
   }
 
   let parsed: any;
@@ -211,16 +248,16 @@ export async function writeVariationsForService(
   const result = await writeBankPayload(payload, serviceName, accountId, websiteId);
 
   if (result.written.length === 0) {
-    const firstError = Object.values(result.errors)[0] ?? "No core sections written";
-    throw new Error(`Full bank write failed for "${serviceName}": ${firstError}`);
+    const firstError = Object.values(result.errors)[0] ?? "No variation bank sections written";
+    throw new Error(`Full 10-section bank write failed for "${serviceName}": ${firstError}`);
   }
 
   return result;
 }
 
 /**
- * Fill missing core bank sections. This still uses one Claude call per service:
- * it regenerates the full core bank, then saves only sections that are missing.
+ * Fill missing bank sections. This still uses one Claude call per service:
+ * it regenerates the full 10-section bank, then saves only sections that are missing.
  */
 export async function fillMissingSectionsForService(
   serviceName: string,
@@ -240,7 +277,7 @@ export async function fillMissingSectionsForService(
   const prompt = buildBankPrompt(serviceName, ctx);
   const { text: raw, provider, promptTokens, completionTokens } = await callAI({
     prompt,
-    maxTokens: 9000,
+    maxTokens: 16000,
     temperature: 0.7,
   });
 
@@ -248,7 +285,7 @@ export async function fillMissingSectionsForService(
     await logApiUsage({
       accountId,
       websiteId,
-      generationType: "variation_writing:fill_missing_full_core_bank",
+      generationType: "variation_writing:fill_missing_full_10_section_bank",
       modelUsed: provider,
       inputTokens: promptTokens,
       outputTokens: completionTokens,
@@ -259,7 +296,7 @@ export async function fillMissingSectionsForService(
 
   const json = extractBalancedJson(raw);
   if (!json) {
-    throw new Error(`Claude did not return valid JSON for fill-missing variation bank. Response starts: ${raw.slice(0, 300)}`);
+    throw new Error(`Claude did not return valid JSON for fill-missing 10-section variation bank. Response starts: ${raw.slice(0, 300)}`);
   }
 
   let parsed: any;
