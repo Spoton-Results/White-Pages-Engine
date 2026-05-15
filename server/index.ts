@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { ensureBulkTransactionSafety, repairPagesMissingActiveVersions } from "./services/bulk-transaction-safety";
+import authLiveRouter from "./routes/auth-live";
 import bankHealthRouter from "./routes/bank-health";
 import nexusStripeRouter from "./routes/nexus-stripe";
 import searchConsoleAdminRouter from "./routes/search-console-admin";
@@ -95,6 +96,9 @@ app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody 
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(normalizeAdminHostHeaders);
+
+// Auth must be mounted before any protected /api routes.
+app.use(authLiveRouter);
 
 // Canonical job ownership lives here.
 // All /api/jobs/* routes must come from this router only.
