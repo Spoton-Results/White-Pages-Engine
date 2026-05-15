@@ -1,8 +1,6 @@
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
-import {
-  contentVariationBanks,
-} from "@shared/schema";
+import { contentVariationBanks } from "@shared/schema";
 import {
   sectionRegistry,
   variationVersions,
@@ -12,6 +10,7 @@ export interface ContentSelectionInput {
   accountId: string;
   websiteId?: string;
   serviceId?: string;
+  serviceName?: string;
   locationId?: string;
   sectionKey: string;
   limit?: number;
@@ -26,6 +25,38 @@ export interface SelectedVariation {
   freshnessScore?: number | null;
   uniquenessScore?: number | null;
   usageCount?: number | null;
+}
+
+const LEGACY_SECTION_ALIASES: Record<string, string[]> = {
+  hero: ["hero", "hero_headline", "headline"],
+  intro: ["intro", "introduction", "introduction_paragraph"],
+  why_choose_us: ["why_choose_us", "why choose us", "benefits"],
+  service_details: ["service_details", "service details", "details"],
+  process: ["process", "how_it_works", "how it works"],
+  service_area: ["service_area", "service area", "local_context"],
+  faq: ["faq", "faqs", "questions"],
+  cta: ["cta", "call_to_action", "call to action"],
+};
+
+function normalizeSectionKey(value: string) {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function legacySectionMatches(sectionKey: string, legacySectionName: string) {
+  const normalizedLegacy = normalizeSectionKey(legacySectionName);
+  const aliases = LEGACY_SECTION_ALIASES[sectionKey] ?? [sectionKey];
+  return aliases.map(normalizeSectionKey).includes(normalizedLegacy);
+}
+
+function normalizeLegacyVariation(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["content", "text", "html", "body", "value"]) {
+      if (typeof record[key] === "string") return record[key] as string;
+    }
+  }
+  return null;
 }
 
 /**
@@ -54,32 +85,20 @@ export async function selectBestVariations(
       sectionKey: sectionRegistry.key,
     })
     .from(variationVersions)
-    .innerJoin(
-      sectionRegistry,
-      eq(variationVersions.sectionId, sectionRegistry.id),
-    )
+    .innerJoin(sectionRegistry, eq(variationVersions.sectionId, sectionRegistry.id))
     .where(
       and(
         eq(variationVersions.accountId, input.accountId),
         eq(variationVersions.active, true),
         eq(sectionRegistry.key, input.sectionKey),
         input.websiteId
-          ? or(
-              eq(variationVersions.websiteId, input.websiteId),
-              isNull(variationVersions.websiteId),
-            )
+          ? or(eq(variationVersions.websiteId, input.websiteId), isNull(variationVersions.websiteId))
           : undefined,
         input.serviceId
-          ? or(
-              eq(variationVersions.serviceId, input.serviceId),
-              isNull(variationVersions.serviceId),
-            )
+          ? or(eq(variationVersions.serviceId, input.serviceId), isNull(variationVersions.serviceId))
           : undefined,
         input.locationId
-          ? or(
-              eq(variationVersions.locationId, input.locationId),
-              isNull(variationVersions.locationId),
-            )
+          ? or(eq(variationVersions.locationId, input.locationId), isNull(variationVersions.locationId))
           : undefined,
       ),
     )
@@ -105,50 +124,31 @@ export async function selectBestVariations(
     }));
   }
 
-  // LEGACY FALLBACK
-  // Current production safety layer.
-  // Prevents rendering failures while migration is incomplete.
-
-  const legacyResults = await db
+  const legacyRows = await db
     .select()
     .from(contentVariationBanks)
     .where(
       and(
         eq(contentVariationBanks.accountId, input.accountId),
-        input.websiteId
-          ? eq(contentVariationBanks.websiteId, input.websiteId)
-          : undefined,
+        input.websiteId ? eq(contentVariationBanks.websiteId, input.websiteId) : undefined,
+        input.serviceName ? ilike(contentVariationBanks.service, input.serviceName) : undefined,
       ),
-    )
-    .limit(1);
+    );
 
-  if (legacyResults.length === 0) {
+  const matchingLegacyRow = legacyRows.find((row) =>
+    legacySectionMatches(input.sectionKey, row.sectionName),
+  );
+
+  if (!matchingLegacyRow || !Array.isArray(matchingLegacyRow.variations)) {
     return [];
   }
 
-  const bank = legacyResults[0] as any;
-
-  const legacyFieldMap: Record<string, string> = {
-    hero: "heroVariations",
-    intro: "introVariations",
-    why_choose_us: "whyChooseUsVariations",
-    service_details: "serviceDetailsVariations",
-    process: "processVariations",
-    service_area: "serviceAreaVariations",
-    faq: "faqVariations",
-    cta: "ctaVariations",
-  };
-
-  const field = legacyFieldMap[input.sectionKey];
-
-  if (!field || !Array.isArray(bank[field])) {
-    return [];
-  }
-
-  return bank[field]
+  return matchingLegacyRow.variations
+    .map(normalizeLegacyVariation)
+    .filter((content): content is string => Boolean(content && content.trim().length > 0))
     .slice(0, limit)
-    .map((content: string, index: number) => ({
-      id: `legacy-${input.sectionKey}-${index}`,
+    .map((content, index) => ({
+      id: `legacy-${matchingLegacyRow.id}-${index}`,
       source: "legacy",
       content,
       sectionKey: input.sectionKey,
@@ -162,10 +162,6 @@ export async function selectBestVariations(
 export async function selectSingleBestVariation(
   input: ContentSelectionInput,
 ): Promise<SelectedVariation | null> {
-  const results = await selectBestVariations({
-    ...input,
-    limit: 1,
-  });
-
+  const results = await selectBestVariations({ ...input, limit: 1 });
   return results[0] ?? null;
 }
