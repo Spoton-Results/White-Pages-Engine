@@ -10,8 +10,13 @@ const router = Router();
 type AnyJob = Record<string, any>;
 const DEAD_JOB_MINUTES = Number(process.env.DEAD_JOB_MINUTES || 30);
 const DEAD_JOB_INTERVAL_MS = Number(process.env.DEAD_JOB_INTERVAL_MS || 5 * 60 * 1000);
+const PENDING_BULK_JOB_INTERVAL_MS = Number(process.env.PENDING_BULK_JOB_INTERVAL_MS || 15 * 1000);
+const PENDING_BULK_JOB_BATCH_LIMIT = Math.max(1, Number(process.env.PENDING_BULK_JOB_BATCH_LIMIT || 3));
 let deadJobRecoveryStarted = false;
 let deadJobRecoveryRunning = false;
+let pendingBulkJobPumpStarted = false;
+let pendingBulkJobPumpRunning = false;
+const locallyActiveBulkJobs = new Set<string>();
 
 function normalizeProgress(services: string[]) {
   return services.map((service) => ({
@@ -83,7 +88,6 @@ function mapJobForDashboard(job: AnyJob) {
 
 async function recoverDeadGenerationJobs(minutes = DEAD_JOB_MINUTES) {
   const thresholdMinutes = Math.max(5, Number(minutes || DEAD_JOB_MINUTES));
-  const reason = `Auto-recovered stale job: active longer than ${thresholdMinutes} minutes without terminal status.`;
 
   const result = await pool.query(
     `UPDATE generation_jobs
@@ -121,7 +125,70 @@ function startDeadJobRecoveryLoop() {
   setInterval(run, DEAD_JOB_INTERVAL_MS).unref?.();
 }
 
+function launchBulkJob(jobId: string, source: "route" | "pump") {
+  if (locallyActiveBulkJobs.has(jobId)) return;
+  locallyActiveBulkJobs.add(jobId);
+
+  setImmediate(async () => {
+    try {
+      console.log(`[bulk-generate-job-fast] Launching ${source} runner for job ${jobId}`);
+      await runBulkBackgroundJob(jobId);
+    } catch (error: any) {
+      console.error(`[bulk-generate-job-fast] Job ${jobId} failed`, error);
+      const job = await storage.getGenerationJob(jobId).catch(() => null);
+      await storage.updateGenerationJob(jobId, {
+        status: JOB_STATUS.FAILED as any,
+        completedAt: new Date(),
+        settings: {
+          ...((job as any)?.settings || {}),
+          fatalError: error?.message || "Unknown bulk generation failure",
+          failedBy: source,
+          failedAt: new Date().toISOString(),
+        } as any,
+      } as any).catch(() => {});
+    } finally {
+      locallyActiveBulkJobs.delete(jobId);
+    }
+  });
+}
+
+async function findPendingBulkGenerationJobs(limit = PENDING_BULK_JOB_BATCH_LIMIT) {
+  const result = await pool.query(
+    `SELECT id
+     FROM generation_jobs
+     WHERE status = $1::job_status
+       AND COALESCE(settings->>'jobType', '') = 'bulk-background'
+     ORDER BY created_at ASC
+     LIMIT $2`,
+    [JOB_STATUS.PENDING, limit],
+  );
+
+  return result.rows.map((row: AnyJob) => String(row.id)).filter(Boolean);
+}
+
+function startPendingBulkJobPump() {
+  if (pendingBulkJobPumpStarted || process.env.DISABLE_PENDING_BULK_JOB_PUMP === "true") return;
+  pendingBulkJobPumpStarted = true;
+
+  const run = async () => {
+    if (pendingBulkJobPumpRunning) return;
+    pendingBulkJobPumpRunning = true;
+    try {
+      const jobIds = await findPendingBulkGenerationJobs();
+      for (const jobId of jobIds) launchBulkJob(jobId, "pump");
+    } catch (error) {
+      console.error("[bulk-generate-job-fast] Pending bulk job pump failed", error);
+    } finally {
+      pendingBulkJobPumpRunning = false;
+    }
+  };
+
+  setTimeout(run, 2_000).unref?.();
+  setInterval(run, PENDING_BULK_JOB_INTERVAL_MS).unref?.();
+}
+
 startDeadJobRecoveryLoop();
+startPendingBulkJobPump();
 
 router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -168,27 +235,10 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
     res.status(202).json({
       jobId: job.id,
       status: JOB_STATUS.PENDING,
-      message: "Bulk generation started in background.",
+      message: "Bulk generation queued in background.",
     });
 
-    setImmediate(async () => {
-      try {
-        await runBulkBackgroundJob(job.id);
-      } catch (error: any) {
-        console.error(`[bulk-generate-job-fast] Job ${job.id} failed`, error);
-        await storage.updateGenerationJob(job.id, {
-          status: JOB_STATUS.FAILED as any,
-          completedAt: new Date(),
-          settings: {
-            ...(settings as any),
-            clusterCount,
-            targetCount,
-            jobType: "bulk-background",
-            fatalError: error?.message || "Unknown bulk generation failure",
-          } as any,
-        } as any).catch(() => {});
-      }
-    });
+    launchBulkJob(job.id, "route");
   } catch (error) {
     return next(error);
   }
