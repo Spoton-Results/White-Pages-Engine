@@ -23,7 +23,7 @@ import * as schema from "@shared/schema";
 // can't starve API request handlers of connections.
 const bulkPool = new pg.Pool({
   connectionString: process.env.DATABASE_URL!,
-  max: 5,               // 5 dedicated connections — all job DB ops use this pool now
+  max: Number(process.env.BULK_DB_POOL_MAX || 8),
   idleTimeoutMillis: 60000,
   connectionTimeoutMillis: 30000, // bulk ops may legitimately take longer
 });
@@ -39,10 +39,10 @@ async function insertVersionsBulk(data: schema.InsertPageVersion[]): Promise<voi
   await bulkDb.insert(schema.pageVersions).values(data);
 }
 
-const INSERT_BATCH_SIZE = 25;  // pages per bulk INSERT — keep batches small to avoid long connection holds
-const PAGE_BATCH_SIZE = 300;  // flush job counters to DB every N pages
-const OVERWRITE_BATCH_SIZE = 25; // overwrite updates per batch SQL
-const YIELD_EVERY = 10;       // yield event loop every N pages — frequent yields keep health checks responsive
+const INSERT_BATCH_SIZE = Number(process.env.BULK_INSERT_BATCH_SIZE || 100);
+const PAGE_BATCH_SIZE = Number(process.env.BULK_PROGRESS_BATCH_SIZE || 500);
+const OVERWRITE_BATCH_SIZE = Number(process.env.BULK_OVERWRITE_BATCH_SIZE || 75);
+const YIELD_EVERY = Number(process.env.BULK_YIELD_EVERY || 25);
 
 const yieldEventLoop = () => new Promise<void>(r => setImmediate(r));
 
@@ -144,11 +144,6 @@ export interface BulkJobSettings {
   states?: string[];
   cities?: Array<{ name: string; stateAbbr: string }>;
   overwrite?: boolean;
-  // Phase 6 — Draft-first generation. Only set by the onboarding pipeline.
-  // When isDraft=true: pages are inserted with status='draft', is_draft=true,
-  // draft_reason='onboarding_initial', publish_wave=0; sitemap regen + Google
-  // indexing + sitemap ping are skipped; auto-scoring/tiering still run.
-  // Manual admin jobs never set this — behavior is byte-identical to before.
   isDraft?: boolean;
   draftReason?: string;
   progress: Array<{
@@ -171,13 +166,10 @@ function applyBlueprintTemplates(
     t.replace(/\{service[^}]*\}/gi, vars.service)
       .replace(/\{location[^}]*\}/gi, vars.location)
       .replace(/\{city[^}]*\}/gi, vars.location)
-      // state_abbr / state-abbr must come before the generic {state…} catch-alls
       .replace(/\{state[-_]abbr[^}]*\}/gi, vars.stateAbbr)
       .replace(/\{abbr[^}]*\}/gi, vars.stateAbbr)
-      // {state-slug}, {state_slug}, {state|slugify}, {state|lowercase|hyphenate} → slugified state name
       .replace(/\{state[-_]slug[^}]*\}/gi, slugifyStr(vars.state))
       .replace(/\{state\|[^}]*\}/gi, slugifyStr(vars.state))
-      // bare {state} → raw state name (e.g. "New York")
       .replace(/\{state\}/gi, vars.state)
       .replace(/\{brand[^}]*\}/gi, vars.brand)
       .replace(/\{keyword[^}]*\}/gi, vars.service)
@@ -190,15 +182,10 @@ function applyBlueprintTemplates(
   if (stateLower && rawSlug.endsWith(`-${stateLower}-${stateLower}`)) {
     rawSlug = rawSlug.slice(0, rawSlug.length - stateLower.length - 1);
   }
-  // If a cluster was provided but the blueprint template has no {cluster} placeholder,
-  // append the cluster slug so each (service, cluster, location) combination is unique.
   if (vars.cluster && !/\{cluster/i.test(blueprint.slugTemplate)) {
     const cs = vars.cluster.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     if (cs) rawSlug = `${rawSlug}--${cs}`;
   }
-  // If the blueprint slug template doesn't include {service} AND the service name isn't
-  // hardcoded in the template itself, append the service slug so pages stay unique when
-  // one blueprint is used for multiple services (e.g. a generic state-hub template).
   if (vars.service && !/\{service/i.test(blueprint.slugTemplate)) {
     const ss = slugify(vars.service);
     const templateLower = blueprint.slugTemplate.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -206,9 +193,6 @@ function applyBlueprintTemplates(
       rawSlug = `${rawSlug}--${ss}`;
     }
   }
-  // De-dup "State Name, State Name" in text fields when a blueprint that uses
-  // {city}, {state} is applied to a state-level target (location === state name).
-  // The slug already has this protection above (lines 190–192); title/H1/meta need it too.
   const dedupState = (text: string): string => {
     if (vars.location.toLowerCase() !== vars.state.toLowerCase()) return text;
     const escaped = vars.state.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -277,32 +261,25 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await bulkGetBlueprint(effectiveBlueprintId) : null;
 
-  // ── Pre-load clusters once — keyed by service name (lowercase) ────────────────
   const [accountServices, accountClusters] = await Promise.all([
     bulkGetServices(website.accountId!),
     bulkGetQueryClusters(website.accountId!),
   ]);
-  // If the job specified particular cluster IDs, restrict to only those clusters
   const eligibleClusters = queryClusterIds && queryClusterIds.length > 0
     ? accountClusters.filter((c: any) => queryClusterIds.includes(c.id))
     : accountClusters;
-  // serviceId → cluster
   const clusterByServiceId = new Map<string, ClusterContext>(
     eligibleClusters
       .filter((c: any) => c.serviceId)
       .map((c: any) => [c.serviceId, { id: c.id, primaryKeyword: c.primaryKeyword, secondaryKeywords: c.secondaryKeywords ?? [], intentType: c.intentType }])
   );
-  // service name (lowercase) → serviceId
   const serviceIdByName = new Map<string, string>(
     accountServices.map((s: any) => [s.name.toLowerCase(), s.id])
   );
 
-  // ── Pre-load all state data once ─────────────────────────────────────────────
   const stateDataMap = await bulkGetAllStateData();
   let targets = await buildTargets(mode, stateDataMap, states, cities);
 
-  // ── Build city-by-state index for internal linking on state hub pages ─────────
-  // Maps stateAbbr (uppercase) → list of city names being generated in this job
   const citiesByState = new Map<string, string[]>();
   for (const t of targets) {
     if (t.locationType === "city") {
@@ -312,20 +289,15 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     }
   }
 
-  // ── Build related-services list for cross-service mesh links ─────────────
-  // Pre-compute once: every service name + its slug, passed to every page so
-  // city pages can link sideways to sibling services in the same city.
   const allRelatedServices = services.map(s => ({
     name: s,
     slug: s.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-"),
   }));
 
-  // ── Collect new page URLs for Google Indexing API submission ─────────────
   const newPageUrls: string[] = [];
 
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
 
-  // ── Resume-aware: skip services that already completed before a restart ───
   const completedServiceSet = new Set<number>();
   let resumePassedPages = 0, resumeProcessedPages = 0;
 
@@ -360,10 +332,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     slugTemplate: blueprint.slugTemplate,
   } : null;
 
-  // ── Auto-deduplicate: state-level blueprint used with city targets ────────────
-  // If the blueprint slug template references {state} but NOT {location}/{city},
-  // every city in the same state generates the same slug. Collapse targets to one
-  // representative per state so the job creates unique pages without false skips.
   if (blueprintTemplate) {
     const slugUsesLocation = /\{location|\{city/i.test(blueprintTemplate.slugTemplate);
     const slugUsesState   = /\{state/i.test(blueprintTemplate.slugTemplate);
@@ -380,18 +348,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     }
   }
 
-  // Write the accurate post-dedup total once (avoids an inflated flash in the UI)
   await bulkUpdateJob(jobId, { totalPages });
 
-  // ── Load slug set ONCE for the entire job (not once per service) ─────────────
   const existingSlugSet = await bulkGetPageSlugSet(job.websiteId);
 
-  // ── Process each service sequentially ────────────────────────────────────────
   for (let si = 0; si < services.length; si++) {
     if (completedServiceSet.has(si)) continue;
 
-    // Check for cancellation before starting each service so Cancel actually stops the job.
-    // Without this check the worker runs through all services even after the user cancels.
     const liveJob = await bulkGetJob(jobId);
     if (!liveJob || liveJob.status === "cancelled") {
       console.log(`[bulk-background] Job ${jobId} was cancelled — stopping at service ${si}/${services.length}`);
@@ -400,7 +363,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     }
 
     const svc = services[si];
-
     const svcId = serviceIdByName.get(svc.toLowerCase());
 
     const banks = await bulkGetVariationBanks(job.websiteId, svc);
@@ -410,7 +372,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       continue;
     }
 
-    // Compute and persist bank completeness once per service
     try {
       const completeness = computeBankCompleteness(banks);
       await bulkUpsertBankCompleteness({
@@ -433,7 +394,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       } as any);
     } catch { /* non-critical — completeness tracking is best-effort */ }
 
-    // Determine the min score for Tier 1 from the blueprint (default 80)
     const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
 
     settings.progress[si] = { service: svc, status: "running", created: 0, updated: 0, skipped: 0, errors: 0 };
@@ -442,11 +402,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const serviceSlug = svc.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
     let svcCreated = 0, svcUpdated = 0, svcSkipped = 0, svcErrors = 0;
 
-    // Pending batch for bulk inserts (new pages only)
     const pendingPageData: schema.InsertPage[] = [];
     const pendingContent: string[] = [];
 
-    // Pending batch for overwrites
     const pendingOverwrites: Array<{
       slug: string; title: string; h1: string; meta: string;
       wordCount: number; blueprintId: string | null; contentHtml: string;
@@ -497,18 +455,15 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
     const flushInsertBatch = async () => {
       if (pendingPageData.length === 0) return;
-      // Snapshot and clear the batch BEFORE the insert so a failure never
-      // leaves stale data that causes infinite retry loops.
       const batchData = pendingPageData.splice(0);
       const batchContent = pendingContent.splice(0);
       const slugToContent = new Map<string, string>();
       batchData.forEach((d, i) => slugToContent.set(d.slug, batchContent[i]));
-      const created = await insertPagesBulk(batchData as schema.InsertPage[]); // uses dedicated pool
+      const created = await insertPagesBulk(batchData as schema.InsertPage[]);
       if (created.length > 0) {
         await insertVersionsBulk(
           created.map(p => ({ pageId: p.id, version: 1, contentHtml: slugToContent.get(p.slug) ?? "", isActive: true }))
         );
-        // Collect URLs for Google Indexing API submission at job end
         for (const p of created) {
           newPageUrls.push(`https://${website.domain}/${p.slug}`);
         }
@@ -555,7 +510,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         const finalH1 = bpOverride?.h1 || result.h1;
         const finalMeta = bpOverride?.metaDescription || result.metaDescription;
 
-        // Score this page at generation time
         const pageScore = scorePageContent(
           result.contentHtml, finalMeta, finalTitle, result.wordCount, banks, minScoreForTier1,
         );
@@ -577,11 +531,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             }
           }
         } else {
-          // Mark slug used immediately so within-batch duplicates are caught
           existingSlugSet.add(finalSlug);
-          // Phase 6 — Draft mode override (only set when onboarding pipeline triggered the job).
-          // For manual admin jobs settings.isDraft is undefined, so draftFields is {} and the
-          // insert below behaves exactly as before.
           const draftFields = settings.isDraft
             ? {
                 isDraft: true,
@@ -615,22 +565,14 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         console.error("[bulk-background] error", svc, t.locationName, err);
       }
 
-      // Yield the event loop every YIELD_EVERY pages so pending I/O
-      // (DB connection releases, HTTP request handlers) can run and prevent
-      // connection-pool exhaustion on large 100K+ page jobs.
       pagesSinceLastFlush++;
       if (pagesSinceLastFlush % YIELD_EVERY === 0) await yieldEventLoop();
 
-      // Flush progress counters to DB every PAGE_BATCH_SIZE pages.
-      // Always flush the insert batch first so totalCreated is accurate
-      // even when most pages are skips (batch may not have reached INSERT_BATCH_SIZE yet).
       if (pagesSinceLastFlush >= PAGE_BATCH_SIZE) {
         pagesSinceLastFlush = 0;
         try {
           await flushInsertBatch();
           await flushOverwriteBatch();
-          // Check cancellation every PAGE_BATCH_SIZE pages — reuses the same DB
-          // round-trip window so we don't add extra overhead per page.
           const midJob = await bulkGetJob(jobId);
           if (!midJob || midJob.status === "cancelled") {
             console.log(`[bulk-background] Job ${jobId} cancelled mid-service — stopping`);
@@ -645,15 +587,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
             failedPages: totalFailed,
           });
         } catch (chkErr) {
-          // A transient DB error in the checkpoint should not crash the whole job.
-          // Log it and continue — the next checkpoint will retry.
           console.error("[bulk-background] checkpoint flush error (continuing):", chkErr);
         }
       }
-    } // end for (const t of targets)
-    } // end for (const cl of clustersToIterate)
+    }
+    }
 
-    // Flush remaining pages in batch before marking service done
     await flushInsertBatch();
     await flushOverwriteBatch();
 
@@ -668,7 +607,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     });
   }
 
-  // Final sync and sitemap
   await bulkSyncPublishedCount(job.websiteId);
   const rawFinal = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
   const rawPassedFinal = basePassedPages + totalCreated + totalUpdated;
@@ -680,7 +618,6 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     failedPages: totalFailed,
   });
 
-  // Phase 6 — when isDraft, skip Auto 3 (sitemap regen + ping) and Auto 4 (GSC indexing)
   if (!settings.isDraft) {
     try {
       const { generateSitemapsForWebsite } = await import("./sitemap");
@@ -691,24 +628,19 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       await generateSitemapsForWebsite(job.websiteId, website.domain, canonBase);
     } catch { /* non-critical */ }
 
-    // Ping Google to re-crawl the sitemap immediately after job completion
     try {
       const sitemapUrl = `https://${website.domain}/sitemap.xml`;
       await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
       console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
-    } catch { /* non-critical — Google ping is best-effort */ }
+    } catch { /* non-critical */ }
 
-    // Submit new page URLs directly to Google Indexing API for rapid indexing
     try {
       await submitUrlsToGoogle(newPageUrls);
-    } catch { /* non-critical — GSC indexing is best-effort */ }
+    } catch { /* non-critical */ }
   } else {
     console.log(`[bulk-background] Draft mode — skipped sitemap regen, Google ping, GSC indexing for ${website.domain}`);
   }
 
-  // Auto 1 + 2 + 3 + 4: Create a separate scoring job visible in the Jobs dashboard.
-  // For draft mode, pass skipPublishingHooks so Auto 2 still tiers but doesn't trigger
-  // sitemap regen or Google indexing as a side-effect of newly-promoted Tier 1 pages.
   try {
     const { runAutoScoringJob } = await import("./automation");
     const scoringJob = await bulkCreateJob({
