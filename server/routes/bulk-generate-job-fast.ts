@@ -12,6 +12,7 @@ const DEAD_JOB_MINUTES = Number(process.env.DEAD_JOB_MINUTES || 30);
 const DEAD_JOB_INTERVAL_MS = Number(process.env.DEAD_JOB_INTERVAL_MS || 5 * 60 * 1000);
 const PENDING_BULK_JOB_INTERVAL_MS = Number(process.env.PENDING_BULK_JOB_INTERVAL_MS || 15 * 1000);
 const PENDING_BULK_JOB_BATCH_LIMIT = Math.max(1, Number(process.env.PENDING_BULK_JOB_BATCH_LIMIT || 3));
+const NO_CLUSTER_SENTINEL = "__NO_CLUSTERS__";
 let deadJobRecoveryStarted = false;
 let deadJobRecoveryRunning = false;
 let pendingBulkJobPumpStarted = false;
@@ -38,7 +39,7 @@ function normalizeSettings(body: any): BulkJobSettings {
   return {
     services,
     blueprintId: body?.blueprintId || undefined,
-    queryClusterIds: Array.isArray(body?.queryClusterIds) ? body.queryClusterIds.map(String) : undefined,
+    queryClusterIds: Array.isArray(body?.queryClusterIds) ? body.queryClusterIds.map(String).filter(Boolean) : undefined,
     mode,
     states: Array.isArray(body?.states) ? body.states.map(String) : undefined,
     cities: Array.isArray(body?.cities)
@@ -210,8 +211,21 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
         ? settings.cities?.length || 0
         : 50;
 
-    const clusterCount = settings.queryClusterIds?.length || 1;
+    // Missing queryClusterIds means "base pages only" from this route. The bulk
+    // engine interprets an omitted cluster list as "all account clusters," so pass
+    // a never-matching sentinel for no-cluster jobs to keep totals and output aligned.
+    const requestedClusterIds = (settings.queryClusterIds || []).filter((id) => id && id !== NO_CLUSTER_SENTINEL);
+    const effectiveQueryClusterIds = requestedClusterIds.length > 0 ? requestedClusterIds : [NO_CLUSTER_SENTINEL];
+    const clusterCount = requestedClusterIds.length || 1;
     const estimatedTotal = settings.services.length * targetCount * clusterCount;
+
+    const jobSettings = {
+      ...(settings as any),
+      queryClusterIds: effectiveQueryClusterIds,
+      clusterCount,
+      targetCount,
+      jobType: "bulk-background",
+    } as any;
 
     const job = await storage.createGenerationJob({
       accountId: website.accountId,
@@ -224,12 +238,7 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
       passedPages: 0,
       failedPages: 0,
       errorLog: [],
-      settings: {
-        ...(settings as any),
-        clusterCount,
-        targetCount,
-        jobType: "bulk-background",
-      } as any,
+      settings: jobSettings,
     } as any);
 
     res.status(202).json({
