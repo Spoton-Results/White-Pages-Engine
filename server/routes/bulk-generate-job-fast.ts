@@ -90,14 +90,19 @@ function mapJobForDashboard(job: AnyJob) {
 async function recoverDeadGenerationJobs(minutes = DEAD_JOB_MINUTES) {
   const thresholdMinutes = Math.max(5, Number(minutes || DEAD_JOB_MINUTES));
 
+  // Do not auto-fail RUNNING jobs by age. Large bulk jobs can legitimately run
+  // for hours while still making progress. Until the unified Job Engine has a
+  // heartbeat column, recovery should only clean old PENDING jobs that never
+  // got claimed, not kill active generation work.
   const result = await pool.query(
     `UPDATE generation_jobs
      SET status = $1::job_status,
          completed_at = COALESCE(completed_at, NOW())
-     WHERE status IN ($2::job_status, $3::job_status)
-       AND COALESCE(started_at, created_at) < NOW() - ($4::text || ' minutes')::interval
+     WHERE status = $2::job_status
+       AND started_at IS NULL
+       AND created_at < NOW() - ($3::text || ' minutes')::interval
      RETURNING *`,
-    [JOB_STATUS.FAILED, JOB_STATUS.PENDING, JOB_STATUS.RUNNING, thresholdMinutes],
+    [JOB_STATUS.FAILED, JOB_STATUS.PENDING, thresholdMinutes],
   );
 
   return result.rows.map((job: AnyJob) => mapJobForDashboard(job));
