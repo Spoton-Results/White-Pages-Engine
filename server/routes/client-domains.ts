@@ -258,9 +258,6 @@ async function serveHealth(ctx: any, host: string, res: Response) {
   });
 }
 
-// Public hostname resolver: Cloudflare for SaaS may rewrite Host to the Railway origin.
-// Prefer forwarded custom-host headers so Nexus can still resolve tenant by customer hostname.
-// It must run before requireAuth so custom-hostname traffic can render public pages.
 router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (shouldIgnorePublicResolver(req)) return next();
@@ -414,7 +411,6 @@ router.post("/api/websites/:websiteId/client-domains", async (req, res, next) =>
     const website = await assertWebsiteAccess(req, res, req.params.websiteId); if (!website) return;
     const hostname = normalizeHostname(req.body?.hostname);
     if (!hostname || !hostname.includes(".")) return res.status(400).json({ message: "Enter a valid hostname like pages.client.com" });
-    if (hostname === normalizeHostname(website.domain)) return res.status(400).json({ message: "Use a client subdomain, not the website origin domain." });
 
     let cfResult: any = null;
     let cfError: string | null = null;
@@ -425,7 +421,7 @@ router.post("/api/websites/:websiteId/client-domains", async (req, res, next) =>
     const row = (await pool.query(
       `INSERT INTO client_domains (website_id, account_id, hostname, status, cloudflare_hostname_id, ownership_txt_name, ownership_txt_value, ssl_status, error, verified_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-       ON CONFLICT (hostname) DO UPDATE SET website_id = EXCLUDED.website_id, account_id = EXCLUDED.account_id, status = EXCLUDED.status, cloudflare_hostname_id = EXCLUDED.cloudflare_hostname_id, ownership_txt_name = EXCLUDED.ownership_txt_name, ownership_txt_value = EXCLUDED.ownership_txt_value, ssl_status = EXCLUDED.ssl_status, error = EXCLUDED.error, verified_at = EXCLUDED.verified_at, updated_at = NOW()
+       ON CONFLICT (hostname) DO UPDATE SET website_id = EXCLUDED.website_id, account_id = EXCLUDED.account_id, status = EXCLUDED.status, cloudflare_hostname_id = COALESCE(EXCLUDED.cloudflare_hostname_id, client_domains.cloudflare_hostname_id), ownership_txt_name = COALESCE(EXCLUDED.ownership_txt_name, client_domains.ownership_txt_name), ownership_txt_value = COALESCE(EXCLUDED.ownership_txt_value, client_domains.ownership_txt_value), ssl_status = COALESCE(EXCLUDED.ssl_status, client_domains.ssl_status), error = EXCLUDED.error, verified_at = EXCLUDED.verified_at, updated_at = NOW()
        RETURNING *`,
       [website.id, website.account_id, hostname, status, cfResult?.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus, cfError, status === "active" ? new Date() : null],
     )).rows[0];
