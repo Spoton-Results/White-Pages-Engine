@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { requireAuth } from "../auth";
 import { pool } from "../db";
 import * as storage from "../storage";
-import { runBulkBackgroundJob, type BulkJobSettings } from "../services/bulk-background-locked";
+import { runBulkBackgroundJob, type BulkJobSettings } from "../services/bulk-background";
 import { JOB_STATUS } from "../../shared/job-status";
 
 const router = Router();
@@ -428,29 +428,15 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
   try {
     const { websiteId } = req.params;
     const settings = normalizeSettings(req.body || {});
-
     if (!settings.services.length) {
       return res.status(400).json({ error: "Select at least one service before starting bulk generation." });
     }
-
     const website = await storage.getWebsite(websiteId);
-    if (!website) {
-      return res.status(404).json({ error: "Website not found." });
-    }
-
+    if (!website) return res.status(404).json({ error: "Website not found." });
     const targetCount = getTargetCount(settings);
     const { requestedClusterIds, effectiveQueryClusterIds, clusterCount } = getEffectiveClusters(settings);
     const estimatedTotal = settings.services.length * targetCount * clusterCount;
-
-    const jobSettings = {
-      ...(settings as any),
-      queryClusterIds: effectiveQueryClusterIds,
-      requestedClusterIds,
-      clusterCount,
-      targetCount,
-      jobType: "bulk-background",
-    } as any;
-
+    const jobSettings = { ...(settings as any), queryClusterIds: effectiveQueryClusterIds, requestedClusterIds, clusterCount, targetCount, jobType: "bulk-background" } as any;
     const job = await storage.createGenerationJob({
       accountId: website.accountId,
       websiteId,
@@ -464,13 +450,7 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
       errorLog: [],
       settings: jobSettings,
     } as any);
-
-    res.status(202).json({
-      jobId: job.id,
-      status: JOB_STATUS.PENDING,
-      message: "Bulk generation queued in background.",
-    });
-
+    res.status(202).json({ jobId: job.id, status: JOB_STATUS.PENDING, message: "Bulk generation queued in background." });
     launchBulkJob(job.id, "route");
   } catch (error) {
     return next(error);
