@@ -86,6 +86,32 @@ function telHref(phone: string): string {
   return phone.replace(/[^+\d]/g, "");
 }
 
+function normalizeLinkKey(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[|–—-]+/g, "-")
+    .trim();
+}
+
+function dedupeInternalLinks(links: PublicInternalLink[], limit = 12): PublicInternalLink[] {
+  const seenSlugs = new Set<string>();
+  const seenAnchors = new Set<string>();
+  const unique: PublicInternalLink[] = [];
+
+  for (const link of links) {
+    const slugKey = normalizeLinkKey(link.slug);
+    const anchorKey = normalizeLinkKey(link.anchorText || link.title || link.slug);
+    if (!slugKey || seenSlugs.has(slugKey) || seenAnchors.has(anchorKey)) continue;
+    seenSlugs.add(slugKey);
+    seenAnchors.add(anchorKey);
+    unique.push(link);
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
+}
+
 async function getFallbackInternalLinks(pageId: string, websiteId: string): Promise<PublicInternalLink[]> {
   try {
     const result = await pool.query(
@@ -94,38 +120,46 @@ async function getFallbackInternalLinks(pageId: string, websiteId: string): Prom
          FROM pages
          WHERE id::text = $2::text AND website_id::text = $1::text
          LIMIT 1
+       ), ranked_links AS (
+         SELECT p.slug, p.title,
+           CASE
+             WHEN p.service_id::text = cp.service_id::text AND p.location_id::text = cp.location_id::text THEN p.title
+             WHEN p.service_id::text = cp.service_id::text THEN p.title
+             WHEN p.location_id::text = cp.location_id::text THEN p.title
+             ELSE p.title
+           END AS anchor_text,
+           'fallback_related' AS link_type,
+           ROW_NUMBER() OVER (
+             PARTITION BY lower(COALESCE(p.title, p.slug))
+             ORDER BY
+               CASE WHEN p.service_id::text = cp.service_id::text THEN 0 ELSE 1 END,
+               CASE WHEN p.location_id::text = cp.location_id::text THEN 0 ELSE 1 END,
+               CASE WHEN p.page_type IN ('state_hub','city_hub') THEN 0 ELSE 1 END,
+               p.tier ASC NULLS LAST,
+               p.quality_score DESC NULLS LAST,
+               p.published_at DESC NULLS LAST
+           ) AS title_rank
+         FROM pages p
+         CROSS JOIN current_page cp
+         WHERE p.website_id::text = $1::text
+           AND p.id::text <> $2::text
+           AND p.status = 'published'
+           AND COALESCE(p.noindex, false) = false
        )
-       SELECT p.slug, p.title,
-         CASE
-           WHEN p.service_id::text = cp.service_id::text AND p.location_id::text = cp.location_id::text THEN p.title
-           WHEN p.service_id::text = cp.service_id::text THEN p.title
-           WHEN p.location_id::text = cp.location_id::text THEN p.title
-           ELSE p.title
-         END AS anchor_text,
-         'fallback_related' AS link_type
-       FROM pages p
-       CROSS JOIN current_page cp
-       WHERE p.website_id::text = $1::text
-         AND p.id::text <> $2::text
-         AND p.status = 'published'
-         AND COALESCE(p.noindex, false) = false
-       ORDER BY
-         CASE WHEN p.service_id::text = cp.service_id::text THEN 0 ELSE 1 END,
-         CASE WHEN p.location_id::text = cp.location_id::text THEN 0 ELSE 1 END,
-         CASE WHEN p.page_type IN ('state_hub','city_hub') THEN 0 ELSE 1 END,
-         p.tier ASC NULLS LAST,
-         p.quality_score DESC NULLS LAST,
-         p.published_at DESC NULLS LAST
-       LIMIT 12`,
+       SELECT slug, title, anchor_text, link_type
+       FROM ranked_links
+       WHERE title_rank = 1
+       ORDER BY title ASC NULLS LAST, slug ASC
+       LIMIT 48`,
       [websiteId, pageId],
     );
 
-    return result.rows.map((row: any) => ({
+    return dedupeInternalLinks(result.rows.map((row: any) => ({
       slug: row.slug,
       title: row.title,
       anchorText: row.anchor_text || row.title || row.slug,
       linkType: row.link_type,
-    }));
+    })));
   } catch (error) {
     console.error("Failed to load fallback public links:", error);
     return [];
@@ -143,16 +177,16 @@ export async function getPublicInternalLinks(pageId: string, websiteId: string):
          AND p.status = 'published'
          AND COALESCE(p.noindex, false) = false
        ORDER BY il.created_at DESC
-       LIMIT 12`,
+       LIMIT 48`,
       [websiteId, pageId],
     );
 
-    const explicitLinks = result.rows.map((row: any) => ({
+    const explicitLinks = dedupeInternalLinks(result.rows.map((row: any) => ({
       slug: row.slug,
       title: row.title,
       anchorText: row.anchor_text || row.title || row.slug,
       linkType: row.link_type,
-    }));
+    })));
 
     if (explicitLinks.length > 0) return explicitLinks;
     return await getFallbackInternalLinks(pageId, websiteId);
@@ -250,8 +284,9 @@ function leadForm(page: any, website: any, canonicalUrl: string) {
 }
 
 function internalLinks(links: PublicInternalLink[], website: any) {
-  if (!links.length) return "";
-  return `<section class="nexus-card nexus-links"><p class="nexus-eyebrow">Related resources</p><h2>Explore More Helpful Pages</h2><div class="nexus-link-grid">${links.map((l) => `<a href="${escapeHtml(pageUrl(website, l.slug))}">${escapeHtml(l.anchorText || l.title || l.slug)}</a>`).join("")}</div></section>`;
+  const safeLinks = dedupeInternalLinks(links);
+  if (!safeLinks.length) return "";
+  return `<section class="nexus-card nexus-links"><p class="nexus-eyebrow">Related resources</p><h2>Explore More Helpful Pages</h2><div class="nexus-link-grid">${safeLinks.map((l) => `<a href="${escapeHtml(pageUrl(website, l.slug))}">${escapeHtml(l.anchorText || l.title || l.slug)}</a>`).join("")}</div></section>`;
 }
 
 function footer(website: any) {
