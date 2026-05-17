@@ -41,6 +41,31 @@ const YIELD_EVERY = Number(process.env.BULK_YIELD_EVERY || 25);
 
 const yieldEventLoop = () => new Promise<void>(r => setImmediate(r));
 
+const slugifySegment = (s: string) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+function shouldNamespaceBlueprintSlug(settings: any): boolean {
+  return (
+    Number(settings?.campaignBlueprintTotal || 0) > 1 ||
+    Boolean(settings?.parentJobId) ||
+    Boolean(settings?.multiBlueprintCampaign) ||
+    Boolean(settings?.namespaceBlueprintSlug)
+  );
+}
+
+function namespaceSlugWithBlueprint(slug: string, blueprint: any, settings: any): string {
+  if (!slug || !blueprint || !shouldNamespaceBlueprintSlug(settings)) return slug;
+
+  const blueprintNamespace = slugifySegment(blueprint.slug || blueprint.name || blueprint.id || "");
+  if (!blueprintNamespace) return slug;
+
+  if (slug === blueprintNamespace || slug.startsWith(`${blueprintNamespace}--`)) return slug;
+  return `${blueprintNamespace}--${slug}`;
+}
+
 async function bulkGetJob(id: string) {
   const [row] = await bulkDb.select().from(schema.generationJobs).where(eq(schema.generationJobs.id, id));
   return row ?? null;
@@ -138,6 +163,10 @@ export interface BulkJobSettings {
   overwrite?: boolean;
   isDraft?: boolean;
   draftReason?: string;
+  parentJobId?: string;
+  campaignBlueprintTotal?: number;
+  multiBlueprintCampaign?: boolean;
+  namespaceBlueprintSlug?: boolean;
   progress: Array<{
     service: string;
     status: "pending" | "running" | "done" | "error" | "no-bank";
@@ -383,7 +412,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           const citiesInState = t.locationType === "state" ? (citiesByState.get(t.stateAbbr.toUpperCase()) ?? []).map(name => ({ name })) : undefined;
           const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster, citiesInState, allRelatedServices, website.domain, blueprintTemplate?.slugTemplate, (() => { const rp = ((website.settings as any)?.proxyPath || "") as string; return rp.startsWith("/sites/") ? "" : rp; })());
           const bpOverride = applyBlueprintTemplates(blueprintTemplate, { service: svc, location: t.locationName, state: t.stateName, stateAbbr: t.stateAbbr, brand: brandName, cluster: svcCluster?.primaryKeyword ?? "" });
-          const finalSlug = bpOverride?.slug || result.slug;
+          let finalSlug = bpOverride?.slug || result.slug;
+          finalSlug = namespaceSlugWithBlueprint(finalSlug, blueprint, settings as any);
           const finalTitle = bpOverride?.title || result.title;
           const finalH1 = bpOverride?.h1 || result.h1;
           const finalMeta = bpOverride?.metaDescription || result.metaDescription;
