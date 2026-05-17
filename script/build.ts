@@ -51,7 +51,8 @@ async function patchBulkGeneratorUiToBackendCampaign() {
     if (queryClusterIds.length > 0) payload.queryClusterIds = queryClusterIds;
     accumulatedRef.current = { created: 0, skipped: 0, errors: 0 };
     handledTerminalJobRef.current = "";
-    setBpQueueDisplay({ idx: 0, total: 1, label: payload.runAllBlueprints ? \`Backend campaign · ${"${bpIds.length}"} blueprints\` : "Backend campaign" });
+    const backendCampaignLabel = payload.runAllBlueprints ? "Backend campaign · " + bpIds.length + " blueprints" : "Backend campaign";
+    setBpQueueDisplay({ idx: 0, total: 1, label: backendCampaignLabel });
     setLastResult(null);
     setLastFailure("");
     setIsRunningAll(true);
