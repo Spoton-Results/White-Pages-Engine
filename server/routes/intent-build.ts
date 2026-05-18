@@ -4,8 +4,11 @@ import { createIntentBuildJob, getLatestIntentBuildJob } from "../services/inten
 
 const router = Router();
 
-// POST /api/websites/:websiteId/intent-build/run
-router.post("/websites/:websiteId/intent-build/run", requireAuth, async (req, res) => {
+// Mounted at /api/intent-build in index.ts
+// Routes are relative — do NOT include /api/intent-build/ prefix here.
+
+// POST /api/intent-build/websites/:websiteId/run
+router.post("/websites/:websiteId/run", requireAuth, async (req, res) => {
   try {
     const { websiteId } = req.params;
     const result = await createIntentBuildJob(websiteId);
@@ -16,8 +19,8 @@ router.post("/websites/:websiteId/intent-build/run", requireAuth, async (req, re
   }
 });
 
-// GET /api/websites/:websiteId/intent-build/status
-router.get("/websites/:websiteId/intent-build/status", requireAuth, async (req, res) => {
+// GET /api/intent-build/websites/:websiteId/status
+router.get("/websites/:websiteId/status", requireAuth, async (req, res) => {
   try {
     const { websiteId } = req.params;
     const job = await getLatestIntentBuildJob(websiteId);
@@ -28,8 +31,8 @@ router.get("/websites/:websiteId/intent-build/status", requireAuth, async (req, 
   }
 });
 
-// GET /api/websites/:websiteId/intent-build/report
-router.get("/websites/:websiteId/intent-build/report", requireAuth, async (req, res) => {
+// GET /api/intent-build/websites/:websiteId/report
+router.get("/websites/:websiteId/report", requireAuth, async (req, res) => {
   try {
     const { websiteId } = req.params;
     const job = await getLatestIntentBuildJob(websiteId);

@@ -9,6 +9,9 @@ import { logOperationalEvent } from "../services/observability";
 
 const router = Router();
 
+// Mounted at /api/onboarding in index.ts
+// All routes below are relative — do NOT hardcode /api/onboard* prefixes.
+
 function slugify(value: string) {
   return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -122,7 +125,8 @@ async function insertLocations(accountId: string, selectedStates: string[], city
   return inserted;
 }
 
-router.get("/api/onboard/lookup/:token", async (req, res, next) => {
+// GET /api/onboarding/lookup/:token
+router.get("/lookup/:token", async (req, res, next) => {
   try {
     const token = String(req.params.token || "");
     const result = await pool.query(
@@ -137,7 +141,8 @@ router.get("/api/onboard/lookup/:token", async (req, res, next) => {
   }
 });
 
-router.post("/api/onboard/submit", async (req, res, next) => {
+// POST /api/onboarding/submit
+router.post("/submit", async (req, res, next) => {
   try {
     const { token, business, services, coverage } = req.body || {};
     if (!token) return res.status(400).json({ success: false, error: "Missing token" });
@@ -170,7 +175,8 @@ router.post("/api/onboard/submit", async (req, res, next) => {
   }
 });
 
-router.post("/api/agencies/:agencyId/wizard/suggest-services", requireAuth, async (req, res) => {
+// POST /api/onboarding/agencies/:agencyId/wizard/suggest-services
+router.post("/agencies/:agencyId/wizard/suggest-services", requireAuth, async (req, res) => {
   const { businessName, industry } = req.body || {};
   try {
     const suggested = await suggestServices(industry || "Other", businessName || "Business");
@@ -180,7 +186,8 @@ router.post("/api/agencies/:agencyId/wizard/suggest-services", requireAuth, asyn
   }
 });
 
-router.post("/api/agencies/:agencyId/wizard/launch", requireAuth, async (req, res, next) => {
+// POST /api/onboarding/agencies/:agencyId/wizard/launch
+router.post("/agencies/:agencyId/wizard/launch", requireAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const agencyId = req.params.agencyId;
