@@ -4,13 +4,11 @@
  *   1. The agency owner who manages the website's account
  *   2. The client (account primary contact email)
  *
- * Transport priority:
- *   1. SendGrid HTTP API  — set SENDGRID_API_KEY
- *   2. SMTP fallback      — set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
- *   3. If neither configured — logs a warning, skips silently
+ * Transport: Resend API (RESEND_API_KEY) — no package install needed, pure fetch.
+ * From:      noreply@reply.spotonresults.com
+ * Reply-To:  the lead's email address so recipients can reply directly to the lead.
  *
- * Never throws — all errors are caught and logged so a failed email
- * never breaks a form submission response.
+ * Never throws — all errors caught so a failed email never breaks a form submission.
  */
 
 import { pool } from "../db";
@@ -46,25 +44,32 @@ interface SendOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Transport helpers
+// Config — from address is your verified Resend domain
 // ---------------------------------------------------------------------------
 
-const FROM_EMAIL = process.env.LEAD_NOTIFY_FROM_EMAIL || process.env.SMTP_USER || "leads@spotonresults.com";
-const FROM_NAME = process.env.LEAD_NOTIFY_FROM_NAME || "SpotOn Results Leads";
+const FROM_EMAIL = "noreply@reply.spotonresults.com";
+const FROM_NAME  = process.env.LEAD_NOTIFY_FROM_NAME || "SpotOn Results";
 
-async function sendViaSendGrid(opts: SendOptions): Promise<void> {
-  const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) throw new Error("SENDGRID_API_KEY not set");
+// ---------------------------------------------------------------------------
+// Transport: Resend (pure fetch — no npm package required)
+// ---------------------------------------------------------------------------
+
+async function sendViaResend(opts: SendOptions): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn("[lead-notify] RESEND_API_KEY is not set. Lead email skipped.");
+    return;
+  }
 
   const body = {
-    personalizations: [{ to: [{ email: opts.to.email, name: opts.to.name || "" }] }],
-    from: { email: FROM_EMAIL, name: FROM_NAME },
-    reply_to: opts.replyTo ? { email: opts.replyTo } : undefined,
-    subject: opts.subject,
-    content: [{ type: "text/html", value: opts.html }],
+    from:     `${FROM_NAME} <${FROM_EMAIL}>`,
+    to:       [opts.to.name ? `${opts.to.name} <${opts.to.email}>` : opts.to.email],
+    reply_to: opts.replyTo ?? FROM_EMAIL,
+    subject:  opts.subject,
+    html:     opts.html,
   };
 
-  const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
+  const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -75,53 +80,34 @@ async function sendViaSendGrid(opts: SendOptions): Promise<void> {
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`SendGrid error ${resp.status}: ${text}`);
+    throw new Error(`Resend error ${resp.status}: ${text}`);
   }
-}
 
-async function sendViaSmtp(opts: SendOptions): Promise<void> {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!host || !user || !pass) throw new Error("SMTP env vars not configured");
-
-  // Lazy-import nodemailer so it's not required if SendGrid is used.
-  // If nodemailer is not in package.json, this will throw and fall through to the log.
-  const nodemailer = await import("nodemailer").catch(() => { throw new Error("nodemailer not installed"); });
-  const transporter = nodemailer.createTransport({
-    host,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: process.env.SMTP_SECURE === "true",
-    auth: { user, pass },
-  });
-
-  await transporter.sendMail({
-    from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
-    to: opts.to.name ? `"${opts.to.name}" <${opts.to.email}>` : opts.to.email,
-    replyTo: opts.replyTo,
-    subject: opts.subject,
-    html: opts.html,
-  });
-}
-
-async function sendEmail(opts: SendOptions): Promise<void> {
-  if (process.env.SENDGRID_API_KEY) {
-    return sendViaSendGrid(opts);
-  }
-  if (process.env.SMTP_HOST) {
-    return sendViaSmtp(opts);
-  }
-  console.warn("[lead-notify] No email transport configured. Set SENDGRID_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS to enable lead emails.");
+  const json = await resp.json().catch(() => ({}));
+  console.log(`[lead-notify] Resend accepted → id=${(json as any)?.id} to=${opts.to.email}`);
 }
 
 // ---------------------------------------------------------------------------
 // Email HTML builder
 // ---------------------------------------------------------------------------
 
-function buildLeadEmailHtml(lead: LeadNotifyPayload, businessName: string, recipientRole: "agency" | "client"): string {
-  const ts = lead.formTimestamp.toLocaleString("en-US", { timeZone: "America/Denver", dateStyle: "medium", timeStyle: "short" });
-  const pageLink = lead.sourcePageUrl ? `<a href="${lead.sourcePageUrl}" style="color:#01696f">${lead.sourcePageTitle || lead.sourcePageUrl}</a>` : (lead.sourcePageTitle || "Unknown page");
-  const roleLabel = recipientRole === "agency" ? "one of your client accounts" : "your website";
+function buildLeadEmailHtml(
+  lead: LeadNotifyPayload,
+  businessName: string,
+  recipientRole: "agency" | "client",
+): string {
+  const ts = lead.formTimestamp.toLocaleString("en-US", {
+    timeZone: "America/Denver",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const pageLink = lead.sourcePageUrl
+    ? `<a href="${escHtml(lead.sourcePageUrl)}" style="color:#01696f">${escHtml(lead.sourcePageTitle || lead.sourcePageUrl)}</a>`
+    : escHtml(lead.sourcePageTitle || "Unknown page");
+  const roleLabel =
+    recipientRole === "agency"
+      ? `one of your client accounts (<strong>${escHtml(businessName)}</strong>)`
+      : "your website";
 
   return `
 <!DOCTYPE html>
@@ -131,44 +117,61 @@ function buildLeadEmailHtml(lead: LeadNotifyPayload, businessName: string, recip
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f2;padding:32px 16px">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+
         <!-- Header -->
         <tr><td style="background:#01696f;padding:24px 32px">
-          <p style="margin:0;color:#ffffff;font-size:13px;letter-spacing:0.05em;text-transform:uppercase">New Lead Notification</p>
-          <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;font-weight:700">New Lead for ${escHtml(businessName)}</h1>
+          <p style="margin:0;color:#ffffff;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;opacity:0.75">New Lead Notification</p>
+          <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3">
+            New Lead &mdash; ${escHtml(businessName)}
+          </h1>
         </td></tr>
+
         <!-- Body -->
         <tr><td style="padding:32px">
-          <p style="margin:0 0 24px;color:#555;font-size:15px">A new lead was submitted from ${roleLabel}.</p>
+          <p style="margin:0 0 24px;color:#555;font-size:15px;line-height:1.6">
+            A new lead was submitted from ${roleLabel}.
+          </p>
 
-          <!-- Lead Details -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:6px;overflow:hidden;margin-bottom:24px">
+          <!-- Contact Details -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:6px;overflow:hidden;margin-bottom:20px">
             <tr style="background:#f9f8f5">
-              <td colspan="2" style="padding:12px 16px;font-size:12px;font-weight:600;color:#7a7974;text-transform:uppercase;letter-spacing:0.06em">Contact Information</td>
+              <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#7a7974;text-transform:uppercase;letter-spacing:0.08em">
+                Contact Information
+              </td>
             </tr>
-            ${row("Name", lead.submitterName || "—")}
-            ${row("Email", `<a href="mailto:${escHtml(lead.submitterEmail)}" style="color:#01696f">${escHtml(lead.submitterEmail)}</a>`)}
-            ${row("Phone", lead.submitterPhone ? `<a href="tel:${escHtml(lead.submitterPhone)}" style="color:#01696f">${escHtml(lead.submitterPhone)}</a>` : "—")}
-            ${lead.message ? row("Message", `<span style="white-space:pre-line">${escHtml(lead.message)}</span>`) : ""}
+            ${tableRow("Name",    escHtml(lead.submitterName || "—"))}
+            ${tableRow("Email",   `<a href="mailto:${escHtml(lead.submitterEmail)}" style="color:#01696f;font-weight:600">${escHtml(lead.submitterEmail)}</a>`)}
+            ${tableRow("Phone",   lead.submitterPhone
+                ? `<a href="tel:${escHtml(lead.submitterPhone)}" style="color:#01696f;font-weight:600">${escHtml(lead.submitterPhone)}</a>`
+                : "—")}
+            ${lead.message ? tableRow("Message", `<span style="white-space:pre-line;color:#333">${escHtml(lead.message)}</span>`) : ""}
           </table>
 
-          <!-- Source Info -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:6px;overflow:hidden;margin-bottom:24px">
+          <!-- Lead Source -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:6px;overflow:hidden;margin-bottom:28px">
             <tr style="background:#f9f8f5">
-              <td colspan="2" style="padding:12px 16px;font-size:12px;font-weight:600;color:#7a7974;text-transform:uppercase;letter-spacing:0.06em">Lead Source</td>
+              <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#7a7974;text-transform:uppercase;letter-spacing:0.08em">
+                Lead Source
+              </td>
             </tr>
-            ${row("Form", escHtml(lead.formName || "Contact Form"))}
-            ${row("Page", pageLink)}
-            ${row("Submitted", ts + " MT")}
-            ${row("Lead ID", `<code style="font-size:12px;color:#888">${lead.leadId}</code>`)}
+            ${tableRow("Form",      escHtml(lead.formName || "Contact Form"))}
+            ${tableRow("Page",      pageLink)}
+            ${tableRow("Submitted", `${ts} MT`)}
+            ${tableRow("Lead ID",   `<code style="font-size:11px;color:#aaa;background:#f5f5f5;padding:2px 6px;border-radius:3px">${lead.leadId}</code>`)}
           </table>
 
-          <!-- CTA -->
-          <p style="margin:0;color:#888;font-size:13px">Reply to this email or call the lead directly to follow up.</p>
+          <p style="margin:0;color:#aaa;font-size:13px">
+            Reply to this email to respond directly to the lead.
+          </p>
         </td></tr>
+
         <!-- Footer -->
-        <tr><td style="padding:16px 32px;background:#f3f0ec;border-top:1px solid #e5e3de">
-          <p style="margin:0;font-size:12px;color:#bab9b4">Powered by SpotOn Results &mdash; White Pages Engine</p>
+        <tr><td style="padding:14px 32px;background:#f3f0ec;border-top:1px solid #e5e3de">
+          <p style="margin:0;font-size:11px;color:#bab9b4">
+            Sent by SpotOn Results &mdash; White Pages Engine &bull; ${escHtml(FROM_EMAIL)}
+          </p>
         </td></tr>
+
       </table>
     </td></tr>
   </table>
@@ -176,103 +179,134 @@ function buildLeadEmailHtml(lead: LeadNotifyPayload, businessName: string, recip
 </html>`;
 }
 
-function row(label: string, value: string): string {
+function tableRow(label: string, value: string): string {
   return `<tr>
-    <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#28251d;width:110px;border-top:1px solid #f0ede8">${label}</td>
-    <td style="padding:10px 16px;font-size:14px;color:#555;border-top:1px solid #f0ede8">${value}</td>
+    <td style="padding:9px 16px;font-size:13px;font-weight:600;color:#28251d;width:100px;border-top:1px solid #f0ede8;vertical-align:top">${label}</td>
+    <td style="padding:9px 16px;font-size:14px;color:#555;border-top:1px solid #f0ede8">${value}</td>
   </tr>`;
 }
 
 function escHtml(s: string | null | undefined): string {
-  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ---------------------------------------------------------------------------
-// Recipient resolution
+// Recipient resolution  (websites → accounts → agencies)
 // ---------------------------------------------------------------------------
 
 interface ResolvedRecipients {
-  agencyEmail: string | null;
-  agencyName: string | null;
-  clientEmail: string | null;
-  clientName: string | null;
+  agencyEmail:  string | null;
+  agencyName:   string | null;
+  clientEmail:  string | null;
+  clientName:   string | null;
   businessName: string;
 }
 
 async function resolveRecipients(websiteId: string): Promise<ResolvedRecipients> {
-  // Single query: join websites → accounts → agencies to get all emails
   const result = await pool.query<{
     business_name: string;
-    client_email: string | null;
-    client_name: string | null;
-    agency_email: string | null;
-    agency_name: string | null;
+    client_email:  string | null;
+    client_name:   string | null;
+    agency_email:  string | null;
+    agency_name:   string | null;
   }>(
     `SELECT
-       w.name                              AS business_name,
-       a.primary_contact_email             AS client_email,
-       a.name                              AS client_name,
-       ag.owner_email                      AS agency_email,
-       ag.name                             AS agency_name
-     FROM websites w
-     JOIN accounts a   ON a.id = w.account_id
-     JOIN agencies ag  ON ag.id = a.agency_id
+       w.name                         AS business_name,
+       a.primary_contact_email        AS client_email,
+       a.name                         AS client_name,
+       ag.owner_email                 AS agency_email,
+       ag.name                        AS agency_name
+     FROM websites  w
+     JOIN accounts  a  ON a.id  = w.account_id
+     JOIN agencies  ag ON ag.id = a.agency_id
      WHERE w.id = $1
      LIMIT 1`,
     [websiteId],
   );
 
-  const row = result.rows[0];
-  if (!row) return { agencyEmail: null, agencyName: null, clientEmail: null, clientName: null, businessName: "Your Business" };
+  const r = result.rows[0];
+  if (!r) {
+    return {
+      agencyEmail: null, agencyName: null,
+      clientEmail: null, clientName: null,
+      businessName: "Your Business",
+    };
+  }
 
   return {
-    businessName: row.business_name || "Your Business",
-    clientEmail: row.client_email || null,
-    clientName: row.client_name || null,
-    agencyEmail: row.agency_email || null,
-    agencyName: row.agency_name || null,
+    businessName: r.business_name || "Your Business",
+    clientEmail:  r.client_email  || null,
+    clientName:   r.client_name   || null,
+    agencyEmail:  r.agency_email  || null,
+    agencyName:   r.agency_name   || null,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// Public entry point — always fire-and-forget from the route layer
 // ---------------------------------------------------------------------------
 
 export async function sendLeadNotification(lead: LeadNotifyPayload): Promise<void> {
   try {
-    const recipients = await resolveRecipients(lead.websiteId);
-    const { businessName, agencyEmail, agencyName, clientEmail, clientName } = recipients;
+    const {
+      businessName,
+      agencyEmail, agencyName,
+      clientEmail, clientName,
+    } = await resolveRecipients(lead.websiteId);
 
     const subject = `New Lead: ${lead.submitterName || lead.submitterEmail} — ${businessName}`;
     const sends: Promise<void>[] = [];
 
-    // 1. Notify agency owner
+    // 1. Agency owner — framed as "one of your client accounts"
     if (agencyEmail) {
       const html = buildLeadEmailHtml(lead, businessName, "agency");
       sends.push(
-        sendEmail({ to: { email: agencyEmail, name: agencyName || undefined }, subject, html, replyTo: lead.submitterEmail })
-          .catch(err => console.error(`[lead-notify] Failed to email agency owner (${agencyEmail}):`, err)),
+        sendViaResend({
+          to: { email: agencyEmail, name: agencyName || undefined },
+          subject,
+          html,
+          replyTo: lead.submitterEmail,
+        }).catch(err =>
+          console.error(`[lead-notify] Failed → agency (${agencyEmail}):`, err),
+        ),
       );
     }
 
-    // 2. Notify client account contact
-    if (clientEmail && clientEmail !== agencyEmail) {
+    // 2. Client account contact — framed as "your website"
+    //    Skip if same address as agency to avoid duplicates
+    if (clientEmail && clientEmail.toLowerCase() !== agencyEmail?.toLowerCase()) {
       const html = buildLeadEmailHtml(lead, businessName, "client");
       sends.push(
-        sendEmail({ to: { email: clientEmail, name: clientName || undefined }, subject, html, replyTo: lead.submitterEmail })
-          .catch(err => console.error(`[lead-notify] Failed to email client (${clientEmail}):`, err)),
+        sendViaResend({
+          to: { email: clientEmail, name: clientName || undefined },
+          subject,
+          html,
+          replyTo: lead.submitterEmail,
+        }).catch(err =>
+          console.error(`[lead-notify] Failed → client (${clientEmail}):`, err),
+        ),
       );
     }
 
     if (sends.length === 0) {
-      console.warn(`[lead-notify] No email recipients resolved for websiteId=${lead.websiteId} (leadId=${lead.leadId}). Add owner_email to agencies and primary_contact_email to accounts.`);
+      console.warn(
+        `[lead-notify] No recipients resolved for websiteId=${lead.websiteId} ` +
+        `(leadId=${lead.leadId}). Ensure agencies.owner_email and ` +
+        `accounts.primary_contact_email are populated.`,
+      );
       return;
     }
 
     await Promise.all(sends);
-    console.log(`[lead-notify] Sent ${sends.length} notification(s) for leadId=${lead.leadId} (${businessName})`);
+    console.log(
+      `[lead-notify] ✓ ${sends.length} email(s) sent for leadId=${lead.leadId} (${businessName})`,
+    );
   } catch (err) {
-    // Never propagate — a failed email must never break a form submission
-    console.error("[lead-notify] Unhandled error in sendLeadNotification:", err);
+    // Never propagate — a broken email must never fail a form submission
+    console.error("[lead-notify] Unhandled error:", err);
   }
 }
