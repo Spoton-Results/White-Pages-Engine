@@ -135,7 +135,7 @@ app.use(normalizeAdminHostHeaders);
 // ── Auth (must be before any protected /api routes) ──────────────────────────
 app.use(authLiveRouter);
 
-// ── Jobs (canonical job ownership — all /api/jobs/* must come from here) ─────
+// ── Jobs (canonical job ownership) ───────────────────────────────────────────
 app.use(jobsRouter);
 
 // ── Core page & site management ───────────────────────────────────────────────
@@ -181,7 +181,7 @@ app.use("/widget", widgetRouter);
 // ── System health & control plane ─────────────────────────────────────────────
 app.use(systemIntegrityRouter);
 app.use(autonomousControlPlaneRouter);
-app.use(deploymentQaRouter);
+app.use("/api/deployment-qa", deploymentQaRouter);
 
 // ── Request logger ────────────────────────────────────────────────────────────
 export function log(message: string, source = "express") {
@@ -215,7 +215,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Background startup (schema safety only — DDL migrations run via Drizzle) ──
+// ── Background startup ────────────────────────────────────────────────────────
 async function runBackgroundStartup() {
   try {
     await ensureBulkTransactionSafety();
