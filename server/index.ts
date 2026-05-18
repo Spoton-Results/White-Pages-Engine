@@ -19,12 +19,12 @@ import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import clientDomainsRouter from "./routes/client-domains";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
-import spotonPagesRouter from "./routes/spoton-pages-hotfix";
+import spotonPagesRouter from "./routes/spoton-pages";
 
 // ── Action review & intent governance ───────────────────────────────────────
 import actionReviewActiveRouter from "./routes/action-review-active";
-import actionReviewDecisionRouter from "./routes/action-review-decision-hotfix";
-import intentGovernanceRouter from "./routes/intent-governance-run-hotfix";
+import actionReviewDecisionRouter from "./routes/action-review-decision";
+import intentGovernanceRouter from "./routes/intent-governance";
 import intentActionsRouter from "./routes/intent-actions";
 import intentBuildRouter from "./routes/intent-build";
 
@@ -36,7 +36,7 @@ import searchConsoleAdminRouter from "./routes/search-console-admin";
 // ── Agency dashboards & reporting ───────────────────────────────────────────
 import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
-import agencyDashboardRouter from "./routes/agency-dashboard-hotfix";
+import agencyDashboardRouter from "./routes/agency-dashboard";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import dashboardAgencyRouter from "./routes/dashboard-agency";
 
