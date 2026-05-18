@@ -5,6 +5,6 @@ builder = "nixpacks"
 NIXPACKS_NODE_VERSION = "20"
 
 [deploy]
-startCommand = "npm run start"
+startCommand = "npx drizzle-kit migrate && npm run start"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
