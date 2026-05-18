@@ -42,6 +42,19 @@ export function isR2Configured(): boolean {
   );
 }
 
+function sanitizePageHtmlCopy(value: string): string {
+  return String(value || "")
+    .replace(
+      /free equipment\s*&\s*fast setup for\s*\.\s*Get a free quote today\./gi,
+      "free equipment & fast setup for local businesses. Get a free quote today.",
+    )
+    .replace(/\bfast setup for\s*\./gi, "fast setup for local businesses.")
+    .replace(/\bsetup for\s*\./gi, "setup for local businesses.")
+    .replace(/\bfor\s*\.\s*/gi, "for local businesses. ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ");
+}
+
 export async function putObject(key: string, body: string, contentType = "application/json"): Promise<void> {
   await getClient().send(
     new PutObjectCommand({
@@ -125,7 +138,8 @@ export async function savePageHtml(websiteId: string, slug: string, html: string
 // Returns null if the object does not exist (404) so callers can fall back to DB.
 export async function getPageHtml(r2Key: string): Promise<string | null> {
   try {
-    return await getObject(r2Key);
+    const html = await getObject(r2Key);
+    return sanitizePageHtmlCopy(html);
   } catch (err: any) {
     // NoSuchKey = object never written or already deleted — treat as cache miss
     if (
