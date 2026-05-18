@@ -50,6 +50,19 @@ function normalizeSlug(slug: string): string {
   return slug.replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
+function sanitizeStaticHtmlCopy(value: string): string {
+  return String(value || "")
+    .replace(
+      /free equipment\s*&\s*fast setup for\s*\.\s*Get a free quote today\./gi,
+      "free equipment & fast setup for local businesses. Get a free quote today.",
+    )
+    .replace(/\bfast setup for\s*\./gi, "fast setup for local businesses.")
+    .replace(/\bsetup for\s*\./gi, "setup for local businesses.")
+    .replace(/\bfor\s*\.\s*/gi, "for local businesses. ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ");
+}
+
 function buildCanonicalUrl(domain: string, slug: string, canonicalUrl?: string | null): string {
   if (canonicalUrl) return canonicalUrl;
   const cleanDomain = domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
@@ -63,7 +76,7 @@ function isFullHtmlDocument(contentHtml: string): boolean {
 }
 
 async function buildStaticHtml(row: any): Promise<string> {
-  const contentHtml = row.content_html ?? "";
+  const contentHtml = sanitizeStaticHtmlCopy(row.content_html ?? "");
   const canonical = buildCanonicalUrl(row.domain, row.slug, row.canonical_url);
 
   if (isFullHtmlDocument(contentHtml) && contentHtml.includes("nexus-demo")) {
