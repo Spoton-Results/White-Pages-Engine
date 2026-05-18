@@ -6,6 +6,19 @@ const router = Router();
 const ROOT = "spotonresults.com";
 const PAGES = "pages.spotonresults.com";
 
+function sanitizeSpotOnCopy(value: string) {
+  return String(value || "")
+    .replace(
+      /free equipment\s*&\s*fast setup for\s*\.\s*Get a free quote today\./gi,
+      "free equipment & fast setup for local businesses. Get a free quote today.",
+    )
+    .replace(/\bfast setup for\s*\./gi, "fast setup for local businesses.")
+    .replace(/\bsetup for\s*\./gi, "setup for local businesses.")
+    .replace(/\bfor\s*\.\s*/gi, "for local businesses. ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ");
+}
+
 function requestHost(req: Request) {
   return String(req.headers["x-nexus-host"] || req.headers["x-forwarded-host"] || req.headers.host || "")
     .toLowerCase()
@@ -33,18 +46,18 @@ function leadStatusHtml(req: Request) {
 }
 
 function socialMetaHtml(page: any, canonical: string) {
-  const title = String(page.title || page.h1 || page.slug || "SpotOn Results");
-  const desc = String(page.meta_description || page.metaDescription || "").slice(0, 220);
+  const title = sanitizeSpotOnCopy(String(page.title || page.h1 || page.slug || "SpotOn Results"));
+  const desc = sanitizeSpotOnCopy(String(page.meta_description || page.metaDescription || "")).slice(0, 220);
   const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
   return `<meta property="og:type" content="website"/><meta property="og:url" content="${esc(canonical)}"/><meta property="og:title" content="${esc(title)}"/><meta property="og:description" content="${esc(desc)}"/><meta name="twitter:card" content="summary"/><meta name="twitter:title" content="${esc(title)}"/><meta name="twitter:description" content="${esc(desc)}"/>`;
 }
 
 function enhanceLiveHtml(html: string, page: any, canonical: string, req: Request) {
-  let out = html;
+  let out = sanitizeSpotOnCopy(html);
   const status = leadStatusHtml(req);
   if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
   out = out.replace("</head>", `${socialMetaHtml(page, canonical)}</head>`);
-  return out;
+  return sanitizeSpotOnCopy(out);
 }
 
 async function getPublishedPage(slug: string) {
@@ -129,11 +142,14 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     );
 
     const version = versionResult.rows[0] || {};
-    const content = version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "";
+    const content = sanitizeSpotOnCopy(version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "");
     const canonical = `https://${PAGES}/${page.slug}`;
     const links = await getPublicInternalLinks(page.id, page.website_id || page.websiteId);
 
-    res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("X-SpotOn-Hotfix", "sanitize-copy-v2");
 
     const html = buildEnhancedPublicPageHtml({
       page,
