@@ -1,3 +1,10 @@
+/**
+ * action-review-decision.ts
+ * Graduated from action-review-decision-hotfix.ts — no logic changes.
+ *
+ * Routes:
+ *   POST /api/action-review/:jobId/decision
+ */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { pool } from "../db";
 import { requireAuth } from "../auth";

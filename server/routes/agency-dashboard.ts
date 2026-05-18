@@ -1,3 +1,14 @@
+/**
+ * agency-dashboard.ts
+ * Graduated from agency-dashboard-hotfix.ts — no logic changes.
+ * Provides agency-level summary, per-client detail, and report-link management.
+ *
+ * Routes:
+ *   GET /api/agency-dashboard/summary
+ *   GET /api/agency-dashboard/clients
+ *   GET /api/agency-dashboard/clients/:accountId
+ *   GET /api/agency-dashboard/report-links
+ */
 import { Router } from "express";
 import { randomBytes } from "crypto";
 import { pool } from "../db";
@@ -209,7 +220,6 @@ router.get("/api/agency-dashboard/clients/:accountId", async (req, res, next) =>
         (SELECT MAX(created_at) FROM generation_jobs WHERE account_id::text = $1::text) AS last_job_date,
         (SELECT COUNT(*)::int FROM variation_bank_completeness vbc JOIN websites w ON w.id::text = vbc.website_id::text WHERE w.account_id::text = $1::text AND vbc.completeness_score < 70) AS thin_banks`, [accountId]),
     ]);
-
     const s = summary.rows[0] || {};
     const pagesLive = Number(s.pages_live || 0);
     const pagesBuiltThisMonth = Number(s.pages_30d || 0);
@@ -223,7 +233,6 @@ router.get("/api/agency-dashboard/clients/:accountId", async (req, res, next) =>
     const flags = riskFlags(input);
     const warnings = [...flags];
     if (Number(h.stuck_jobs || 0) > 0) warnings.push(`${h.stuck_jobs} stuck jobs older than 30 minutes`);
-
     res.json({
       client: { id: account.id, name: account.name, status: account.status },
       summary: { pagesLive, pagesBuiltThisMonth, citiesCovered, servicesCovered, estimatedSearchReach: searchReachEstimate(pagesLive, citiesCovered, servicesCovered), roiScore: roiScore(input), last30DaysWork, failedJobs, thinBanks, lastJobDate: h.last_job_date, churnRiskFlags: flags, recommendedNextAction: nextAction(input) },
