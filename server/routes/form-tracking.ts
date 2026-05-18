@@ -3,6 +3,7 @@ import { db } from "../db";
 import { trackedLeads, bookedJobs, websites } from "@shared/schema";
 import { eq, and, gte, lt, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { sendLeadNotification } from "../services/lead-notify";
 
 const router = Router();
 
@@ -84,6 +85,22 @@ router.post("/submit", async (req, res) => {
       })
       .returning();
 
+    // Fire-and-forget email notifications — never await so a failed email
+    // cannot cause a 500 or delay the form response to the visitor.
+    sendLeadNotification({
+      leadId: lead.id,
+      websiteId: lead.websiteId,
+      pageId: lead.pageId,
+      submitterName: lead.submitterName,
+      submitterEmail: lead.submitterEmail,
+      submitterPhone: lead.submitterPhone,
+      message: lead.message,
+      formName: lead.formName,
+      sourcePageUrl: lead.sourcePageUrl,
+      sourcePageTitle: lead.sourcePageTitle,
+      formTimestamp: lead.formTimestamp ?? new Date(),
+    });
+
     if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "success");
 
     return res.json({
@@ -140,7 +157,6 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
 });
 
 // GET /api/form-tracking/account-leads?accountId=X&month=YYYY-MM&limit=100
-// Single endpoint for all leads across every website on an account — no per-website waterfall.
 router.get("/account-leads", requireAuth, async (req, res) => {
   try {
     const { accountId, month } = req.query as { accountId?: string; month?: string };
@@ -150,7 +166,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const cached = getCachedLeads(cacheKey);
     if (cached) return res.json(cached);
 
-    // 1. Resolve website IDs for this account in one query
     const siteRows = await db
       .select({ id: websites.id })
       .from(websites)
@@ -159,7 +174,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const websiteIds = siteRows.map((r) => r.id);
     if (!websiteIds.length) return res.json({ leads: [], totalForms: 0 });
 
-    // 2. Build date filter
     const conditions: any[] = [inArray(trackedLeads.websiteId, websiteIds)];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
@@ -167,7 +181,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
       conditions.push(lt(trackedLeads.formTimestamp, new Date(year, monthNum, 1)));
     }
 
-    // 3. Fetch top 100 leads with SQL LIMIT — no JS slicing
     const leads = await db
       .select()
       .from(trackedLeads)
@@ -175,7 +188,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
       .orderBy(desc(trackedLeads.formTimestamp))
       .limit(100);
 
-    // 4. Enrich with booked jobs in one query
     const leadIds = leads.map((l) => l.id);
     const jobs =
       leadIds.length > 0
