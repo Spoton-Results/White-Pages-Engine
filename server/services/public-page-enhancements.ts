@@ -16,6 +16,20 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+function sanitizePublicCopy(value: unknown): string {
+  return String(value || "")
+    .replace(
+      /free equipment\s*&\s*fast setup for\s*\.\s*Get a free quote today\./gi,
+      "free equipment & fast setup for local businesses. Get a free quote today.",
+    )
+    .replace(/\bfast setup for\s*\./gi, "fast setup for local businesses.")
+    .replace(/\bsetup for\s*\./gi, "setup for local businesses.")
+    .replace(/\bfor\s*\.\s*/gi, "for local businesses. ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function normalizeUrl(value: unknown): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -204,13 +218,13 @@ function structuredData(page: any, website: any, canonicalUrl: string) {
   const main = mainWebsiteUrl(website);
   const phone = setting(website, "phone");
   const brand = brandName(website);
-  const desc = page.meta_description || page.metaDescription || page.title || page.h1 || "";
+  const desc = sanitizePublicCopy(page.meta_description || page.metaDescription || page.title || page.h1 || "");
   const graph: any[] = [
     {
       "@type": "WebPage",
       "@id": `${canonicalUrl}#webpage`,
       url: canonicalUrl,
-      name: page.title || page.h1 || page.slug,
+      name: sanitizePublicCopy(page.title || page.h1 || page.slug),
       description: desc,
       isPartOf: main ? { "@id": `${main.replace(/\/+$/, "")}#website` } : undefined,
     },
@@ -219,7 +233,7 @@ function structuredData(page: any, website: any, canonicalUrl: string) {
       "@id": `${canonicalUrl}#breadcrumb`,
       itemListElement: [
         { "@type": "ListItem", position: 1, name: brand, item: main || canonicalUrl },
-        { "@type": "ListItem", position: 2, name: page.title || page.h1 || page.slug, item: canonicalUrl },
+        { "@type": "ListItem", position: 2, name: sanitizePublicCopy(page.title || page.h1 || page.slug), item: canonicalUrl },
       ],
     },
     {
@@ -261,7 +275,7 @@ function header(website: any) {
 function breadcrumb(page: any, website: any, canonicalUrl: string) {
   const main = mainWebsiteUrl(website);
   const brand = brandName(website);
-  return `<nav class="nexus-wrap nexus-breadcrumb" aria-label="Breadcrumb"><a href="${escapeHtml(main || canonicalUrl)}">${escapeHtml(brand)}</a> <span>›</span> <span>${escapeHtml(page.title || page.h1 || page.slug)}</span></nav>`;
+  return `<nav class="nexus-wrap nexus-breadcrumb" aria-label="Breadcrumb"><a href="${escapeHtml(main || canonicalUrl)}">${escapeHtml(brand)}</a> <span>›</span> <span>${escapeHtml(sanitizePublicCopy(page.title || page.h1 || page.slug))}</span></nav>`;
 }
 
 function cta(website: any) {
@@ -280,7 +294,7 @@ function leadForm(page: any, website: any, canonicalUrl: string) {
   const locationId = page.location_id || page.locationId || "";
   if (!websiteId || !pageId || !serviceId) return "";
   const brand = brandName(website);
-  return `<section class="nexus-card nexus-lead" id="quote"><div><p class="nexus-eyebrow">Request pricing</p><h2>Get a Free Quote</h2><p>Send a quick note and ${escapeHtml(brand)} will follow up with next steps.</p></div><form class="nexus-form" method="post" action="/api/form-tracking/submit"><input type="hidden" name="websiteId" value="${escapeHtml(websiteId)}"/><input type="hidden" name="pageId" value="${escapeHtml(pageId)}"/><input type="hidden" name="serviceId" value="${escapeHtml(serviceId)}"/><input type="hidden" name="locationId" value="${escapeHtml(locationId)}"/><input type="hidden" name="formName" value="Public Page Quote Form"/><input type="hidden" name="sourcePageUrl" value="${escapeHtml(canonicalUrl)}"/><input type="hidden" name="sourcePageTitle" value="${escapeHtml(page.title || page.h1 || page.slug)}"/><label>Name<input name="submitterName" autocomplete="name" placeholder="Your name"/></label><label>Email<input name="submitterEmail" type="email" autocomplete="email" placeholder="you@example.com" required/></label><label>Phone<input name="submitterPhone" autocomplete="tel" placeholder="Best phone number"/></label><label>Message<textarea name="message" rows="4" placeholder="Tell us what you need help with"></textarea></label><button class="nexus-button" type="submit">Submit Request</button></form></section>`;
+  return `<section class="nexus-card nexus-lead" id="quote"><div><p class="nexus-eyebrow">Request pricing</p><h2>Get a Free Quote</h2><p>Send a quick note and ${escapeHtml(brand)} will follow up with next steps.</p></div><form class="nexus-form" method="post" action="/api/form-tracking/submit"><input type="hidden" name="websiteId" value="${escapeHtml(websiteId)}"/><input type="hidden" name="pageId" value="${escapeHtml(pageId)}"/><input type="hidden" name="serviceId" value="${escapeHtml(serviceId)}"/><input type="hidden" name="locationId" value="${escapeHtml(locationId)}"/><input type="hidden" name="formName" value="Public Page Quote Form"/><input type="hidden" name="sourcePageUrl" value="${escapeHtml(canonicalUrl)}"/><input type="hidden" name="sourcePageTitle" value="${escapeHtml(sanitizePublicCopy(page.title || page.h1 || page.slug))}"/><label>Name<input name="submitterName" autocomplete="name" placeholder="Your name"/></label><label>Email<input name="submitterEmail" type="email" autocomplete="email" placeholder="you@example.com" required/></label><label>Phone<input name="submitterPhone" autocomplete="tel" placeholder="Best phone number"/></label><label>Message<textarea name="message" rows="4" placeholder="Tell us what you need help with"></textarea></label><button class="nexus-button" type="submit">Submit Request</button></form></section>`;
 }
 
 function internalLinks(links: PublicInternalLink[], website: any) {
@@ -309,7 +323,16 @@ export function buildEnhancedPublicPageHtml(input: {
   links?: PublicInternalLink[];
 }) {
   const { page, website, contentHtml, canonicalUrl, links = [] } = input;
-  const title = page.title || page.h1 || page.slug;
-  const desc = page.meta_description || page.metaDescription || "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>${desc ? `<meta name="description" content="${escapeHtml(desc)}"/>` : ""}<link rel="canonical" href="${escapeHtml(canonicalUrl)}"/>${structuredData(page, website, canonicalUrl)}${css()}</head><body>${demoBanner(website)}${header(website)}${breadcrumb(page, website, canonicalUrl)}<section class="hero"><div class="nexus-wrap"><h1>${escapeHtml(page.h1 || title)}</h1>${desc ? `<p>${escapeHtml(desc)}</p>` : ""}</div></section><main class="content">${contentHtml || `<p>${escapeHtml(desc || title)}</p>`}</main>${cta(website)}${leadForm(page, website, canonicalUrl)}${internalLinks(links, website)}${footer(website)}${stickyMobileCta(website)}</body></html>`;
+  const title = sanitizePublicCopy(page.title || page.h1 || page.slug);
+  const desc = sanitizePublicCopy(page.meta_description || page.metaDescription || "");
+  const h1 = sanitizePublicCopy(page.h1 || title);
+  const cleanContentHtml = sanitizePublicCopy(contentHtml);
+  const cleanPage = {
+    ...page,
+    title,
+    h1,
+    meta_description: desc,
+    metaDescription: desc,
+  };
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>${desc ? `<meta name="description" content="${escapeHtml(desc)}"/>` : ""}<link rel="canonical" href="${escapeHtml(canonicalUrl)}"/>${structuredData(cleanPage, website, canonicalUrl)}${css()}</head><body>${demoBanner(website)}${header(website)}${breadcrumb(cleanPage, website, canonicalUrl)}<section class="hero"><div class="nexus-wrap"><h1>${escapeHtml(h1)}</h1>${desc ? `<p>${escapeHtml(desc)}</p>` : ""}</div></section><main class="content">${cleanContentHtml || `<p>${escapeHtml(desc || title)}</p>`}</main>${cta(website)}${leadForm(cleanPage, website, canonicalUrl)}${internalLinks(links, website)}${footer(website)}${stickyMobileCta(website)}</body></html>`;
 }
