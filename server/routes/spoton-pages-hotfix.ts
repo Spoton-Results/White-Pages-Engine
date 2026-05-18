@@ -36,12 +36,8 @@ function isSkippablePath(path: string) {
 
 function leadStatusHtml(req: Request) {
   const lead = String(req.query.lead || "").toLowerCase();
-  if (lead === "success") {
-    return `<div class="nexus-alert nexus-alert-success" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#ecfdf5;border:1px solid #86efac;color:#166534">Thank you — your request was received. SpotOn Results will follow up shortly.</div>`;
-  }
-  if (lead === "error") {
-    return `<div class="nexus-alert nexus-alert-error" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">The form could not be submitted. Please try again or use the phone/main website link.</div>`;
-  }
+  if (lead === "success") return `<div class="nexus-alert nexus-alert-success" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#ecfdf5;border:1px solid #86efac;color:#166534">Thank you — your request was received. SpotOn Results will follow up shortly.</div>`;
+  if (lead === "error") return `<div class="nexus-alert nexus-alert-error" id="quote" style="max-width:1100px;margin:18px auto 0;padding:14px 18px;border-radius:16px;font-weight:750;background:#fef2f2;border:1px solid #fecaca;color:#991b1b">The form could not be submitted. Please try again or use the phone/main website link.</div>`;
   return "";
 }
 
@@ -85,6 +81,66 @@ async function getPublishedPage(slug: string) {
   );
   return pageResult.rows[0] || null;
 }
+
+router.all("/api/spoton-pages-repair-copy", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const versionUpdate = await pool.query(
+      `WITH spoton_websites AS (
+         SELECT id FROM websites
+         WHERE lower(domain) IN ($1, $2)
+            OR lower(settings->>'parentDomain') IN ($1, $2)
+            OR lower(settings->>'publicDomain') IN ($1, $2)
+            OR lower(settings->>'legacyParentDomain') = $2
+       ), target_pages AS (
+         SELECT p.id
+         FROM pages p
+         JOIN spoton_websites w ON p.website_id::text = w.id::text
+         WHERE p.status = 'published'
+       )
+       UPDATE page_versions pv
+       SET content_html = regexp_replace(
+         regexp_replace(
+           regexp_replace(
+             regexp_replace(pv.content_html, 'free equipment\\s*&\\s*fast setup for\\s*\\.\\s*Get a free quote today\\.', 'free equipment & fast setup for local businesses. Get a free quote today.', 'gi'),
+             '\\bfast setup for\\s*\\.', 'fast setup for local businesses.', 'gi'
+           ),
+           '\\bsetup for\\s*\\.', 'setup for local businesses.', 'gi'
+         ),
+         '\\bfor\\s*\\.\\s*', 'for local businesses. ', 'gi'
+       )
+       WHERE pv.page_id::text IN (SELECT id::text FROM target_pages)
+         AND pv.content_html ~* '(free equipment\\s*&\\s*fast setup for\\s*\\.|\\bfast setup for\\s*\\.|\\bsetup for\\s*\\.|\\bfor\\s*\\.)'
+       RETURNING pv.page_id`
+      , [PAGES, ROOT]
+    );
+
+    const pageUpdate = await pool.query(
+      `WITH spoton_websites AS (
+         SELECT id FROM websites
+         WHERE lower(domain) IN ($1, $2)
+            OR lower(settings->>'parentDomain') IN ($1, $2)
+            OR lower(settings->>'publicDomain') IN ($1, $2)
+            OR lower(settings->>'legacyParentDomain') = $2
+       )
+       UPDATE pages p
+       SET r2_key = NULL,
+           content_hash = NULL,
+           rendered_at = NULL,
+           updated_at = NOW(),
+           meta_description = CASE WHEN meta_description IS NULL THEN meta_description ELSE regexp_replace(regexp_replace(regexp_replace(regexp_replace(meta_description, 'free equipment\\s*&\\s*fast setup for\\s*\\.\\s*Get a free quote today\\.', 'free equipment & fast setup for local businesses. Get a free quote today.', 'gi'), '\\bfast setup for\\s*\\.', 'fast setup for local businesses.', 'gi'), '\\bsetup for\\s*\\.', 'setup for local businesses.', 'gi'), '\\bfor\\s*\\.\\s*', 'for local businesses. ', 'gi') END,
+           h1 = CASE WHEN h1 IS NULL THEN h1 ELSE regexp_replace(regexp_replace(regexp_replace(regexp_replace(h1, 'free equipment\\s*&\\s*fast setup for\\s*\\.\\s*Get a free quote today\\.', 'free equipment & fast setup for local businesses. Get a free quote today.', 'gi'), '\\bfast setup for\\s*\\.', 'fast setup for local businesses.', 'gi'), '\\bsetup for\\s*\\.', 'setup for local businesses.', 'gi'), '\\bfor\\s*\\.\\s*', 'for local businesses. ', 'gi') END,
+           title = CASE WHEN title IS NULL THEN title ELSE regexp_replace(regexp_replace(regexp_replace(regexp_replace(title, 'free equipment\\s*&\\s*fast setup for\\s*\\.\\s*Get a free quote today\\.', 'free equipment & fast setup for local businesses. Get a free quote today.', 'gi'), '\\bfast setup for\\s*\\.', 'fast setup for local businesses.', 'gi'), '\\bsetup for\\s*\\.', 'setup for local businesses.', 'gi'), '\\bfor\\s*\\.\\s*', 'for local businesses. ', 'gi') END
+       WHERE p.website_id::text IN (SELECT id::text FROM spoton_websites)
+         AND p.status = 'published'
+       RETURNING p.id, p.slug, p.page_type`
+      , [PAGES, ROOT]
+    );
+
+    return res.json({ ok: true, pageVersionsRepaired: versionUpdate.rowCount || 0, pagesMarkedForRerender: pageUpdate.rowCount || 0, sample: pageUpdate.rows.slice(0, 10) });
+  } catch (err) {
+    return next(err);
+  }
+});
 
 router.get("/api/spoton-pages-debug/:slug", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -132,9 +188,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const page = await getPublishedPage(slug);
     if (!page) return next();
 
-    if (h === ROOT) {
-      return res.redirect(301, `https://${PAGES}/${slug}`);
-    }
+    if (h === ROOT) return res.redirect(301, `https://${PAGES}/${slug}`);
 
     const versionResult = await pool.query(
       `SELECT * FROM page_versions WHERE page_id::text = $1::text ORDER BY is_active DESC NULLS LAST, version DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1`,
@@ -149,19 +203,9 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    res.setHeader("X-SpotOn-Hotfix", "sanitize-copy-v2");
+    res.setHeader("X-SpotOn-Hotfix", "sanitize-copy-v3");
 
-    const html = buildEnhancedPublicPageHtml({
-      page,
-      website: {
-        ...page,
-        name: page.website_name,
-      },
-      contentHtml: content,
-      canonicalUrl: canonical,
-      links,
-    });
-
+    const html = buildEnhancedPublicPageHtml({ page, website: { ...page, name: page.website_name }, contentHtml: content, canonicalUrl: canonical, links });
     return res.type("html").send(enhanceLiveHtml(html, page, canonical, req));
   } catch (err) {
     return next(err);
