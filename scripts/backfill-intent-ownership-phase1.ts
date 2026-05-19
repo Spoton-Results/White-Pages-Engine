@@ -2,7 +2,6 @@ import { pool } from "../server/db";
 import {
   buildIntentCluster,
   funnelStageFromIntent,
-  hasModifierIntentSlug,
   intentTypeFromPageType,
   riskFromOverlapScore,
   supportRoleFromIntent,
@@ -13,7 +12,6 @@ type Args = {
   limit: number;
   batch: number;
   dryRun: boolean;
-  reclassify: boolean;
 };
 
 type PageRow = {
@@ -37,14 +35,13 @@ type PageRow = {
 };
 
 function parseArgs(): Args {
-  const args: Args = { limit: 500, batch: 100, dryRun: false, reclassify: false };
+  const args: Args = { limit: 500, batch: 100, dryRun: false };
   for (const raw of process.argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, "").split("=");
     if (key === "websiteId") args.websiteId = value;
     if (key === "limit") args.limit = Math.max(1, Number(value || 500));
     if (key === "batch") args.batch = Math.max(1, Number(value || 100));
     if (key === "dryRun") args.dryRun = value !== "false";
-    if (key === "reclassify") args.reclassify = value !== "false";
   }
   return args;
 }
@@ -60,21 +57,16 @@ function authorityWeight(row: PageRow): number {
 }
 
 function isCanonicalOwner(row: PageRow): boolean {
-  const intent = intentTypeFromPageType(row.page_type, row.slug);
-
-  // Phase 1 should not try to crown every Tier 1 page as canonical owner.
-  // Cluster-winner ownership belongs in Phase 2 after performance/overlap analysis.
-  if (hasModifierIntentSlug(row.slug)) return false;
-  if (intent === "STATE_HUB" || intent === "CITY_HUB" || intent === "REGION_HUB" || intent === "METRO_HUB") return true;
+  if (row.page_type === "state_hub" || row.page_type === "city_hub") return true;
+  if (row.tier === 1) return true;
   return false;
 }
 
 function overlapRisk(row: PageRow): number {
   let score = 0;
   const slug = row.slug.toLowerCase();
-  if (hasModifierIntentSlug(slug)) score += 15;
   if (slug.includes("best-") || slug.includes("top-")) score += 15;
-  if (slug.includes("pricing") || slug.includes("rates") || slug.includes("cost") || slug.includes("fees")) score += 10;
+  if (slug.includes("pricing") || slug.includes("rates") || slug.includes("cost")) score += 10;
   if (slug.includes("services") && slug.includes("processing")) score += 10;
   if (row.page_type === "service_city") score += 10;
   if (row.quality_score && row.quality_score < 60) score += 20;
@@ -111,10 +103,6 @@ async function getTargets(args: Args): Promise<PageRow[]> {
     where.push(`p.website_id = $${params.length}::text`);
   }
 
-  if (!args.reclassify) {
-    where.push("(p.primary_intent IS NULL OR p.intent_cluster IS NULL OR p.funnel_stage IS NULL)");
-  }
-
   params.push(args.limit);
   const limitParam = params.length;
 
@@ -141,6 +129,7 @@ async function getTargets(args: Args): Promise<PageRow[]> {
      LEFT JOIN services s ON s.id = p.service_id
      LEFT JOIN locations l ON l.id = p.location_id
      WHERE ${where.join(" AND ")}
+       AND (p.primary_intent IS NULL OR p.intent_cluster IS NULL OR p.funnel_stage IS NULL)
      ORDER BY p.website_id ASC, p.page_type ASC, p.slug ASC
      LIMIT $${limitParam}::int`,
     params,
@@ -152,7 +141,7 @@ async function getTargets(args: Args): Promise<PageRow[]> {
 async function main() {
   const args = parseArgs();
   console.log(`[intent-backfill] Starting Phase 1 backfill website=${args.websiteId || "all"}`);
-  console.log(`[intent-backfill] Options: limit=${args.limit} batch=${args.batch} dryRun=${args.dryRun} reclassify=${args.reclassify}`);
+  console.log(`[intent-backfill] Options: limit=${args.limit} batch=${args.batch} dryRun=${args.dryRun}`);
   console.log("[intent-backfill] Before:", await getStats(args.websiteId));
 
   const targets = await getTargets(args);
@@ -202,7 +191,7 @@ async function main() {
       }
 
       processed++;
-      console.log(`[intent-backfill] ${processed}: ${row.page_type}/${row.slug} intent=${primaryIntent} owner=${canonicalOwner} cluster=${cluster} risk=${risk}`);
+      console.log(`[intent-backfill] ${processed}: ${row.page_type}/${row.slug} intent=${primaryIntent} cluster=${cluster} risk=${risk}`);
     } catch (err: any) {
       failed++;
       console.error(`[intent-backfill] failed ${row.id} ${row.slug}:`, err?.message || err);
