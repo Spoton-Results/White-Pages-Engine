@@ -46,7 +46,17 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "../services/sitemap";
-import { invalidateSitemapCache, invalidatePageCache } from "../routes";
+
+// ── Cache invalidation stubs ──────────────────────────────────────────────────
+// The old routes.ts monolith held in-memory Maps for sitemap and page caches.
+// Those Maps no longer exist after the modular migration. These stubs are
+// no-ops until a dedicated cache module is introduced.
+function invalidateSitemapCache(_websiteId: string): void {
+  // no-op: cache layer removed with routes.ts monolith
+}
+function invalidatePageCache(_websiteId: string, _slug: string): void {
+  // no-op: cache layer removed with routes.ts monolith
+}
 
 const router = Router();
 
