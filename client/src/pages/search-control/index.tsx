@@ -542,7 +542,7 @@ export default function SearchControlPage() {
             {/* Bank Completeness */}
             <Section
               title="Variation Bank Completeness"
-              subtitle="Services with all 5 core sections and 5+ variations per section can reach Tier 1."
+              subtitle="Legacy content-bank health signal. Tier 1 is now based on quality score, coverage, and active approved content inventory."
               action={
                 <button
                   data-testid="button-recompute-banks"

@@ -3,6 +3,7 @@ import { db } from "../db";
 import { trackedLeads, bookedJobs, websites } from "@shared/schema";
 import { eq, and, gte, lt, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { sendLeadNotification } from "../services/lead-notify";
 
 const router = Router();
 
@@ -15,6 +16,33 @@ function getCachedLeads(key: string) {
 }
 function setCachedLeads(key: string, data: unknown) {
   leadsCache.set(key, { data, exp: Date.now() + 30_000 });
+}
+
+function wantsHtmlRedirect(req: any) {
+  const accept = String(req.headers.accept || "");
+  const contentType = String(req.headers["content-type"] || "");
+  return contentType.includes("application/x-www-form-urlencoded") || accept.includes("text/html");
+}
+
+function safeReturnUrl(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (!/^https?:$/.test(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function redirectWithStatus(res: any, sourcePageUrl: unknown, status: "success" | "error") {
+  const fallback = safeReturnUrl(sourcePageUrl);
+  if (!fallback) return res.status(status === "success" ? 200 : 400).send(status === "success" ? "Thank you. Your request was received." : "Unable to submit this form.");
+  const url = new URL(fallback);
+  url.searchParams.set("lead", status);
+  url.hash = "quote";
+  return res.redirect(303, url.toString());
 }
 
 // POST /api/form-tracking/submit  (public — called from public-facing page forms)
@@ -35,6 +63,7 @@ router.post("/submit", async (req, res) => {
     } = req.body;
 
     if (!pageId || !websiteId || !serviceId || !submitterEmail) {
+      if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "error");
       return res.status(400).json({ error: "Missing required fields: pageId, serviceId, websiteId, submitterEmail" });
     }
 
@@ -44,17 +73,35 @@ router.post("/submit", async (req, res) => {
         websiteId,
         pageId,
         serviceId,
-        locationId: locationId ?? null,
-        formName: formName ?? "Contact Form",
-        submitterName: submitterName ?? null,
+        locationId: locationId || null,
+        formName: formName || "Contact Form",
+        submitterName: submitterName || null,
         submitterEmail,
-        submitterPhone: submitterPhone ?? null,
-        message: message ?? null,
-        sourcePageUrl: sourcePageUrl ?? null,
-        sourcePageTitle: sourcePageTitle ?? null,
+        submitterPhone: submitterPhone || null,
+        message: message || null,
+        sourcePageUrl: sourcePageUrl || null,
+        sourcePageTitle: sourcePageTitle || null,
         formTimestamp: new Date(),
       })
       .returning();
+
+    // Fire-and-forget email notifications — never await so a failed email
+    // cannot cause a 500 or delay the form response to the visitor.
+    sendLeadNotification({
+      leadId: lead.id,
+      websiteId: lead.websiteId,
+      pageId: lead.pageId,
+      submitterName: lead.submitterName,
+      submitterEmail: lead.submitterEmail,
+      submitterPhone: lead.submitterPhone,
+      message: lead.message,
+      formName: lead.formName,
+      sourcePageUrl: lead.sourcePageUrl,
+      sourcePageTitle: lead.sourcePageTitle,
+      formTimestamp: lead.formTimestamp ?? new Date(),
+    });
+
+    if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "success");
 
     return res.json({
       success: true,
@@ -63,6 +110,7 @@ router.post("/submit", async (req, res) => {
     });
   } catch (error) {
     console.error("Error recording form:", error);
+    if (wantsHtmlRedirect(req)) return redirectWithStatus(res, req.body?.sourcePageUrl, "error");
     return res.status(500).json({ error: "Failed to submit form" });
   }
 });
@@ -109,7 +157,6 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
 });
 
 // GET /api/form-tracking/account-leads?accountId=X&month=YYYY-MM&limit=100
-// Single endpoint for all leads across every website on an account — no per-website waterfall.
 router.get("/account-leads", requireAuth, async (req, res) => {
   try {
     const { accountId, month } = req.query as { accountId?: string; month?: string };
@@ -119,7 +166,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const cached = getCachedLeads(cacheKey);
     if (cached) return res.json(cached);
 
-    // 1. Resolve website IDs for this account in one query
     const siteRows = await db
       .select({ id: websites.id })
       .from(websites)
@@ -128,7 +174,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const websiteIds = siteRows.map((r) => r.id);
     if (!websiteIds.length) return res.json({ leads: [], totalForms: 0 });
 
-    // 2. Build date filter
     const conditions: any[] = [inArray(trackedLeads.websiteId, websiteIds)];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
@@ -136,7 +181,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
       conditions.push(lt(trackedLeads.formTimestamp, new Date(year, monthNum, 1)));
     }
 
-    // 3. Fetch top 100 leads with SQL LIMIT — no JS slicing
     const leads = await db
       .select()
       .from(trackedLeads)
@@ -144,7 +188,6 @@ router.get("/account-leads", requireAuth, async (req, res) => {
       .orderBy(desc(trackedLeads.formTimestamp))
       .limit(100);
 
-    // 4. Enrich with booked jobs in one query
     const leadIds = leads.map((l) => l.id);
     const jobs =
       leadIds.length > 0

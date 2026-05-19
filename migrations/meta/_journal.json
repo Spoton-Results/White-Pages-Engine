@@ -5,8 +5,29 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1770000000000,
-      "tag": "0000_r2_page_metadata",
+      "when": 1747699200000,
+      "tag": "0000_initial_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1747699201000,
+      "tag": "0001_call_tracking_phase10",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1747699202000,
+      "tag": "0002_admin_notifications_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1747699203000,
+      "tag": "0003_page_version_triggers",
       "breakpoints": true
     }
   ]

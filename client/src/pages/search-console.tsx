@@ -1,0 +1,197 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import DashboardLayout from "@/components/layout/DashboardLayout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ExternalLink, Globe, KeyRound, PlayCircle, RefreshCcw, Save, SearchCheck, ShieldCheck, Trash2, TriangleAlert, Wand2 } from "lucide-react";
+
+type Account = { id: string; name: string; status?: string };
+type Website = { id: string; accountId: string; name: string; domain: string; status?: string };
+type GscConfig = { adminGoogleUser: string; accessMethod: string; clientInstruction: string; serviceAccountReady?: boolean; hasProjectId?: boolean; hasClientEmail?: boolean; hasPrivateKey?: boolean; privateKeyLooksValid?: boolean };
+type TestResult = { ok: boolean; message: string; [key: string]: any };
+type GscProperty = { id: string; accountId: string; accountName: string; websiteId: string | null; websiteName: string | null; websiteDomain: string | null; propertyUrl: string; siteUrl: string | null; connectionStatus: string; accessMethod: string; adminGoogleUser: string | null; sitemapSubmitted: boolean; indexedPages: number; clicks: number; impressions: number; averagePosition: number | null; coverageWarnings: number; lastSyncAt: string | null; updatedAt: string | null; };
+type PropertyType = "domain" | "url_prefix";
+type FormState = { accountId: string; websiteId: string; propertyType: PropertyType; propertyValue: string; propertyUrl: string; siteValue: string; siteUrl: string; adminGoogleUser: string; connectionStatus: string; sitemapSubmitted: boolean; indexedPages: string; clicks: string; impressions: string; averagePosition: string; coverageWarnings: string; };
+
+/** Empty config sentinel — prevents (void 0) crashes when API returns null/undefined */
+const EMPTY_CONFIG: GscConfig = { adminGoogleUser: "", accessMethod: "delegated_admin_user", clientInstruction: "" };
+
+function cleanDomain(value: string) { return String(value || "").trim().replace(/^sc-domain:/i, "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").toLowerCase(); }
+function cleanUrlValue(value: string) { return String(value || "").trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/^sc-domain:/i, ""); }
+function buildPropertyUrl(type: PropertyType, value: string) { const cleaned = type === "domain" ? cleanDomain(value) : cleanUrlValue(value); if (!cleaned) return ""; return type === "domain" ? `sc-domain:${cleaned}` : `https://${cleaned}`; }
+function buildSiteUrl(value: string) { const cleaned = cleanUrlValue(value); return cleaned ? `https://${cleaned}` : ""; }
+function inferPropertyType(propertyUrl?: string | null): PropertyType { return String(propertyUrl || "").startsWith("sc-domain:") ? "domain" : "url_prefix"; }
+function propertyValueFromUrl(propertyUrl?: string | null) { const raw = String(propertyUrl || ""); return raw.startsWith("sc-domain:") ? cleanDomain(raw) : cleanUrlValue(raw); }
+function siteValueFromUrl(siteUrl?: string | null) { return cleanUrlValue(String(siteUrl || "")); }
+
+const baseForm: FormState = { accountId: "", websiteId: "", propertyType: "domain", propertyValue: "", propertyUrl: "", siteValue: "", siteUrl: "", adminGoogleUser: "", connectionStatus: "access_pending", sitemapSubmitted: false, indexedPages: "0", clicks: "0", impressions: "0", averagePosition: "", coverageWarnings: "0" };
+
+/** Safely extract a human-readable error message from any thrown value */
+function extractErrorMessage(e: unknown, fallback: string): string {
+  if (!e) return fallback;
+  if (typeof e === "string") return e || fallback;
+  if (typeof e === "object") {
+    const msg = (e as any).message;
+    if (typeof msg === "string" && msg.length > 0) return msg;
+  }
+  return fallback;
+}
+
+/** Fetch JSON safely — never throws (void 0) or SyntaxError, always a clean Error with a message */
+async function getJson<T>(url: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: "include" });
+  } catch (networkErr: unknown) {
+    throw new Error(extractErrorMessage(networkErr, `Network error fetching ${url}`));
+  }
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText || ""}`.trim());
+    throw new Error(`Unexpected non-JSON response from ${url} (${res.status})`);
+  }
+  if (!res.ok) {
+    const msg = typeof json?.message === "string" && json.message ? json.message : `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
+  return json as T;
+}
+
+/** POST/PUT/DELETE JSON safely */
+async function sendJson<T>(url: string, method: "POST" | "PUT" | "DELETE", body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method, credentials: "include", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  } catch (networkErr: unknown) {
+    throw new Error(extractErrorMessage(networkErr, `Network error on ${method} ${url}`));
+  }
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText || ""}`.trim());
+    throw new Error(`Unexpected non-JSON response from ${url} (${res.status})`);
+  }
+  if (!res.ok) {
+    const msg = typeof json?.message === "string" && json.message ? json.message : `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
+  return json as T;
+}
+
+function fmt(n?: number | null) { return Math.round(Number(n || 0)).toLocaleString(); }
+function dateText(v?: string | null) { return v ? new Date(v).toLocaleString() : "Not synced"; }
+function statusLabel(status: string) { return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+function statusClass(status: string) { if (status === "sync_active" || status === "access_confirmed") return "bg-green-100 text-green-800 hover:bg-green-100"; if (status === "access_lost") return "bg-red-100 text-red-800 hover:bg-red-100"; return "bg-yellow-100 text-yellow-900 hover:bg-yellow-100"; }
+
+export default function SearchConsolePage() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [websites, setWebsites] = useState<Website[]>([]);
+  const [properties, setProperties] = useState<GscProperty[]>([]);
+  const [config, setConfig] = useState<GscConfig>(EMPTY_CONFIG);
+  const [form, setForm] = useState<FormState>(baseForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [authTesting, setAuthTesting] = useState(false);
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [syncTestingId, setSyncTestingId] = useState<string | null>(null);
+  const [authResult, setAuthResult] = useState<TestResult | null>(null);
+  const [syncResult, setSyncResult] = useState<TestResult | null>(null);
+  const [autoFillResult, setAutoFillResult] = useState<TestResult | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const filteredWebsites = useMemo(() => websites.filter((w) => !form.accountId || w.accountId === form.accountId), [websites, form.accountId]);
+  const activeCount = properties.filter((p) => p.connectionStatus === "sync_active" || p.connectionStatus === "access_confirmed").length;
+  const pendingCount = properties.filter((p) => p.connectionStatus === "access_pending").length;
+  const lastSync = properties.map((p) => p.lastSyncAt).filter(Boolean).sort().reverse()[0] || null;
+  const propertyPrefix = form.propertyType === "domain" ? "sc-domain:" : "https://";
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // All four queries are scoped: accounts -> websites -> GSC properties
+      // config is global (no account scope) but still guarded against null
+      const [rawConfig, accountRows, websiteRows, propertyRows] = await Promise.all([
+        getJson<GscConfig | null>("/api/search-console/config"),
+        getJson<Account[]>("/api/accounts"),
+        getJson<Website[]>("/api/websites"),
+        getJson<GscProperty[]>("/api/search-console/properties"),
+      ]);
+
+      // Guard: API may return null if no config row exists yet — use sentinel defaults
+      const configRow: GscConfig = (rawConfig && typeof rawConfig === "object")
+        ? { ...EMPTY_CONFIG, ...rawConfig }
+        : EMPTY_CONFIG;
+
+      setConfig(configRow);
+      setAccounts(Array.isArray(accountRows) ? accountRows : []);
+      setWebsites(Array.isArray(websiteRows) ? websiteRows : []);
+      setProperties(Array.isArray(propertyRows) ? propertyRows : []);
+
+      // Only pre-fill adminGoogleUser if it hasn't been manually set
+      setForm((prev) => ({
+        ...prev,
+        adminGoogleUser: prev.adminGoogleUser || configRow.adminGoogleUser || "",
+      }));
+    } catch (e: unknown) {
+      setError(extractErrorMessage(e, "Failed to load Search Console data"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function update<K extends keyof FormState>(key: K, value: FormState[K]) { setForm((prev) => ({ ...prev, [key]: value })); }
+  function setPropertyType(type: PropertyType) { setForm((prev) => ({ ...prev, propertyType: type, propertyValue: type === "domain" ? cleanDomain(prev.propertyValue || prev.propertyUrl) : cleanUrlValue(prev.propertyValue || prev.propertyUrl), propertyUrl: buildPropertyUrl(type, prev.propertyValue || prev.propertyUrl) })); }
+  function setPropertyValue(value: string) { setForm((prev) => ({ ...prev, propertyValue: value, propertyUrl: buildPropertyUrl(prev.propertyType, value) })); }
+  function setSiteValue(value: string) { setForm((prev) => ({ ...prev, siteValue: value, siteUrl: buildSiteUrl(value) })); }
+
+  // When a website is selected: auto-fill property domain from website.domain (account-scoped)
+  function selectWebsite(websiteId: string) {
+    const website = websites.find((w) => w.id === websiteId);
+    const value = website?.domain ? cleanDomain(website.domain) : form.propertyValue;
+    setForm((prev) => ({
+      ...prev,
+      websiteId,
+      propertyType: "domain",
+      propertyValue: value,
+      propertyUrl: buildPropertyUrl("domain", value),
+      siteValue: value,
+      siteUrl: buildSiteUrl(value),
+    }));
+  }
+
+  function reset() { setForm({ ...baseForm, adminGoogleUser: config.adminGoogleUser || "" }); setEditingId(null); }
+  function edit(row: GscProperty) { const type = inferPropertyType(row.propertyUrl); const propertyValue = propertyValueFromUrl(row.propertyUrl); const siteValue = siteValueFromUrl(row.siteUrl) || propertyValue; setEditingId(row.id); setForm({ accountId: row.accountId, websiteId: row.websiteId || "", propertyType: type, propertyValue, propertyUrl: buildPropertyUrl(type, propertyValue), siteValue, siteUrl: buildSiteUrl(siteValue), adminGoogleUser: row.adminGoogleUser || config.adminGoogleUser || "", connectionStatus: row.connectionStatus || "access_pending", sitemapSubmitted: !!row.sitemapSubmitted, indexedPages: String(row.indexedPages || 0), clicks: String(row.clicks || 0), impressions: String(row.impressions || 0), averagePosition: row.averagePosition === null ? "" : String(row.averagePosition), coverageWarnings: String(row.coverageWarnings || 0) }); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  async function copyInstruction() { const text = config.clientInstruction || `Please add ${form.adminGoogleUser || config.adminGoogleUser} as a Full user in your Google Search Console property.`; await navigator.clipboard.writeText(text); setNotice("Client instruction copied."); setTimeout(() => setNotice(null), 3000); }
+  async function testServiceAccount() { setAuthTesting(true); setAuthResult(null); setError(null); try { const result = await getJson<TestResult>("/api/search-console/auth-test"); setAuthResult(result); setNotice(result.ok ? "Service account auth passed." : "Service account auth failed."); } catch (e: unknown) { setAuthResult({ ok: false, message: extractErrorMessage(e, "Service account auth failed.") }); } finally { setAuthTesting(false); } }
+  async function autoFillFromWebsites() { setAutoFilling(true); setAutoFillResult(null); setError(null); try { const result = await sendJson<TestResult>("/api/search-console/auto-create", "POST"); setAutoFillResult(result); setNotice(result.message || "Search Console tracking rows updated."); await load(); } catch (e: unknown) { setAutoFillResult({ ok: false, message: extractErrorMessage(e, "Auto-fill failed.") }); } finally { setAutoFilling(false); } }
+  async function runSyncTest(id: string) { setSyncTestingId(id); setSyncResult(null); setError(null); try { const result = await sendJson<TestResult>(`/api/search-console/properties/${id}/sync-test`, "POST"); setSyncResult(result); setNotice(result.ok ? "Sync test completed." : "Sync test failed."); await load(); } catch (e: unknown) { setSyncResult({ ok: false, message: extractErrorMessage(e, "Sync test failed.") }); } finally { setSyncTestingId(null); } }
+  async function save() { setSaving(true); setError(null); setNotice(null); try { const propertyUrl = buildPropertyUrl(form.propertyType, form.propertyValue || form.propertyUrl); const siteUrl = buildSiteUrl(form.siteValue || form.propertyValue || form.siteUrl); const payload = { accountId: form.accountId, websiteId: form.websiteId || null, propertyUrl, siteUrl: siteUrl || null, accessMethod: "delegated_admin_user", adminGoogleUser: form.adminGoogleUser || config.adminGoogleUser || null, connectionStatus: form.connectionStatus, sitemapSubmitted: form.sitemapSubmitted, indexedPages: Number(form.indexedPages || 0), clicks: Number(form.clicks || 0), impressions: Number(form.impressions || 0), averagePosition: form.averagePosition === "" ? null : Number(form.averagePosition), coverageWarnings: Number(form.coverageWarnings || 0), lastSyncAt: new Date().toISOString() }; if (!payload.accountId) throw new Error("Select a client first."); if (!payload.propertyUrl) throw new Error("Enter the GSC property domain or URL."); if (editingId) await sendJson(`/api/search-console/properties/${editingId}`, "PUT", payload); else await sendJson("/api/search-console/properties", "POST", payload); setNotice(editingId ? "Search Console property updated." : "Search Console property saved."); reset(); await load(); } catch (e: unknown) { setError(extractErrorMessage(e, "Failed to save Search Console property")); } finally { setSaving(false); } }
+  async function remove(id: string) { setError(null); setNotice(null); try { await sendJson(`/api/search-console/properties/${id}`, "DELETE"); setNotice("Search Console property removed."); await load(); } catch (e: unknown) { setError(extractErrorMessage(e, "Failed to remove property")); } }
+
+  return <DashboardLayout><div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><div className="rounded-lg bg-blue-50 p-2 text-blue-700"><SearchCheck className="h-5 w-5" /></div><h1 className="text-2xl font-bold tracking-tight text-gray-900">Search Console</h1></div><p className="mt-2 max-w-3xl text-sm text-gray-500">Admin-only delegated Search Console access tracker. Clients add your admin Google user to their GSC property; Nexus stores the property and reports the data back.</p></div><Button variant="outline" onClick={() => window.location.href = "/agency-dashboard"}><ExternalLink className="mr-2 h-4 w-4" />Agency Dashboard</Button></div>
+    {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}{notice && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-800">{notice}</div>}
+    <Card className="border-blue-100 bg-gradient-to-br from-slate-950 to-blue-950 text-white"><CardContent className="p-6 md:p-8"><div className="max-w-3xl"><div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-blue-100"><ShieldCheck className="h-3.5 w-3.5" />Internal operations only</div><h2 className="mt-5 text-3xl font-bold tracking-tight md:text-5xl">Track delegated GSC access for each client.</h2><p className="mt-3 text-sm leading-6 text-blue-100">No client OAuth flow required. Have the client add your admin Google user to their property, confirm access, save the property URL, then sync/report the metrics.</p>{config.adminGoogleUser && <div className="mt-5 rounded-xl border border-white/10 bg-white/10 p-4"><p className="text-xs uppercase tracking-wide text-blue-100">Admin Google User from Railway</p><p className="mt-1 break-all font-mono text-sm font-semibold">{config.adminGoogleUser}</p><div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button size="sm" variant="secondary" onClick={copyInstruction}>Copy Client Instruction</Button><Button size="sm" variant="secondary" onClick={testServiceAccount} disabled={authTesting}><PlayCircle className="mr-2 h-4 w-4" />{authTesting ? "Testing..." : "Test Service Account"}</Button><Button size="sm" variant="secondary" onClick={autoFillFromWebsites} disabled={autoFilling}><Wand2 className="mr-2 h-4 w-4" />{autoFilling ? "Auto-filling..." : "Auto-Fill From Websites"}</Button></div></div>}</div></CardContent></Card>
+    {(authResult || syncResult || autoFillResult) && <div className="grid gap-4 lg:grid-cols-3">{authResult && <ResultCard title="Service Account Test" result={authResult}/>} {syncResult && <ResultCard title="Property Sync Test" result={syncResult}/>} {autoFillResult && <ResultCard title="Auto-Fill Result" result={autoFillResult}/>}</div>}
+    <div className="grid gap-4 md:grid-cols-3"><StatusCard title="Active / Confirmed Properties" value={fmt(activeCount)} tone={activeCount ? "ok" : "warn"} icon="key" /><StatusCard title="Access Pending" value={fmt(pendingCount)} tone={pendingCount ? "warn" : "ok"} icon="globe" /><StatusCard title="Last Sync" value={dateText(lastSync)} tone={lastSync ? "ok" : "warn"} icon="sync" /></div>
+    <Card><CardHeader><CardTitle>{editingId ? "Update Search Console Property" : "Add Search Console Property"}</CardTitle><CardDescription>Manual backup form. Normal workflow is Auto-Fill From Websites, then Sync Test after the client adds the service account.</CardDescription></CardHeader><CardContent className="space-y-5"><div className="grid gap-4 lg:grid-cols-3"><Field label="Client"><select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.accountId} onChange={(e) => { update("accountId", e.target.value); update("websiteId", ""); }}><option value="">Select client</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field><Field label="Website / Domain"><select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.websiteId} onChange={(e) => selectWebsite(e.target.value)}><option value="">No website selected</option>{filteredWebsites.map((w) => <option key={w.id} value={w.id}>{w.name} — {w.domain}</option>)}</select></Field><Field label="Access Status"><select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.connectionStatus} onChange={(e) => update("connectionStatus", e.target.value)}><option value="access_pending">Access Pending</option><option value="access_confirmed">Access Confirmed</option><option value="sync_active">Sync Active</option><option value="access_lost">Access Lost</option></select></Field></div><div className="grid gap-4 lg:grid-cols-3"><Field label="GSC Property"><div className="grid gap-2"><select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.propertyType} onChange={(e) => setPropertyType(e.target.value as PropertyType)}><option value="domain">Domain property</option><option value="url_prefix">URL prefix property</option></select><div className="flex overflow-hidden rounded-md border bg-white shadow-sm"><div className="flex min-w-fit items-center border-r bg-gray-50 px-3 font-mono text-sm font-semibold text-gray-700">{propertyPrefix}</div><Input className="rounded-none border-0 shadow-none focus-visible:ring-0" value={form.propertyValue} onChange={(e) => setPropertyValue(e.target.value)} placeholder={form.propertyType === "domain" ? "example.com" : "example.com/optional-path/"} /></div><p className="break-all text-xs text-gray-500">Saved as: {buildPropertyUrl(form.propertyType, form.propertyValue) || `${propertyPrefix}example.com`}</p></div></Field><Field label="Site URL"><div className="grid gap-2"><div className="flex overflow-hidden rounded-md border bg-white shadow-sm"><div className="flex min-w-fit items-center border-r bg-gray-50 px-3 font-mono text-sm font-semibold text-gray-700">https://</div><Input className="rounded-none border-0 shadow-none focus-visible:ring-0" value={form.siteValue} onChange={(e) => setSiteValue(e.target.value)} placeholder="example.com" /></div><p className="break-all text-xs text-gray-500">Saved as: {buildSiteUrl(form.siteValue) || "https://example.com"}</p></div></Field><Field label="Admin Google User"><Input value={form.adminGoogleUser} onChange={(e) => update("adminGoogleUser", e.target.value)} placeholder={config.adminGoogleUser || "your-admin@gmail.com"} /></Field></div><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6"><Field label="Indexed Pages"><Input type="number" min="0" value={form.indexedPages} onChange={(e) => update("indexedPages", e.target.value)} /></Field><Field label="Clicks"><Input type="number" min="0" value={form.clicks} onChange={(e) => update("clicks", e.target.value)} /></Field><Field label="Impressions"><Input type="number" min="0" value={form.impressions} onChange={(e) => update("impressions", e.target.value)} /></Field><Field label="Avg Position"><Input type="number" min="0" step="0.01" value={form.averagePosition} onChange={(e) => update("averagePosition", e.target.value)} /></Field><Field label="Coverage Warnings"><Input type="number" min="0" value={form.coverageWarnings} onChange={(e) => update("coverageWarnings", e.target.value)} /></Field><Field label="Sitemap Submitted"><select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.sitemapSubmitted ? "yes" : "no"} onChange={(e) => update("sitemapSubmitted", e.target.value === "yes")}><option value="no">No</option><option value="yes">Yes</option></select></Field></div><div className="flex flex-col gap-2 sm:flex-row"><Button onClick={save} disabled={saving}><Save className="mr-2 h-4 w-4" />{saving ? "Saving..." : editingId ? "Update Property" : "Save Property"}</Button>{editingId && <Button variant="outline" onClick={reset}>Cancel Edit</Button>}<Button variant="outline" onClick={load} disabled={loading}><RefreshCcw className="mr-2 h-4 w-4" />Refresh</Button></div></CardContent></Card>
+    <div className="grid gap-6 lg:grid-cols-2"><Card><CardHeader><CardTitle>Admin Setup Checklist</CardTitle><CardDescription>Use this operating checklist before exposing GSC metrics in reports.</CardDescription></CardHeader><CardContent className="space-y-3 text-sm"><CheckRow text="Create the client and website/domain in Nexus." /><CheckRow text="Click Auto-Fill From Websites to create the GSC tracking row." /><CheckRow text="Send the client your service account email and ask them to add it to their Search Console property as Full user." /><CheckRow text="Click Sync Test after access is granted." /><CheckRow text="Expose read-only proof inside Agency Dashboard and monthly reports." /></CardContent></Card><Card><CardHeader><CardTitle>Where Search Console Belongs</CardTitle><CardDescription>Agencies see proof, not setup controls.</CardDescription></CardHeader><CardContent className="space-y-3 text-sm"><Placement label="Admin Search Console" value="Confirm delegated access, map property, sync, repair." /><Placement label="Client Detail Drawer" value="Show GSC access and sync health for that client." /><Placement label="Agency Dashboard" value="Show summary proof only." /><Placement label="Monthly Report" value="Show client-facing growth proof." /></CardContent></Card></div>
+    <Card><CardHeader><CardTitle>Client Property Table</CardTitle><CardDescription>Saved delegated-access Search Console properties.</CardDescription></CardHeader><CardContent>{loading ? <div className="rounded-lg border border-dashed p-8 text-center text-sm text-gray-500">Loading properties...</div> : properties.length === 0 ? <div className="rounded-lg border border-dashed p-8 text-center"><TriangleAlert className="mx-auto h-8 w-8 text-yellow-600" /><p className="mt-3 font-semibold text-gray-900">No Search Console properties saved yet.</p><p className="mt-1 text-sm text-gray-500">Click Auto-Fill From Websites after creating client websites.</p></div> : <div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Property</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Indexed</TableHead><TableHead className="text-right">Clicks</TableHead><TableHead className="text-right">Impressions</TableHead><TableHead className="text-right">Warnings</TableHead><TableHead>Last Sync</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>{properties.map((p) => <TableRow key={p.id}><TableCell><div className="font-medium">{p.accountName}</div><div className="text-xs text-gray-500">{p.websiteDomain || p.websiteName || "No website mapped"}</div></TableCell><TableCell><div className="font-mono text-xs">{p.propertyUrl}</div><div className="text-xs text-gray-500">{p.adminGoogleUser || "No admin user saved"}</div></TableCell><TableCell><Badge className={statusClass(p.connectionStatus)}>{statusLabel(p.connectionStatus)}</Badge></TableCell><TableCell className="text-right">{fmt(p.indexedPages)}</TableCell><TableCell className="text-right">{fmt(p.clicks)}</TableCell><TableCell className="text-right">{fmt(p.impressions)}</TableCell><TableCell className="text-right">{fmt(p.coverageWarnings)}</TableCell><TableCell className="text-xs text-gray-500">{dateText(p.lastSyncAt)}</TableCell><TableCell className="text-right"><div className="flex flex-col justify-end gap-2 xl:flex-row"><Button size="sm" variant="outline" onClick={() => runSyncTest(p.id)} disabled={syncTestingId === p.id}><PlayCircle className="mr-1 h-3.5 w-3.5" />{syncTestingId === p.id ? "Testing" : "Sync Test"}</Button><Button size="sm" variant="outline" onClick={() => edit(p)}>Edit</Button><Button size="sm" variant="outline" onClick={() => remove(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button></div></TableCell></TableRow>)}</TableBody></Table></div>}</CardContent></Card>
+  </div></DashboardLayout>;
+}
+function StatusCard({ title, value, tone, icon }: { title: string; value: string; tone: "ok" | "warn"; icon: "key" | "globe" | "sync" }) { const Icon = icon === "key" ? KeyRound : icon === "globe" ? Globe : RefreshCcw; return <Card><CardContent className="p-5"><Icon className="h-5 w-5 text-blue-600" /><p className="mt-4 text-2xl font-bold text-gray-900">{value}</p><div className="mt-2 flex items-center justify-between gap-2"><p className="text-sm text-gray-500">{title}</p><Badge className={tone === "ok" ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-yellow-100 text-yellow-900 hover:bg-yellow-100"}>{tone === "ok" ? "Ready" : "Pending"}</Badge></div></CardContent></Card>; }
+function ResultCard({ title, result }: { title: string; result: TestResult }) { return <Card className={result.ok ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}><CardHeader><CardTitle className={result.ok ? "text-green-900" : "text-red-900"}>{title}</CardTitle><CardDescription className={result.ok ? "text-green-800" : "text-red-800"}>{result.message}</CardDescription></CardHeader><CardContent><div className="grid gap-2 text-xs sm:grid-cols-2">{Object.entries(result).filter(([k]) => !["ok","message","tokenPreview","rows"].includes(k)).slice(0, 10).map(([k,v]) => <div key={k} className="rounded-md border bg-white/70 p-2"><div className="font-semibold text-gray-600">{k}</div><div className="mt-1 break-words text-gray-900">{typeof v === "object" ? JSON.stringify(v) : String(v)}</div></div>)}</div></CardContent></Card>; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="grid gap-2"><Label className="text-xs font-semibold text-gray-600">{label}</Label>{children}</div>; }
+function CheckRow({ text }: { text: string }) { return <div className="rounded-lg border bg-gray-50 p-3 text-gray-700">{text}</div>; }
+function Placement({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-4 rounded-lg border p-3"><div className="font-medium text-gray-900">{label}</div><div className="max-w-xs text-right text-gray-500">{value}</div></div>; }

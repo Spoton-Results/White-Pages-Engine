@@ -1,5 +1,8 @@
 import { hashPassword } from "./auth";
 import * as storage from "./storage";
+import { db } from "./db";
+import { accounts } from "@shared/schema";
+import { ilike, or } from "drizzle-orm";
 
 const US_STATES = [
   { name: "Alabama", code: "AL" }, { name: "Alaska", code: "AK" },
@@ -168,12 +171,14 @@ export async function seedDatabase() {
     console.log("Created super admin:", superAdmin.email);
   }
 
-  // ── SpotOn Results — self-heal missing services/locations ───────────────────
-  // Find by name to handle both dev and production accounts regardless of slug
-  const accounts = await storage.getAccounts();
-  const spoton = accounts.find((a: any) =>
-    a.name.toLowerCase().includes("spoton") || a.name.toLowerCase().includes("spot on")
-  );
+  // ── SpotOn Results — targeted lookup (avoids full-table scan) ───────────────
+  // Uses a single WHERE ILIKE query instead of loading all accounts into memory.
+  const [spoton] = await db
+    .select()
+    .from(accounts)
+    .where(or(ilike(accounts.name, "%spoton%"), ilike(accounts.name, "%spot on%")))
+    .limit(1);
+
   if (spoton) {
     await seedSpotOnData(spoton.id);
   }

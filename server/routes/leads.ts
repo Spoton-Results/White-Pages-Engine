@@ -6,6 +6,10 @@ import { requireAuth } from "../auth";
 
 const router = Router();
 
+// Mounted at /api/leads in index.ts
+// IMPORTANT: specific/static routes MUST be registered before dynamic /:param routes
+// to prevent Express shadowing /update-status and /metrics/:accountId with /:websiteId.
+
 // 30-second in-memory cache for metrics (keyed by accountId:month)
 const metricsCache = new Map<string, { data: unknown; exp: number }>();
 function getCachedMetrics(key: string) {
@@ -17,7 +21,7 @@ function setCachedMetrics(key: string, data: unknown) {
   metricsCache.set(key, { data, exp: Date.now() + 30_000 });
 }
 
-// POST /api/leads/update-status
+// POST /api/leads/update-status  ← registered FIRST (static path)
 router.post("/update-status", requireAuth, async (req, res) => {
   try {
     const { leadId, status, jobValue, accountId } = req.body;
@@ -67,41 +71,7 @@ router.post("/update-status", requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/leads/:websiteId
-router.get("/:websiteId", requireAuth, async (req, res) => {
-  try {
-    const { websiteId } = req.params;
-
-    const leads = await db
-      .select()
-      .from(trackedLeads)
-      .where(eq(trackedLeads.websiteId, websiteId))
-      .orderBy(desc(trackedLeads.formTimestamp));
-
-    const leadIds = leads.map((l) => l.id);
-    const jobs =
-      leadIds.length > 0
-        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
-        : [];
-
-    const jobsByLeadId: Record<string, typeof jobs[number]> = {};
-    for (const job of jobs) {
-      if (job.leadId) jobsByLeadId[job.leadId] = job;
-    }
-
-    const enrichedLeads = leads.map((lead) => ({
-      ...lead,
-      bookedJob: jobsByLeadId[lead.id] ?? null,
-    }));
-
-    return res.json({ leads: enrichedLeads });
-  } catch (error) {
-    console.error("Error fetching leads:", error);
-    return res.status(500).json({ error: "Failed to fetch leads" });
-  }
-});
-
-// GET /api/leads/metrics/:accountId
+// GET /api/leads/metrics/:accountId  ← registered BEFORE /:websiteId (static segment first)
 router.get("/metrics/:accountId", requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
@@ -132,6 +102,40 @@ router.get("/metrics/:accountId", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error fetching metrics:", error);
     return res.status(500).json({ error: "Failed to fetch metrics" });
+  }
+});
+
+// GET /api/leads/:websiteId  ← dynamic param LAST so it doesn't shadow routes above
+router.get("/:websiteId", requireAuth, async (req, res) => {
+  try {
+    const { websiteId } = req.params;
+
+    const leads = await db
+      .select()
+      .from(trackedLeads)
+      .where(eq(trackedLeads.websiteId, websiteId))
+      .orderBy(desc(trackedLeads.formTimestamp));
+
+    const leadIds = leads.map((l) => l.id);
+    const jobs =
+      leadIds.length > 0
+        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
+        : [];
+
+    const jobsByLeadId: Record<string, typeof jobs[number]> = {};
+    for (const job of jobs) {
+      if (job.leadId) jobsByLeadId[job.leadId] = job;
+    }
+
+    const enrichedLeads = leads.map((lead) => ({
+      ...lead,
+      bookedJob: jobsByLeadId[lead.id] ?? null,
+    }));
+
+    return res.json({ leads: enrichedLeads });
+  } catch (error) {
+    console.error("Error fetching leads:", error);
+    return res.status(500).json({ error: "Failed to fetch leads" });
   }
 });
 

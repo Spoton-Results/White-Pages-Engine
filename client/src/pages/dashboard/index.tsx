@@ -1,25 +1,69 @@
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Globe, FileText, Activity, Zap, Building2, CheckCircle, AlertCircle, BarChart3 } from "lucide-react";
+import {
+  Globe, FileText, Activity, Zap, Building2,
+  CheckCircle, AlertCircle, BarChart3, Briefcase, Factory,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import { Link } from "wouter";
 
 export default function Dashboard() {
+  // Primary stats — from the dedicated endpoint
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
-    queryFn: () => api.get<any>("/api/dashboard/stats"),
-    refetchInterval: 300000,
+    queryFn: () => api.get<any>("/api/dashboard/stats").catch(() => ({})),
+    refetchInterval: 300_000,
+  });
+
+  // Fallback counts fetched directly from list endpoints so the KPIs always
+  // resolve even if /api/dashboard/stats is empty or not yet wired.
+  const { data: accountRows = [] } = useQuery({
+    queryKey: ["/api/accounts"],
+    queryFn: () => api.get<any[]>("/api/accounts").catch(() => []),
+    staleTime: 60_000,
+  });
+  const { data: websiteRows = [] } = useQuery({
+    queryKey: ["/api/websites"],
+    queryFn: () => api.get<any[]>("/api/websites").catch(() => []),
+    staleTime: 60_000,
+  });
+  const { data: brandRows = [] } = useQuery({
+    queryKey: ["/api/brand-profiles"],
+    queryFn: () => api.get<any[]>("/api/brand-profiles").catch(() => []),
+    staleTime: 60_000,
+  });
+  const { data: industryRows = [] } = useQuery({
+    queryKey: ["/api/industries"],
+    queryFn: () => api.get<any[]>("/api/industries").catch(() => []),
+    staleTime: 60_000,
+  });
+  const { data: publishedRows = [] } = useQuery({
+    queryKey: ["/api/pages", { status: "published" }],
+    queryFn: () =>
+      api.get<any[]>("/api/pages?status=published").catch(() => []),
+    staleTime: 60_000,
   });
 
   const { data: activity, isLoading: activityLoading } = useQuery({
     queryKey: ["/api/dashboard/activity"],
-    queryFn: () => api.get<any>("/api/dashboard/activity"),
-    refetchInterval: 120000,
+    queryFn: () => api.get<any>("/api/dashboard/activity").catch(() => ({})),
+    refetchInterval: 120_000,
   });
+
+  // Resolve counts: prefer /stats fields, fall back to list lengths
+  const totalAccounts  = stats?.totalAccounts  ?? (Array.isArray(accountRows)  ? accountRows.length  : null);
+  const totalWebsites  = stats?.totalWebsites  ?? (Array.isArray(websiteRows)  ? websiteRows.length  : null);
+  const totalBrands    = stats?.totalBrandProfiles ?? (Array.isArray(brandRows) ? brandRows.length : null);
+  const totalIndustries= stats?.totalIndustries ?? (Array.isArray(industryRows) ? industryRows.length : null);
+  const publishedPages = stats?.publishedPages  ?? (Array.isArray(publishedRows) ? publishedRows.length : null);
+  const failedQA       = stats?.draftPages      ?? null;
+  const activeJobs     = stats?.activeJobs      ?? null;
+
+  const kpiLoading = statsLoading;
 
   return (
     <DashboardLayout>
@@ -39,25 +83,29 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {/* KPI grid — 7 cards */}
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
           {[
-            { label: "Accounts", value: stats?.totalAccounts, icon: Building2, color: "text-violet-500" },
-            { label: "Websites", value: stats?.totalWebsites, icon: Globe, color: "text-blue-500" },
-            { label: "Published", value: stats?.publishedPages, icon: CheckCircle, color: "text-emerald-500" },
-            { label: "Failed QA", value: stats?.draftPages, icon: AlertCircle, color: "text-amber-500" },
-            { label: "Active Jobs", value: stats?.activeJobs, icon: Activity, color: "text-red-500" },
+            { label: "Accounts",       value: totalAccounts,   icon: Building2,    color: "text-violet-500" },
+            { label: "Websites",       value: totalWebsites,   icon: Globe,        color: "text-blue-500" },
+            { label: "Brand Profiles", value: totalBrands,     icon: Briefcase,    color: "text-pink-500" },
+            { label: "Industries",     value: totalIndustries, icon: Factory,      color: "text-orange-500" },
+            { label: "Published",      value: publishedPages,  icon: CheckCircle,  color: "text-emerald-500" },
+            { label: "Failed QA",      value: failedQA,        icon: AlertCircle,  color: "text-amber-500" },
+            { label: "Active Jobs",    value: activeJobs,      icon: Activity,     color: "text-red-500" },
           ].map((stat) => (
-            <Card key={stat.label} className="xl:col-span-1">
+            <Card key={stat.label}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-muted-foreground font-medium">{stat.label}</span>
                   <stat.icon className={`size-4 ${stat.color}`} />
                 </div>
-                {statsLoading ? (
+                {kpiLoading ? (
                   <Skeleton className="h-7 w-16" />
                 ) : (
-                  <div className="text-2xl font-bold">{stat.value?.toLocaleString() ?? "—"}</div>
+                  <div className="text-2xl font-bold tabular-nums">
+                    {stat.value != null ? stat.value.toLocaleString() : "—"}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -81,18 +129,18 @@ export default function Dashboard() {
                   <div className="space-y-3">
                     {[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
                   </div>
-                ) : activity?.recentJobs?.length === 0 ? (
+                ) : !activity?.recentJobs?.length ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No generation jobs yet. Create one to get started.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {activity?.recentJobs?.slice(0, 5).map((job: any) => (
+                    {activity.recentJobs.slice(0, 5).map((job: any) => (
                       <div key={job.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 hover:bg-muted/70 transition-colors">
                         <div className={`size-2 rounded-full shrink-0 ${
                           job.status === "completed" ? "bg-emerald-500" :
-                          job.status === "running" ? "bg-blue-500 animate-pulse" :
-                          job.status === "failed" ? "bg-destructive" :
+                          job.status === "running"   ? "bg-blue-500 animate-pulse" :
+                          job.status === "failed"    ? "bg-destructive" :
                           "bg-muted-foreground"
                         }`} />
                         <div className="flex-1 min-w-0">
@@ -103,8 +151,8 @@ export default function Dashboard() {
                         </div>
                         <Badge variant="outline" className={`text-xs ${
                           job.status === "completed" ? "border-emerald-200 text-emerald-700" :
-                          job.status === "running" ? "border-blue-200 text-blue-700" :
-                          job.status === "failed" ? "border-red-200 text-red-700" : ""
+                          job.status === "running"   ? "border-blue-200 text-blue-700" :
+                          job.status === "failed"    ? "border-red-200 text-red-700" : ""
                         }`}>
                           {job.status}
                         </Badge>
@@ -131,14 +179,18 @@ export default function Dashboard() {
                 <div className="space-y-3">
                   {[1,2,3,4].map(i => <Skeleton key={i} className="h-10 w-full" />)}
                 </div>
+              ) : !activity?.recentPages?.length ? (
+                <div className="text-center py-6 text-muted-foreground text-sm">
+                  No pages yet.
+                </div>
               ) : (
                 <div className="space-y-2">
-                  {activity?.recentPages?.slice(0, 6).map((page: any) => (
+                  {activity.recentPages.slice(0, 6).map((page: any) => (
                     <div key={page.id} className="flex items-start gap-2 p-2 rounded-md hover:bg-muted/50 transition-colors">
                       <div className={`size-1.5 rounded-full mt-1.5 shrink-0 ${
                         page.status === "published" ? "bg-emerald-500" :
-                        page.status === "review" ? "bg-amber-500" :
-                        page.status === "approved" ? "bg-blue-500" :
+                        page.status === "review"    ? "bg-amber-500" :
+                        page.status === "approved"  ? "bg-blue-500" :
                         "bg-muted-foreground"
                       }`} />
                       <div className="flex-1 min-w-0">
@@ -156,10 +208,10 @@ export default function Dashboard() {
         {/* Quick Actions */}
         <div className="grid gap-3 md:grid-cols-4">
           {[
-            { title: "New Generation Job", desc: "Generate pages with Claude AI", href: "/jobs", icon: Zap, color: "from-blue-500/10" },
-            { title: "Review Drafts", desc: `${stats?.draftPages || 0} failed-QA pages to review`, href: "/drafts", icon: FileText, color: "from-amber-500/10" },
-            { title: "Published Pages", desc: `${stats?.publishedPages || 0} pages live`, href: "/published", icon: CheckCircle, color: "from-emerald-500/10" },
-            { title: "Manage Sitemaps", desc: "Generate & export sitemaps", href: "/sitemaps", icon: BarChart3, color: "from-violet-500/10" },
+            { title: "New Generation Job", desc: "Generate pages with Claude AI",                    href: "/jobs",     icon: Zap },
+            { title: "Review Drafts",      desc: `${failedQA ?? 0} failed-QA pages to review`,      href: "/drafts",   icon: FileText },
+            { title: "Published Pages",    desc: `${publishedPages ?? 0} pages live`,                href: "/published",icon: CheckCircle },
+            { title: "Manage Sitemaps",    desc: "Generate & export sitemaps",                       href: "/sitemaps", icon: BarChart3 },
           ].map((action) => (
             <Link key={action.title} href={action.href}>
               <a>
