@@ -4,11 +4,17 @@ import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { ensureBulkTransactionSafety, repairPagesMissingActiveVersions } from "./services/bulk-transaction-safety";
 
-// ── Auth ────────────────────────────────────────────────────────────────────
+// ── Auth ───────────────────────────────────────────────────────────────────────
 import authLiveRouter from "./routes/auth-live";
 import { sessionMiddleware } from "./auth";
 
-// ── Core platform routers ────────────────────────────────────────────────────
+// ── CORE API ───────────────────────────────────────────────────────────────────
+// Accounts, websites, locations, services, brand-profiles, industries,
+// blueprints, query-clusters, pages, generation-jobs, variation-banks,
+// sitemaps, and the public contact form.
+import coreApiRouter from "./routes/core-api";
+
+// ── Core platform routers ─────────────────────────────────────────────────────────
 import jobsRouter from "./routes/jobs";
 import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 import websiteDomainEditRouter from "./routes/website-domain-edit";
@@ -21,7 +27,7 @@ import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
 import spotonPagesRouter from "./routes/spoton-pages";
 
-// ── Action review & intent governance ───────────────────────────────────────
+// ── Action review & intent governance ─────────────────────────────────────────────
 import actionReviewActiveRouter from "./routes/action-review-active";
 import actionReviewDecisionRouter from "./routes/action-review-decision";
 import intentGovernanceRouter from "./routes/intent-governance";
@@ -29,28 +35,28 @@ import intentGovernanceRunRouter from "./routes/intent-governance-run";
 import intentActionsRouter from "./routes/intent-actions";
 import intentBuildRouter from "./routes/intent-build";
 
-// ── Billing & search infrastructure ─────────────────────────────────────────
+// ── Billing & search infrastructure ──────────────────────────────────────────────
 import nexusStripeRouter from "./routes/nexus-stripe";
 import bankHealthRouter from "./routes/bank-health";
 import searchConsoleAdminRouter from "./routes/search-console-admin";
 
-// ── Agency dashboards & reporting ───────────────────────────────────────────
+// ── Agency dashboards & reporting ───────────────────────────────────────────────
 import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 import agencyDashboardRouter from "./routes/agency-dashboard";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import dashboardAgencyRouter from "./routes/dashboard-agency";
 
-// ── Lead tracking & conversion ───────────────────────────────────────────────
+// ── Lead tracking & conversion ────────────────────────────────────────────────────
 import callTrackingRouter from "./routes/call-tracking";
 import formTrackingRouter from "./routes/form-tracking";
 import leadsRouter from "./routes/leads";
 
-// ── Onboarding & widget ──────────────────────────────────────────────────────
+// ── Onboarding & widget ────────────────────────────────────────────────────────────
 import onboardingRouter from "./routes/onboarding-live";
 import widgetRouter from "./routes/widget";
 
-// ── System health & control plane ───────────────────────────────────────────
+// ── System health & control plane ───────────────────────────────────────────────
 import systemIntegrityRouter from "./routes/system-integrity";
 import autonomousControlPlaneRouter from "./routes/autonomous-control-plane";
 import deploymentQaRouter from "./routes/deployment-qa";
@@ -127,19 +133,22 @@ function normalizeAdminHostHeaders(req: Request, _res: Response, next: NextFunct
   next();
 }
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// ── Middleware ────────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(sessionMiddleware());
 app.use(normalizeAdminHostHeaders);
 
-// ── Auth (must be before any protected /api routes) ──────────────────────────
+// ── Auth (must be before any protected /api routes) ──────────────────────────────────
 app.use(authLiveRouter);
 
-// ── Jobs (canonical job ownership) ───────────────────────────────────────────
+// ── CORE API (accounts, websites, pages, services, etc.) ───────────────────────────
+app.use(coreApiRouter);
+
+// ── Jobs (canonical job ownership) ───────────────────────────────────────────────────
 app.use(jobsRouter);
 
-// ── Core page & site management ───────────────────────────────────────────────
+// ── Core page & site management ──────────────────────────────────────────────────────
 app.use(bulkGenerateJobFastRouter);
 app.use(websiteDomainEditRouter);
 app.use(publishedPagesSearchRouter);
@@ -151,7 +160,7 @@ app.use(clientDomainsRouter);
 app.use(publicWebsiteDomainsRouter);
 app.use(clientDomainHomepageRouter);
 
-// ── Intent & action review ────────────────────────────────────────────────────
+// ── Intent & action review ─────────────────────────────────────────────────────────
 app.use(actionReviewActiveRouter);
 app.use(actionReviewDecisionRouter);
 app.use(intentGovernanceRouter);
@@ -159,33 +168,33 @@ app.use(intentGovernanceRunRouter);
 app.use("/api/intent-actions", intentActionsRouter);
 app.use("/api/intent-build", intentBuildRouter);
 
-// ── Billing & search infrastructure ──────────────────────────────────────────
+// ── Billing & search infrastructure ──────────────────────────────────────────────────
 app.use(nexusStripeRouter);
 app.use(bankHealthRouter);
 app.use(searchConsoleAdminRouter);
 
-// ── Agency dashboards & reporting ─────────────────────────────────────────────
+// ── Agency dashboards & reporting ───────────────────────────────────────────────────
 app.use(agencyRoiDashboardRouter);
 app.use(agencyMonthlyReportRouter);
 app.use(agencyDashboardRouter);
 app.use("/api/admin", dashboardAdminRouter);
 app.use("/api/dashboard", dashboardAgencyRouter);
 
-// ── Lead tracking & conversion ────────────────────────────────────────────────
+// ── Lead tracking & conversion ────────────────────────────────────────────────────────
 app.use("/api/call-tracking", callTrackingRouter);
 app.use("/api/form-tracking", formTrackingRouter);
 app.use("/api/leads", leadsRouter);
 
-// ── Onboarding & widget ───────────────────────────────────────────────────────
+// ── Onboarding & widget ─────────────────────────────────────────────────────────────
 app.use("/api/onboarding", onboardingRouter);
 app.use("/widget", widgetRouter);
 
-// ── System health & control plane ─────────────────────────────────────────────
+// ── System health & control plane ──────────────────────────────────────────────────
 app.use(systemIntegrityRouter);
 app.use(autonomousControlPlaneRouter);
 app.use("/api/deployment-qa", deploymentQaRouter);
 
-// ── Request logger ────────────────────────────────────────────────────────────
+// ── Request logger ───────────────────────────────────────────────────────────────────
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -217,7 +226,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Background startup ────────────────────────────────────────────────────────
+// ── Background startup ────────────────────────────────────────────────────────────────
 async function runBackgroundStartup() {
   try {
     await ensureBulkTransactionSafety();
@@ -234,7 +243,7 @@ async function runBackgroundStartup() {
   }
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── Boot ────────────────────────────────────────────────────────────────────────────
 (async () => {
   // IMPORTANT: serveStatic MUST be registered before the error handler.
   // Express middleware runs in order — registering the error handler first
