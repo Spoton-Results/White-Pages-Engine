@@ -34,25 +34,29 @@ function isAgencyRole(user: any) {
   return role === "agency" || role === "agency_admin" || role === "agency_user";
 }
 
-// Websites nav item is dynamic — it appends ?accountId= when an account is selected
+// Websites nav item is dynamic — appends ?accountId= when an account is selected
 function useWebsitesHref() {
   const { selectedAccountId } = useAccountContext();
   return selectedAccountId ? `/websites?accountId=${selectedAccountId}` : "/websites";
 }
 
-const staticNavigation = [
-  { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Agencies", href: "/agencies", icon: Handshake },
-  { name: "Accounts", href: "/accounts", icon: Building2 },
-  // Websites is rendered separately via WebsitesNavItem
-  { name: "Client Domains", href: "/client-domains", icon: Globe },
-  { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
-  { name: "Industries", href: "/industries", icon: Factory },
-  { name: "Locations", href: "/locations", icon: MapPin },
-  { name: "Services", href: "/services", icon: Wrench },
-  { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
-  { name: "Blueprints", href: "/blueprints", icon: Layers },
-  { name: "Hub Pages", href: "/hub-pages", icon: Network },
+// Platform nav — Websites is injected dynamically after Accounts via WebsitesNavItem
+const staticNavigationTop = [
+  { name: "Overview",      href: "/",              icon: LayoutDashboard },
+  { name: "Agencies",      href: "/agencies",      icon: Handshake },
+  { name: "Accounts",      href: "/accounts",      icon: Building2 },
+  // << Websites is rendered here via WebsitesNavItem >>
+];
+
+const staticNavigationBottom = [
+  { name: "Client Domains",  href: "/client-domains",  icon: Globe },
+  { name: "Brand Profiles",  href: "/brand-profiles",  icon: Briefcase },
+  { name: "Industries",      href: "/industries",      icon: Factory },
+  { name: "Locations",       href: "/locations",       icon: MapPin },
+  { name: "Services",        href: "/services",        icon: Wrench },
+  { name: "Query Clusters",  href: "/query-clusters",  icon: SearchIcon },
+  { name: "Blueprints",      href: "/blueprints",      icon: Layers },
+  { name: "Hub Pages",       href: "/hub-pages",       icon: Network },
 ];
 
 const testingNav = [
@@ -60,28 +64,28 @@ const testingNav = [
 ];
 
 const contentNav = [
-  { name: "Published Pages", href: "/published", icon: Globe },
-  { name: "Leads", href: "/leads", icon: Inbox },
-  { name: "Agency Dashboard", href: "/agency-dashboard", icon: PhoneCall },
-  { name: "Report Center", href: "/report-links", icon: Share2 },
-  { name: "Operations", href: "/operations", icon: ShieldCheck },
-  { name: "Search Console", href: "/search-console", icon: SearchCheck },
-  { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
-  { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
-  { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
-  { name: "Internal Links", href: "/internal-links", icon: Link2 },
-  { name: "Intent Build", href: "/intent-build", icon: GitBranch },
-  { name: "Action Review", href: "/action-review", icon: ClipboardCheck },
-  { name: "Automation", href: "/automation", icon: Bot },
-  { name: "Bank Health", href: "/bank-health", icon: Activity },
-  { name: "SEO Control", href: "/search-control", icon: ShieldCheck },
-  { name: "Users & Roles", href: "/users", icon: Users },
-  { name: "Operations Guide", href: "/guide", icon: BookOpen },
+  { name: "Published Pages",  href: "/published",       icon: Globe },
+  { name: "Leads",            href: "/leads",           icon: Inbox },
+  { name: "Agency Dashboard", href: "/agency-dashboard",icon: PhoneCall },
+  { name: "Report Center",    href: "/report-links",    icon: Share2 },
+  { name: "Operations",       href: "/operations",      icon: ShieldCheck },
+  { name: "Search Console",   href: "/search-console",  icon: SearchCheck },
+  { name: "Bulk Generator",   href: "/bulk-generator",  icon: Zap },
+  { name: "Generation Jobs",  href: "/jobs",            icon: BarChart3 },
+  { name: "Sitemap Manager",  href: "/sitemaps",        icon: Map },
+  { name: "Internal Links",   href: "/internal-links",  icon: Link2 },
+  { name: "Intent Build",     href: "/intent-build",    icon: GitBranch },
+  { name: "Action Review",    href: "/action-review",   icon: ClipboardCheck },
+  { name: "Automation",       href: "/automation",      icon: Bot },
+  { name: "Bank Health",      href: "/bank-health",     icon: Activity },
+  { name: "SEO Control",      href: "/search-control",  icon: ShieldCheck },
+  { name: "Users & Roles",    href: "/users",           icon: Users },
+  { name: "Operations Guide", href: "/guide",           icon: BookOpen },
 ];
 
 const agencyPortalNav = [
   { name: "Agency Dashboard", href: "/agency-dashboard", icon: PhoneCall },
-  { name: "Report Center", href: "/report-links", icon: Share2 },
+  { name: "Report Center",    href: "/report-links",     icon: Share2 },
 ];
 
 function NavItem({ item, onClick }: { item: { name: string; href: string; icon: any }; onClick?: () => void }) {
@@ -102,7 +106,7 @@ function NavItem({ item, onClick }: { item: { name: string; href: string; icon: 
   );
 }
 
-// Websites nav item reads context so it stays in sync with the header switcher
+// Websites nav item — reads context so it stays in sync with the header switcher
 function WebsitesNavItem({ onClick }: { onClick?: () => void }) {
   const websitesHref = useWebsitesHref();
   const [location] = useLocation();
@@ -128,7 +132,6 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
   const agencyPortalOnly = isAgencyRole(user);
 
   const handleLogout = async () => {
-    // Guard: logout mutation may not be ready if auth query is still loading
     if (!logout?.mutateAsync) {
       console.warn("[Nexus] logout mutation not ready");
       return;
@@ -172,10 +175,16 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
             <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
               Platform
             </div>
-            {staticNavigation.map((item) => (
+            {/* Top nav: Overview → Agencies → Accounts */}
+            {staticNavigationTop.map((item) => (
               <NavItem key={item.name} item={item} onClick={onNav} />
             ))}
+            {/* Websites directly under Accounts */}
             <WebsitesNavItem onClick={onNav} />
+            {/* Rest of platform nav */}
+            {staticNavigationBottom.map((item) => (
+              <NavItem key={item.name} item={item} onClick={onNav} />
+            ))}
             <Separator className="my-3" />
             <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
               Content
@@ -226,8 +235,6 @@ function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
   const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } =
     useAccountContext();
 
-  // Guard queryFn with a safe fallback so a 404 / missing route never
-  // throws `(void 0) is not a function` and crashes the whole layout.
   const { data: agencies = [] } = useQuery({
     queryKey: ["/api/agencies"],
     queryFn: () =>
@@ -320,7 +327,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const agencyPortalOnly = isAgencyRole(user);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Initialise from the persistent session store (window.__nexusSession)
   const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(
     () => loadFromStorage(STORAGE_KEY_AGENCY),
   );
