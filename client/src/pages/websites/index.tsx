@@ -15,13 +15,17 @@ import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useSearch } from "wouter";
 import { useForm } from "react-hook-form";
+import { useAccountContext } from "@/hooks/use-account-context";
 
 export default function WebsitesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const search = useSearch();
   const params = new URLSearchParams(search);
-  const accountIdFilter = params.get("accountId");
+  // URL param (from Accounts → View Websites) takes priority over header switcher
+  const urlAccountId = params.get("accountId");
+  const { selectedAccountId: ctxAccountId } = useAccountContext();
+  const accountIdFilter = urlAccountId ?? ctxAccountId ?? null;
 
   const [searchText, setSearchText] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -34,6 +38,7 @@ export default function WebsitesPage() {
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<any>();
 
+  // queryKey includes accountIdFilter so React Query auto-refetches when the header switcher changes
   const { data: websites = [], isLoading, isFetching: websitesFetching } = useQuery({
     queryKey: ["/api/websites", accountIdFilter],
     queryFn: () => api.get<any[]>(`/api/websites${accountIdFilter ? `?accountId=${accountIdFilter}` : ""}`),
@@ -142,13 +147,22 @@ export default function WebsitesPage() {
     w.name.toLowerCase().includes(searchText.toLowerCase())
   );
 
+  // Label showing which account is being filtered
+  const filterLabel = accountIdFilter
+    ? (accounts as any[]).find((a: any) => a.id === accountIdFilter)?.name ?? "Filtered Account"
+    : null;
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Websites</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">Manage target subdomains and deployment settings.</p>
+            <p className="text-muted-foreground text-sm mt-0.5">
+              {filterLabel
+                ? <>Showing websites for <span className="font-semibold text-foreground">{filterLabel}</span>. <Link href="/websites"><a className="text-primary underline underline-offset-2">Show all</a></Link></>
+                : "Manage target subdomains and deployment settings."}
+            </p>
           </div>
           <div className="flex gap-2">
             <Button
@@ -200,7 +214,7 @@ export default function WebsitesPage() {
               ) : filtered.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    No websites found.
+                    {accountIdFilter ? `No websites found for this account.` : "No websites found."}
                   </TableCell>
                 </TableRow>
               ) : filtered.map((w: any) => (
@@ -314,10 +328,13 @@ export default function WebsitesPage() {
           <form onSubmit={handleSubmit(d => create.mutate(d))} className="space-y-4">
             <div className="space-y-1.5">
               <Label>Account</Label>
-              <Select onValueChange={v => setValue("accountId", v)}>
+              <Select
+                defaultValue={accountIdFilter ?? undefined}
+                onValueChange={v => setValue("accountId", v)}
+              >
                 <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
                 <SelectContent>
-                  {accounts.map((a: any) => (
+                  {(accounts as any[]).map((a: any) => (
                     <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -400,7 +417,7 @@ export default function WebsitesPage() {
               </Select>
             </div>
 
-            {/* Brand & Contact — drives the header link and CTA section on all published pages */}
+            {/* Brand & Contact */}
             <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
               <p className="text-sm font-semibold">Brand &amp; Contact <span className="text-muted-foreground font-normal">(appears on every generated page)</span></p>
               <div className="space-y-1.5">
