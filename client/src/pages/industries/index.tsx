@@ -27,21 +27,30 @@ export default function IndustriesPage() {
 
   const industryName = watch("name");
 
+  // accounts query — always loaded, no account scope
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
     queryFn: () => api.get<any[]>("/api/accounts"),
   });
 
+  // selectedAccount: explicit override > first account in list
+  // Include accounts in deps so it re-derives after accounts load (prevents stale closure)
   const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
 
+  // industries: scoped to selectedAccount -> re-fetches on account change
   const { data: industries = [], isLoading } = useQuery({
     queryKey: ["/api/industries", selectedAccount],
-    queryFn: () => selectedAccount ? api.get<any[]>(`/api/accounts/${selectedAccount}/industries`) : Promise.resolve([]),
+    queryFn: () =>
+      selectedAccount
+        ? api.get<any[]>(`/api/accounts/${selectedAccount}/industries`)
+        : Promise.resolve([]),
     enabled: !!selectedAccount,
   });
 
+  // create: posts to the currently selected account
   const create = useMutation({
-    mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/industries`, data),
+    mutationFn: (data: any) =>
+      api.post(`/api/accounts/${selectedAccount}/industries`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/industries"] });
       setShowCreate(false);
@@ -49,7 +58,8 @@ export default function IndustriesPage() {
       setAiResult(null);
       toast({ title: "Industry created" });
     },
-    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    onError: (err: any) =>
+      toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
   const remove = useMutation({
@@ -68,7 +78,10 @@ export default function IndustriesPage() {
     setAiLoading(true);
     setAiResult(null);
     try {
-      const result = await api.post<any>(`/api/accounts/${selectedAccount}/industries/ai-suggest`, { name: industryName });
+      const result = await api.post<any>(
+        `/api/accounts/${selectedAccount}/industries/ai-suggest`,
+        { name: industryName }
+      );
       setAiResult(result);
     } catch (e: any) {
       toast({ title: "AI error", description: e.message, variant: "destructive" });
@@ -99,13 +112,14 @@ export default function IndustriesPage() {
           )}
         </div>
 
+        {/* Account switcher: connects this page to the correct account's industries */}
         <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
           <Select onValueChange={setOverrideAccount} value={selectedAccount}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
             <SelectContent>
-              {accounts.map((a: any) => (
+              {(accounts as any[]).map((a: any) => (
                 <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
               ))}
             </SelectContent>

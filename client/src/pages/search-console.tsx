@@ -16,6 +16,9 @@ type GscProperty = { id: string; accountId: string; accountName: string; website
 type PropertyType = "domain" | "url_prefix";
 type FormState = { accountId: string; websiteId: string; propertyType: PropertyType; propertyValue: string; propertyUrl: string; siteValue: string; siteUrl: string; adminGoogleUser: string; connectionStatus: string; sitemapSubmitted: boolean; indexedPages: string; clicks: string; impressions: string; averagePosition: string; coverageWarnings: string; };
 
+/** Empty config sentinel — prevents (void 0) crashes when API returns null/undefined */
+const EMPTY_CONFIG: GscConfig = { adminGoogleUser: "", accessMethod: "delegated_admin_user", clientInstruction: "" };
+
 function cleanDomain(value: string) { return String(value || "").trim().replace(/^sc-domain:/i, "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").toLowerCase(); }
 function cleanUrlValue(value: string) { return String(value || "").trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/^sc-domain:/i, ""); }
 function buildPropertyUrl(type: PropertyType, value: string) { const cleaned = type === "domain" ? cleanDomain(value) : cleanUrlValue(value); if (!cleaned) return ""; return type === "domain" ? `sc-domain:${cleaned}` : `https://${cleaned}`; }
@@ -49,7 +52,6 @@ async function getJson<T>(url: string): Promise<T> {
   try {
     json = await res.json();
   } catch {
-    // Response body was not JSON (e.g. HTML login redirect or 502 gateway page)
     if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText || ""}`.trim());
     throw new Error(`Unexpected non-JSON response from ${url} (${res.status})`);
   }
@@ -91,7 +93,7 @@ export default function SearchConsolePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [websites, setWebsites] = useState<Website[]>([]);
   const [properties, setProperties] = useState<GscProperty[]>([]);
-  const [config, setConfig] = useState<GscConfig>({ adminGoogleUser: "", accessMethod: "delegated_admin_user", clientInstruction: "" });
+  const [config, setConfig] = useState<GscConfig>(EMPTY_CONFIG);
   const [form, setForm] = useState<FormState>(baseForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,17 +117,30 @@ export default function SearchConsolePage() {
     setLoading(true);
     setError(null);
     try {
-      const [configRow, accountRows, websiteRows, propertyRows] = await Promise.all([
-        getJson<GscConfig>("/api/search-console/config"),
+      // All four queries are scoped: accounts -> websites -> GSC properties
+      // config is global (no account scope) but still guarded against null
+      const [rawConfig, accountRows, websiteRows, propertyRows] = await Promise.all([
+        getJson<GscConfig | null>("/api/search-console/config"),
         getJson<Account[]>("/api/accounts"),
         getJson<Website[]>("/api/websites"),
         getJson<GscProperty[]>("/api/search-console/properties"),
       ]);
+
+      // Guard: API may return null if no config row exists yet — use sentinel defaults
+      const configRow: GscConfig = (rawConfig && typeof rawConfig === "object")
+        ? { ...EMPTY_CONFIG, ...rawConfig }
+        : EMPTY_CONFIG;
+
       setConfig(configRow);
-      setAccounts(accountRows);
-      setWebsites(websiteRows);
-      setProperties(propertyRows);
-      setForm((prev) => ({ ...prev, adminGoogleUser: prev.adminGoogleUser || configRow.adminGoogleUser || "" }));
+      setAccounts(Array.isArray(accountRows) ? accountRows : []);
+      setWebsites(Array.isArray(websiteRows) ? websiteRows : []);
+      setProperties(Array.isArray(propertyRows) ? propertyRows : []);
+
+      // Only pre-fill adminGoogleUser if it hasn't been manually set
+      setForm((prev) => ({
+        ...prev,
+        adminGoogleUser: prev.adminGoogleUser || configRow.adminGoogleUser || "",
+      }));
     } catch (e: unknown) {
       setError(extractErrorMessage(e, "Failed to load Search Console data"));
     } finally {
@@ -139,7 +154,22 @@ export default function SearchConsolePage() {
   function setPropertyType(type: PropertyType) { setForm((prev) => ({ ...prev, propertyType: type, propertyValue: type === "domain" ? cleanDomain(prev.propertyValue || prev.propertyUrl) : cleanUrlValue(prev.propertyValue || prev.propertyUrl), propertyUrl: buildPropertyUrl(type, prev.propertyValue || prev.propertyUrl) })); }
   function setPropertyValue(value: string) { setForm((prev) => ({ ...prev, propertyValue: value, propertyUrl: buildPropertyUrl(prev.propertyType, value) })); }
   function setSiteValue(value: string) { setForm((prev) => ({ ...prev, siteValue: value, siteUrl: buildSiteUrl(value) })); }
-  function selectWebsite(websiteId: string) { const website = websites.find((w) => w.id === websiteId); const value = website?.domain ? cleanDomain(website.domain) : form.propertyValue; setForm((prev) => ({ ...prev, websiteId, propertyType: "domain", propertyValue: value, propertyUrl: buildPropertyUrl("domain", value), siteValue: value, siteUrl: buildSiteUrl(value) })); }
+
+  // When a website is selected: auto-fill property domain from website.domain (account-scoped)
+  function selectWebsite(websiteId: string) {
+    const website = websites.find((w) => w.id === websiteId);
+    const value = website?.domain ? cleanDomain(website.domain) : form.propertyValue;
+    setForm((prev) => ({
+      ...prev,
+      websiteId,
+      propertyType: "domain",
+      propertyValue: value,
+      propertyUrl: buildPropertyUrl("domain", value),
+      siteValue: value,
+      siteUrl: buildSiteUrl(value),
+    }));
+  }
+
   function reset() { setForm({ ...baseForm, adminGoogleUser: config.adminGoogleUser || "" }); setEditingId(null); }
   function edit(row: GscProperty) { const type = inferPropertyType(row.propertyUrl); const propertyValue = propertyValueFromUrl(row.propertyUrl); const siteValue = siteValueFromUrl(row.siteUrl) || propertyValue; setEditingId(row.id); setForm({ accountId: row.accountId, websiteId: row.websiteId || "", propertyType: type, propertyValue, propertyUrl: buildPropertyUrl(type, propertyValue), siteValue, siteUrl: buildSiteUrl(siteValue), adminGoogleUser: row.adminGoogleUser || config.adminGoogleUser || "", connectionStatus: row.connectionStatus || "access_pending", sitemapSubmitted: !!row.sitemapSubmitted, indexedPages: String(row.indexedPages || 0), clicks: String(row.clicks || 0), impressions: String(row.impressions || 0), averagePosition: row.averagePosition === null ? "" : String(row.averagePosition), coverageWarnings: String(row.coverageWarnings || 0) }); window.scrollTo({ top: 0, behavior: "smooth" }); }
   async function copyInstruction() { const text = config.clientInstruction || `Please add ${form.adminGoogleUser || config.adminGoogleUser} as a Full user in your Google Search Console property.`; await navigator.clipboard.writeText(text); setNotice("Client instruction copied."); setTimeout(() => setNotice(null), 3000); }
