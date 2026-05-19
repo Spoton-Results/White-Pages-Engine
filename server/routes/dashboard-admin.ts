@@ -3,13 +3,8 @@ import { db } from "../db";
 import { accounts, websites, trackedCalls, trackedLeads, bookedJobs } from "@shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { requireSuperAdmin } from "../auth";
-import { createIntentBuildJob, getLatestIntentBuildJob } from "../services/intent-build-job";
 
 const router = Router();
-
-function routeParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value[0] : value || "";
-}
 
 // GET /api/admin/dashboard/accounts
 router.get("/dashboard/accounts", requireSuperAdmin, async (req, res) => {
@@ -86,45 +81,6 @@ router.get("/dashboard/revenue-summary", requireSuperAdmin, async (req, res) => 
   } catch (error) {
     console.error("Error fetching revenue summary:", error);
     return res.status(500).json({ error: "Failed to fetch revenue summary" });
-  }
-});
-
-// POST /api/admin/websites/:websiteId/intent-build/run
-router.post("/websites/:websiteId/intent-build/run", requireSuperAdmin, async (req, res) => {
-  try {
-    const websiteId = routeParam(req.params.websiteId);
-    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
-    const result = await createIntentBuildJob(websiteId);
-    return res.status(result.alreadyRunning ? 200 : 202).json(result);
-  } catch (error: any) {
-    console.error("[intent-build] run failed:", error);
-    return res.status(500).json({ error: "Failed to start intent build", message: error?.message });
-  }
-});
-
-// GET /api/admin/websites/:websiteId/intent-build/status
-router.get("/websites/:websiteId/intent-build/status", requireSuperAdmin, async (req, res) => {
-  try {
-    const websiteId = routeParam(req.params.websiteId);
-    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
-    const job = await getLatestIntentBuildJob(websiteId);
-    return res.json({ job });
-  } catch (error: any) {
-    console.error("[intent-build] status failed:", error);
-    return res.status(500).json({ error: "Failed to fetch intent build status", message: error?.message });
-  }
-});
-
-// GET /api/admin/websites/:websiteId/intent-build/report
-router.get("/websites/:websiteId/intent-build/report", requireSuperAdmin, async (req, res) => {
-  try {
-    const websiteId = routeParam(req.params.websiteId);
-    if (!websiteId) return res.status(400).json({ error: "Missing websiteId" });
-    const job = await getLatestIntentBuildJob(websiteId);
-    return res.json({ job, report: job?.result_json ?? job?.resultJson ?? null });
-  } catch (error: any) {
-    console.error("[intent-build] report failed:", error);
-    return res.status(500).json({ error: "Failed to fetch intent build report", message: error?.message });
   }
 });
 

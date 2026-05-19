@@ -4,8 +4,8 @@ import {
   LayoutDashboard, Users, Globe,
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
-  Handshake, FlaskConical, PhoneCall, GitBranch, ClipboardCheck, Share2, SearchCheck,
+  Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
+  ChevronDown, Handshake, FlaskConical, PhoneCall,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -29,34 +29,18 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-function isAgencyRole(user: any) {
-  const role = String(user?.role || "").toLowerCase();
-  return role === "agency" || role === "agency_admin" || role === "agency_user";
-}
-
-// Websites nav item is dynamic — appends ?accountId= when an account is selected
-function useWebsitesHref() {
-  const { selectedAccountId } = useAccountContext();
-  return selectedAccountId ? `/websites?accountId=${selectedAccountId}` : "/websites";
-}
-
-// Platform nav — Websites is injected dynamically after Accounts via WebsitesNavItem
-const staticNavigationTop = [
-  { name: "Overview",      href: "/",              icon: LayoutDashboard },
-  { name: "Agencies",      href: "/agencies",      icon: Handshake },
-  { name: "Accounts",      href: "/accounts",      icon: Building2 },
-  // << Websites is rendered here via WebsitesNavItem >>
-];
-
-const staticNavigationBottom = [
-  { name: "Client Domains",  href: "/client-domains",  icon: Globe },
-  { name: "Brand Profiles",  href: "/brand-profiles",  icon: Briefcase },
-  { name: "Industries",      href: "/industries",      icon: Factory },
-  { name: "Locations",       href: "/locations",       icon: MapPin },
-  { name: "Services",        href: "/services",        icon: Wrench },
-  { name: "Query Clusters",  href: "/query-clusters",  icon: SearchIcon },
-  { name: "Blueprints",      href: "/blueprints",      icon: Layers },
-  { name: "Hub Pages",       href: "/hub-pages",       icon: Network },
+const navigation = [
+  { name: "Overview", href: "/", icon: LayoutDashboard },
+  { name: "Agencies", href: "/agencies", icon: Handshake },
+  { name: "Accounts", href: "/accounts", icon: Building2 },
+  { name: "Websites", href: "/websites", icon: Globe },
+  { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
+  { name: "Industries", href: "/industries", icon: Factory },
+  { name: "Locations", href: "/locations", icon: MapPin },
+  { name: "Services", href: "/services", icon: Wrench },
+  { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
+  { name: "Blueprints", href: "/blueprints", icon: Layers },
+  { name: "Hub Pages", href: "/hub-pages", icon: Network },
 ];
 
 const testingNav = [
@@ -64,39 +48,31 @@ const testingNav = [
 ];
 
 const contentNav = [
-  { name: "Published Pages",  href: "/published",       icon: Globe },
-  { name: "Leads",            href: "/leads",           icon: Inbox },
-  { name: "Agency Dashboard", href: "/agency-dashboard",icon: PhoneCall },
-  { name: "Report Center",    href: "/report-links",    icon: Share2 },
-  { name: "Operations",       href: "/operations",      icon: ShieldCheck },
-  { name: "Search Console",   href: "/search-console",  icon: SearchCheck },
-  { name: "Bulk Generator",   href: "/bulk-generator",  icon: Zap },
-  { name: "Generation Jobs",  href: "/jobs",            icon: BarChart3 },
-  { name: "Sitemap Manager",  href: "/sitemaps",        icon: Map },
-  { name: "Internal Links",   href: "/internal-links",  icon: Link2 },
-  { name: "Intent Build",     href: "/intent-build",    icon: GitBranch },
-  { name: "Action Review",    href: "/action-review",   icon: ClipboardCheck },
-  { name: "Automation",       href: "/automation",      icon: Bot },
-  { name: "Bank Health",      href: "/bank-health",     icon: Activity },
-  { name: "SEO Control",      href: "/search-control",  icon: ShieldCheck },
-  { name: "Users & Roles",    href: "/users",           icon: Users },
-  { name: "Operations Guide", href: "/guide",           icon: BookOpen },
-];
-
-const agencyPortalNav = [
-  { name: "Agency Dashboard", href: "/agency-dashboard", icon: PhoneCall },
-  { name: "Report Center",    href: "/report-links",     icon: Share2 },
+  { name: "Published Pages", href: "/published", icon: Globe },
+  { name: "Leads", href: "/leads", icon: Inbox },
+  { name: "Leads & Conversions", href: "/agency-dashboard", icon: PhoneCall },
+  { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
+  { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
+  { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
+  { name: "Internal Links", href: "/internal-links", icon: Link2 },
+  { name: "Automation", href: "/automation", icon: Bot },
+  { name: "Bank Health", href: "/bank-health", icon: Activity },
+  { name: "SEO Control", href: "/search-control", icon: ShieldCheck },
+  { name: "Users & Roles", href: "/users", icon: Users },
+  { name: "Operations Guide", href: "/guide", icon: BookOpen },
 ];
 
 function NavItem({ item, onClick }: { item: { name: string; href: string; icon: any }; onClick?: () => void }) {
   const [location] = useLocation();
-  const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href.split("?")[0]));
+  const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
   return (
     <Link href={item.href}>
       <a
         onClick={onClick}
         className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-          isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          isActive
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
         }`}
       >
         <item.icon className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
@@ -106,40 +82,15 @@ function NavItem({ item, onClick }: { item: { name: string; href: string; icon: 
   );
 }
 
-// Websites nav item — reads context so it stays in sync with the header switcher
-function WebsitesNavItem({ onClick }: { onClick?: () => void }) {
-  const websitesHref = useWebsitesHref();
-  const [location] = useLocation();
-  const isActive = location === "/websites" || location.startsWith("/websites");
-  return (
-    <Link href={websitesHref}>
-      <a
-        onClick={onClick}
-        className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-          isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-        }`}
-      >
-        <Globe className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-        Websites
-      </a>
-    </Link>
-  );
-}
-
 function SidebarContent({ onNav }: { onNav?: () => void }) {
   const { user, logout } = useAuth();
   const { toast } = useToast();
-  const agencyPortalOnly = isAgencyRole(user);
 
   const handleLogout = async () => {
-    if (!logout?.mutateAsync) {
-      console.warn("[Nexus] logout mutation not ready");
-      return;
-    }
     try {
       await logout.mutateAsync();
     } catch (err: any) {
-      toast({ title: "Logout failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+      toast({ title: "Logout failed", description: err.message, variant: "destructive" });
     }
   };
 
@@ -150,79 +101,45 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
           <div className="size-7 rounded bg-primary flex items-center justify-center text-primary-foreground">
             <Globe className="size-4" />
           </div>
-          <span>{agencyPortalOnly ? "Nexus Reports" : "Nexus"}</span>
+          <span>Nexus</span>
         </div>
       </div>
 
-      {!agencyPortalOnly && (
-        <div className="md:hidden px-3 py-3 border-b">
-          <AgencyClientSwitcher stacked />
-        </div>
-      )}
+      <div className="md:hidden px-3 py-3 border-b">
+        <AgencyClientSwitcher stacked />
+      </div>
 
       <div className="flex-1 py-4 px-3 flex flex-col gap-0.5 overflow-y-auto">
-        {agencyPortalOnly ? (
-          <>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
-              Client Reporting
-            </div>
-            {agencyPortalNav.map((item) => (
-              <NavItem key={item.name} item={item} onClick={onNav} />
-            ))}
-          </>
-        ) : (
-          <>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
-              Platform
-            </div>
-            {/* Top nav: Overview → Agencies → Accounts */}
-            {staticNavigationTop.map((item) => (
-              <NavItem key={item.name} item={item} onClick={onNav} />
-            ))}
-            {/* Websites directly under Accounts */}
-            <WebsitesNavItem onClick={onNav} />
-            {/* Rest of platform nav */}
-            {staticNavigationBottom.map((item) => (
-              <NavItem key={item.name} item={item} onClick={onNav} />
-            ))}
-            <Separator className="my-3" />
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
-              Content
-            </div>
-            {contentNav.map((item) => (
-              <NavItem key={item.name} item={item} onClick={onNav} />
-            ))}
-            <Separator className="my-3" />
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
-              Testing
-            </div>
-            {testingNav.map((item) => (
-              <NavItem key={item.name} item={item} onClick={onNav} />
-            ))}
-          </>
-        )}
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+          Platform
+        </div>
+        {navigation.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+
+        <Separator className="my-3" />
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+          Content
+        </div>
+        {contentNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+
+        <Separator className="my-3" />
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+          Testing
+        </div>
+        {testingNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
       </div>
 
       <div className="p-3 mt-auto border-t shrink-0">
         <div className="flex items-center gap-3 px-2 py-1.5">
           <Avatar className="size-7">
             <AvatarFallback className="text-xs bg-primary/10 text-primary">
-              {user?.username?.slice(0, 2).toUpperCase() ?? "??"}
+              {user?.username?.slice(0, 2).toUpperCase() || "??"}
             </AvatarFallback>
           </Avatar>
           <div className="flex flex-col flex-1 min-w-0">
-            <span className="text-sm font-medium leading-none truncate">{user?.username ?? "..."}</span>
-            <span className="text-xs text-muted-foreground truncate">
-              {agencyPortalOnly ? "agency reporting" : user?.role ?? ""}
-            </span>
+            <span className="text-sm font-medium leading-none truncate">{user?.username || "..."}</span>
+            <span className="text-xs text-muted-foreground truncate">{user?.role || ""}</span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground"
-            onClick={handleLogout}
-            data-testid="button-logout"
-          >
+          <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={handleLogout} data-testid="button-logout">
             <LogOut className="size-3.5" />
           </Button>
         </div>
@@ -232,27 +149,21 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
 }
 
 function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
-  const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } =
-    useAccountContext();
+  const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } = useAccountContext();
 
   const { data: agencies = [] } = useQuery({
     queryKey: ["/api/agencies"],
-    queryFn: () =>
-      api.get<any[]>("/api/agencies").catch(() => [] as any[]),
+    queryFn: () => api.get<any[]>("/api/agencies"),
   });
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["/api/accounts"],
-    queryFn: () =>
-      api.get<any[]>("/api/accounts").catch(() => [] as any[]),
+    queryFn: () => api.get<any[]>("/api/accounts"),
   });
 
-  const agencyList  = Array.isArray(agencies) ? (agencies as any[]) : [];
-  const accountList = Array.isArray(accounts) ? (accounts as any[]) : [];
-
   const filteredAccounts = selectedAgencyId
-    ? accountList.filter((a: any) => a.agencyId === selectedAgencyId)
-    : accountList;
+    ? (accounts as any[]).filter((a: any) => a.agencyId === selectedAgencyId)
+    : (accounts as any[]);
 
   const handleAgencyChange = (val: string) => {
     const newAgencyId = val === "all" ? null : val;
@@ -264,26 +175,18 @@ function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
     setSelectedAccountId(val === "all" ? null : val);
   };
 
-  const selectedAgencyLabel =
-    selectedAgencyId
-      ? agencyList.find((a: any) => a.id === selectedAgencyId)?.name ?? "Agency"
-      : "All Agencies";
+  const selectedAgencyLabel = selectedAgencyId
+    ? (agencies as any[]).find((a: any) => a.id === selectedAgencyId)?.name ?? "Agency"
+    : "All Agencies";
 
-  const selectedAccountLabel =
-    selectedAccountId
-      ? accountList.find((a: any) => a.id === selectedAccountId)?.name ?? "Client"
-      : "All Clients";
+  const selectedAccountLabel = selectedAccountId
+    ? (accounts as any[]).find((a: any) => a.id === selectedAccountId)?.name ?? "Client"
+    : "All Clients";
 
   return (
-    <div
-      className={stacked ? "flex flex-col gap-2 w-full" : "flex items-center gap-2"}
-      data-testid="agency-client-switcher"
-    >
+    <div className={stacked ? "flex flex-col gap-2 w-full" : "flex items-center gap-2"} data-testid="agency-client-switcher">
       <Select value={selectedAgencyId ?? "all"} onValueChange={handleAgencyChange}>
-        <SelectTrigger
-          className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`}
-          data-testid="select-agency"
-        >
+        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-agency">
           <Handshake className="size-3 text-muted-foreground shrink-0" />
           <SelectValue placeholder="All Agencies">
             <span className="truncate">{selectedAgencyLabel}</span>
@@ -291,19 +194,14 @@ function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Agencies</SelectItem>
-          {agencyList.map((a: any) => (
-            <SelectItem key={a.id} value={a.id}>
-              {a.name}
-            </SelectItem>
+          {(agencies as any[]).map((a: any) => (
+            <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>
 
       <Select value={selectedAccountId ?? "all"} onValueChange={handleAccountChange}>
-        <SelectTrigger
-          className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`}
-          data-testid="select-client"
-        >
+        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-client">
           <Building2 className="size-3 text-muted-foreground shrink-0" />
           <SelectValue placeholder="All Clients">
             <span className="truncate">{selectedAccountLabel}</span>
@@ -312,9 +210,7 @@ function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
         <SelectContent>
           <SelectItem value="all">All Clients</SelectItem>
           {filteredAccounts.map((a: any) => (
-            <SelectItem key={a.id} value={a.id}>
-              {a.name}
-            </SelectItem>
+            <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -323,16 +219,9 @@ function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user } = useAuth();
-  const agencyPortalOnly = isAgencyRole(user);
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(
-    () => loadFromStorage(STORAGE_KEY_AGENCY),
-  );
-  const [selectedAccountId, setSelectedAccountIdRaw] = useState<string | null>(
-    () => loadFromStorage(STORAGE_KEY_ACCOUNT),
-  );
+  const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_AGENCY));
+  const [selectedAccountId, setSelectedAccountIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_ACCOUNT));
 
   const setSelectedAgencyId = useCallback((id: string | null) => {
     setSelectedAgencyIdRaw(id);
@@ -345,16 +234,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, []);
 
   return (
-    <AccountContext.Provider
-      value={{ selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId }}
-    >
+    <AccountContext.Provider value={{ selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId }}>
       <div className="min-h-screen bg-background flex">
-        {/* Desktop sidebar */}
+        {/* Desktop Sidebar */}
         <aside className="hidden md:flex w-60 flex-col border-r bg-card sticky top-0 h-screen z-40 shrink-0">
           <SidebarContent />
         </aside>
 
-        {/* Mobile drawer */}
+        {/* Mobile Drawer */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
             <SheetHeader className="sr-only">
@@ -364,8 +251,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </SheetContent>
         </Sheet>
 
+        {/* Main Content */}
         <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
           <header className="h-14 border-b bg-background/95 backdrop-blur sticky top-0 z-30 flex items-center justify-between px-4 gap-3">
+            {/* Hamburger — mobile only */}
             <Button
               variant="ghost"
               size="icon"
@@ -375,26 +264,31 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               <Menu className="size-5" />
             </Button>
+
+            {/* Logo — mobile only (desktop shows in sidebar) */}
             <div className="md:hidden flex items-center gap-2 font-bold text-base">
               <div className="size-6 rounded bg-primary flex items-center justify-center text-primary-foreground">
                 <Globe className="size-3.5" />
               </div>
-              <span>{agencyPortalOnly ? "Nexus Reports" : "Nexus"}</span>
+              <span>Nexus</span>
             </div>
+
             <div className="flex-1 hidden md:block" />
+
             <div className="flex items-center gap-3">
-              {!agencyPortalOnly && (
-                <div className="hidden md:flex">
-                  <AgencyClientSwitcher />
-                </div>
-              )}
+              <div className="hidden md:flex">
+                <AgencyClientSwitcher />
+              </div>
               <Button variant="ghost" size="icon" className="text-muted-foreground size-8">
                 <Bell className="size-4" />
               </Button>
             </div>
           </header>
+
           <div className="flex-1 overflow-auto bg-muted/20">
-            <div className="p-4 md:p-6 max-w-7xl mx-auto">{children}</div>
+            <div className="p-4 md:p-6 max-w-7xl mx-auto">
+              {children}
+            </div>
           </div>
         </main>
       </div>
