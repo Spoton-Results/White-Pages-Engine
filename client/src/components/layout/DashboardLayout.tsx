@@ -44,7 +44,7 @@ const staticNavigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Agencies", href: "/agencies", icon: Handshake },
   { name: "Accounts", href: "/accounts", icon: Building2 },
-  // Websites is rendered separately via DynamicWebsitesNavItem
+  // Websites is rendered separately via WebsitesNavItem
   { name: "Client Domains", href: "/client-domains", icon: Globe },
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
   { name: "Industries", href: "/industries", icon: Factory },
@@ -89,7 +89,12 @@ function NavItem({ item, onClick }: { item: { name: string; href: string; icon: 
   const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href.split("?")[0]));
   return (
     <Link href={item.href}>
-      <a onClick={onClick} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+      <a
+        onClick={onClick}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`}
+      >
         <item.icon className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
         {item.name}
       </a>
@@ -104,7 +109,12 @@ function WebsitesNavItem({ onClick }: { onClick?: () => void }) {
   const isActive = location === "/websites" || location.startsWith("/websites");
   return (
     <Link href={websitesHref}>
-      <a onClick={onClick} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+      <a
+        onClick={onClick}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`}
+      >
         <Globe className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
         Websites
       </a>
@@ -118,10 +128,15 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
   const agencyPortalOnly = isAgencyRole(user);
 
   const handleLogout = async () => {
+    // Guard: logout mutation may not be ready if auth query is still loading
+    if (!logout?.mutateAsync) {
+      console.warn("[Nexus] logout mutation not ready");
+      return;
+    }
     try {
       await logout.mutateAsync();
     } catch (err: any) {
-      toast({ title: "Logout failed", description: err.message, variant: "destructive" });
+      toast({ title: "Logout failed", description: err?.message ?? "Unknown error", variant: "destructive" });
     }
   };
 
@@ -129,39 +144,78 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
     <div className="flex flex-col h-full">
       <div className="h-14 flex items-center px-4 border-b shrink-0">
         <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
-          <div className="size-7 rounded bg-primary flex items-center justify-center text-primary-foreground"><Globe className="size-4" /></div>
+          <div className="size-7 rounded bg-primary flex items-center justify-center text-primary-foreground">
+            <Globe className="size-4" />
+          </div>
           <span>{agencyPortalOnly ? "Nexus Reports" : "Nexus"}</span>
         </div>
       </div>
 
-      {!agencyPortalOnly && <div className="md:hidden px-3 py-3 border-b"><AgencyClientSwitcher stacked /></div>}
+      {!agencyPortalOnly && (
+        <div className="md:hidden px-3 py-3 border-b">
+          <AgencyClientSwitcher stacked />
+        </div>
+      )}
 
       <div className="flex-1 py-4 px-3 flex flex-col gap-0.5 overflow-y-auto">
         {agencyPortalOnly ? (
           <>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">Client Reporting</div>
-            {agencyPortalNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+              Client Reporting
+            </div>
+            {agencyPortalNav.map((item) => (
+              <NavItem key={item.name} item={item} onClick={onNav} />
+            ))}
           </>
         ) : (
           <>
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">Platform</div>
-            {staticNavigation.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+              Platform
+            </div>
+            {staticNavigation.map((item) => (
+              <NavItem key={item.name} item={item} onClick={onNav} />
+            ))}
             <WebsitesNavItem onClick={onNav} />
             <Separator className="my-3" />
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">Content</div>
-            {contentNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+              Content
+            </div>
+            {contentNav.map((item) => (
+              <NavItem key={item.name} item={item} onClick={onNav} />
+            ))}
             <Separator className="my-3" />
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">Testing</div>
-            {testingNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+              Testing
+            </div>
+            {testingNav.map((item) => (
+              <NavItem key={item.name} item={item} onClick={onNav} />
+            ))}
           </>
         )}
       </div>
 
       <div className="p-3 mt-auto border-t shrink-0">
         <div className="flex items-center gap-3 px-2 py-1.5">
-          <Avatar className="size-7"><AvatarFallback className="text-xs bg-primary/10 text-primary">{user?.username?.slice(0, 2).toUpperCase() || "??"}</AvatarFallback></Avatar>
-          <div className="flex flex-col flex-1 min-w-0"><span className="text-sm font-medium leading-none truncate">{user?.username || "..."}</span><span className="text-xs text-muted-foreground truncate">{agencyPortalOnly ? "agency reporting" : user?.role || ""}</span></div>
-          <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={handleLogout} data-testid="button-logout"><LogOut className="size-3.5" /></Button>
+          <Avatar className="size-7">
+            <AvatarFallback className="text-xs bg-primary/10 text-primary">
+              {user?.username?.slice(0, 2).toUpperCase() ?? "??"}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex flex-col flex-1 min-w-0">
+            <span className="text-sm font-medium leading-none truncate">{user?.username ?? "..."}</span>
+            <span className="text-xs text-muted-foreground truncate">
+              {agencyPortalOnly ? "agency reporting" : user?.role ?? ""}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground"
+            onClick={handleLogout}
+            data-testid="button-logout"
+          >
+            <LogOut className="size-3.5" />
+          </Button>
         </div>
       </div>
     </div>
@@ -169,34 +223,92 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
 }
 
 function AgencyClientSwitcher({ stacked = false }: { stacked?: boolean }) {
-  const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } = useAccountContext();
-  const { data: agencies = [] } = useQuery({ queryKey: ["/api/agencies"], queryFn: () => api.get<any[]>("/api/agencies") });
-  const { data: accounts = [] } = useQuery({ queryKey: ["/api/accounts"], queryFn: () => api.get<any[]>("/api/accounts") });
-  const filteredAccounts = selectedAgencyId ? (accounts as any[]).filter((a: any) => a.agencyId === selectedAgencyId) : (accounts as any[]);
-  const handleAgencyChange = (val: string) => { const newAgencyId = val === "all" ? null : val; setSelectedAgencyId(newAgencyId); setSelectedAccountId(null); };
-  const handleAccountChange = (val: string) => { setSelectedAccountId(val === "all" ? null : val); };
-  const selectedAgencyLabel = selectedAgencyId ? (agencies as any[]).find((a: any) => a.id === selectedAgencyId)?.name ?? "Agency" : "All Agencies";
-  const selectedAccountLabel = selectedAccountId ? (accounts as any[]).find((a: any) => a.id === selectedAccountId)?.name ?? "Client" : "All Clients";
+  const { selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId } =
+    useAccountContext();
+
+  // Guard queryFn with a safe fallback so a 404 / missing route never
+  // throws `(void 0) is not a function` and crashes the whole layout.
+  const { data: agencies = [] } = useQuery({
+    queryKey: ["/api/agencies"],
+    queryFn: () =>
+      api.get<any[]>("/api/agencies").catch(() => [] as any[]),
+  });
+
+  const { data: accounts = [] } = useQuery({
+    queryKey: ["/api/accounts"],
+    queryFn: () =>
+      api.get<any[]>("/api/accounts").catch(() => [] as any[]),
+  });
+
+  const agencyList  = Array.isArray(agencies) ? (agencies as any[]) : [];
+  const accountList = Array.isArray(accounts) ? (accounts as any[]) : [];
+
+  const filteredAccounts = selectedAgencyId
+    ? accountList.filter((a: any) => a.agencyId === selectedAgencyId)
+    : accountList;
+
+  const handleAgencyChange = (val: string) => {
+    const newAgencyId = val === "all" ? null : val;
+    setSelectedAgencyId(newAgencyId);
+    setSelectedAccountId(null);
+  };
+
+  const handleAccountChange = (val: string) => {
+    setSelectedAccountId(val === "all" ? null : val);
+  };
+
+  const selectedAgencyLabel =
+    selectedAgencyId
+      ? agencyList.find((a: any) => a.id === selectedAgencyId)?.name ?? "Agency"
+      : "All Agencies";
+
+  const selectedAccountLabel =
+    selectedAccountId
+      ? accountList.find((a: any) => a.id === selectedAccountId)?.name ?? "Client"
+      : "All Clients";
+
   return (
-    <div className={stacked ? "flex flex-col gap-2 w-full" : "flex items-center gap-2"} data-testid="agency-client-switcher">
+    <div
+      className={stacked ? "flex flex-col gap-2 w-full" : "flex items-center gap-2"}
+      data-testid="agency-client-switcher"
+    >
       <Select value={selectedAgencyId ?? "all"} onValueChange={handleAgencyChange}>
-        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-agency">
+        <SelectTrigger
+          className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`}
+          data-testid="select-agency"
+        >
           <Handshake className="size-3 text-muted-foreground shrink-0" />
-          <SelectValue placeholder="All Agencies"><span className="truncate">{selectedAgencyLabel}</span></SelectValue>
+          <SelectValue placeholder="All Agencies">
+            <span className="truncate">{selectedAgencyLabel}</span>
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Agencies</SelectItem>
-          {(agencies as any[]).map((a: any) => (<SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>))}
+          {agencyList.map((a: any) => (
+            <SelectItem key={a.id} value={a.id}>
+              {a.name}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
+
       <Select value={selectedAccountId ?? "all"} onValueChange={handleAccountChange}>
-        <SelectTrigger className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`} data-testid="select-client">
+        <SelectTrigger
+          className={`h-8 text-xs gap-1 ${stacked ? "w-full" : "w-[160px]"}`}
+          data-testid="select-client"
+        >
           <Building2 className="size-3 text-muted-foreground shrink-0" />
-          <SelectValue placeholder="All Clients"><span className="truncate">{selectedAccountLabel}</span></SelectValue>
+          <SelectValue placeholder="All Clients">
+            <span className="truncate">{selectedAccountLabel}</span>
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Clients</SelectItem>
-          {filteredAccounts.map((a: any) => (<SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>))}
+          {filteredAccounts.map((a: any) => (
+            <SelectItem key={a.id} value={a.id}>
+              {a.name}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>
@@ -207,24 +319,62 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user } = useAuth();
   const agencyPortalOnly = isAgencyRole(user);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_AGENCY));
-  const [selectedAccountId, setSelectedAccountIdRaw] = useState<string | null>(() => loadFromStorage(STORAGE_KEY_ACCOUNT));
-  const setSelectedAgencyId = useCallback((id: string | null) => { setSelectedAgencyIdRaw(id); saveToStorage(STORAGE_KEY_AGENCY, id); }, []);
-  const setSelectedAccountId = useCallback((id: string | null) => { setSelectedAccountIdRaw(id); saveToStorage(STORAGE_KEY_ACCOUNT, id); }, []);
+
+  // Initialise from the persistent session store (window.__nexusSession)
+  const [selectedAgencyId, setSelectedAgencyIdRaw] = useState<string | null>(
+    () => loadFromStorage(STORAGE_KEY_AGENCY),
+  );
+  const [selectedAccountId, setSelectedAccountIdRaw] = useState<string | null>(
+    () => loadFromStorage(STORAGE_KEY_ACCOUNT),
+  );
+
+  const setSelectedAgencyId = useCallback((id: string | null) => {
+    setSelectedAgencyIdRaw(id);
+    saveToStorage(STORAGE_KEY_AGENCY, id);
+  }, []);
+
+  const setSelectedAccountId = useCallback((id: string | null) => {
+    setSelectedAccountIdRaw(id);
+    saveToStorage(STORAGE_KEY_ACCOUNT, id);
+  }, []);
+
   return (
-    <AccountContext.Provider value={{ selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId }}>
+    <AccountContext.Provider
+      value={{ selectedAgencyId, selectedAccountId, setSelectedAgencyId, setSelectedAccountId }}
+    >
       <div className="min-h-screen bg-background flex">
-        <aside className="hidden md:flex w-60 flex-col border-r bg-card sticky top-0 h-screen z-40 shrink-0"><SidebarContent /></aside>
+        {/* Desktop sidebar */}
+        <aside className="hidden md:flex w-60 flex-col border-r bg-card sticky top-0 h-screen z-40 shrink-0">
+          <SidebarContent />
+        </aside>
+
+        {/* Mobile drawer */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
-            <SheetHeader className="sr-only"><SheetTitle>Navigation</SheetTitle></SheetHeader>
+            <SheetHeader className="sr-only">
+              <SheetTitle>Navigation</SheetTitle>
+            </SheetHeader>
             <SidebarContent onNav={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
+
         <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
           <header className="h-14 border-b bg-background/95 backdrop-blur sticky top-0 z-30 flex items-center justify-between px-4 gap-3">
-            <Button variant="ghost" size="icon" className="md:hidden shrink-0" onClick={() => setMobileOpen(true)} data-testid="button-mobile-menu"><Menu className="size-5" /></Button>
-            <div className="md:hidden flex items-center gap-2 font-bold text-base"><div className="size-6 rounded bg-primary flex items-center justify-center text-primary-foreground"><Globe className="size-3.5" /></div><span>{agencyPortalOnly ? "Nexus Reports" : "Nexus"}</span></div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden shrink-0"
+              onClick={() => setMobileOpen(true)}
+              data-testid="button-mobile-menu"
+            >
+              <Menu className="size-5" />
+            </Button>
+            <div className="md:hidden flex items-center gap-2 font-bold text-base">
+              <div className="size-6 rounded bg-primary flex items-center justify-center text-primary-foreground">
+                <Globe className="size-3.5" />
+              </div>
+              <span>{agencyPortalOnly ? "Nexus Reports" : "Nexus"}</span>
+            </div>
             <div className="flex-1 hidden md:block" />
             <div className="flex items-center gap-3">
               {!agencyPortalOnly && (
@@ -232,7 +382,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   <AgencyClientSwitcher />
                 </div>
               )}
-              <Button variant="ghost" size="icon" className="text-muted-foreground size-8"><Bell className="size-4" /></Button>
+              <Button variant="ghost" size="icon" className="text-muted-foreground size-8">
+                <Bell className="size-4" />
+              </Button>
             </div>
           </header>
           <div className="flex-1 overflow-auto bg-muted/20">

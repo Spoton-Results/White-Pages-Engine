@@ -1,13 +1,18 @@
 /**
  * use-account-context.ts
  *
- * NOTE: localStorage is blocked in the Railway sandboxed iframe environment —
- * calls silently return null on every page load, causing all "Select account"
- * dropdowns to reset to empty even though the accounts exist in the database.
+ * Agency / Client selection that survives:
+ *   - React StrictMode double-renders
+ *   - Vite HMR module re-evaluations
+ *   - wouter route changes
+ *   - Railway sandboxed iframe (localStorage is blocked)
  *
- * Fix: use a module-level in-memory Map instead. Selection persists for the
- * lifetime of the browser session (survives React re-renders and route changes)
- * without requiring any storage access.
+ * Strategy: store on window.__nexusSession (a plain object attached to the
+ * global). This is the only reliable cross-render, cross-HMR store that
+ * works without localStorage in an iframe sandbox.
+ *
+ * Falls back to localStorage for local-dev convenience when window is
+ * available and localStorage is not blocked.
  */
 import { createContext, useContext } from "react";
 
@@ -29,46 +34,59 @@ export function useAccountContext(): AccountContextValue {
   return useContext(AccountContext);
 }
 
-// ── In-memory session store (replaces localStorage) ──────────────────────────────
-// Module-level Map: lives as long as the JS bundle is loaded in the tab.
-// Cleared on hard refresh / tab close — acceptable for admin session state.
-const _memStore = new Map<string, string>();
-
-export const STORAGE_KEY_AGENCY = "nexus_selected_agency_id";
+// ── Keys ────────────────────────────────────────────────────────────────────
+export const STORAGE_KEY_AGENCY  = "nexus_selected_agency_id";
 export const STORAGE_KEY_ACCOUNT = "nexus_selected_account_id";
 
+// ── Global session singleton ─────────────────────────────────────────────────
+// Attach to window so it is shared across HMR reloads and React StrictMode
+// double-invocations. Falls back to a module Map when window is unavailable
+// (e.g. SSR / test environments).
+type NexusSession = { [key: string]: string };
+
+function getSession(): NexusSession {
+  if (typeof window === "undefined") return {};
+  if (!(window as any).__nexusSession) {
+    (window as any).__nexusSession = {} as NexusSession;
+  }
+  return (window as any).__nexusSession as NexusSession;
+}
+
 /**
- * Read a value from the in-memory store.
- * Falls back to localStorage as a best-effort secondary source
- * (e.g. local dev where localStorage works fine).
+ * Read a value — checks window.__nexusSession first, then localStorage.
  */
 export function loadFromStorage(key: string): string | null {
-  // In-memory first (Railway / sandboxed environments)
-  const memVal = _memStore.get(key);
-  if (memVal !== undefined) return memVal;
+  // 1. In-memory window session (primary — always works in Railway iframe)
+  const session = getSession();
+  if (key in session) return session[key];
 
-  // localStorage fallback (local dev)
+  // 2. localStorage fallback (local dev where it's not blocked)
   try {
-    return localStorage.getItem(key);
+    const val = localStorage.getItem(key);
+    if (val !== null) {
+      // Promote to session store so future reads are fast
+      session[key] = val;
+    }
+    return val;
   } catch {
     return null;
   }
 }
 
 /**
- * Write a value to both the in-memory store and localStorage.
- * The in-memory write always succeeds; the localStorage write may
- * silently fail in sandboxed environments — that is expected and safe.
+ * Write a value — always writes to window.__nexusSession; also tries
+ * localStorage as a best-effort secondary store for local dev.
  */
 export function saveToStorage(key: string, value: string | null): void {
-  // Always update in-memory store
+  const session = getSession();
+
   if (value === null) {
-    _memStore.delete(key);
+    delete session[key];
   } else {
-    _memStore.set(key, value);
+    session[key] = value;
   }
 
-  // Best-effort localStorage sync (for local dev convenience)
+  // Best-effort localStorage sync
   try {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
