@@ -1,9 +1,13 @@
--- Migration 0003: page_version triggers & functions
--- Previously ran as runtime DDL on every server boot in
--- server/services/bulk-transaction-safety.ts
--- Now idempotent via CREATE OR REPLACE / DROP IF EXISTS.
+-- ============================================================
+-- Migration 0003 — Page Version DB Triggers
+-- Referenced by: server/services/bulk-transaction-safety.ts
+--
+-- After this migration runs on a DB, the fallback guard in
+-- ensureBulkTransactionSafety() becomes a pure no-op.
+-- The console.warn "Triggers missing" will stop appearing.
+-- ============================================================
 
--- ── Function: enforce single active version per page ────────────────────────
+-- Function: enforce single active version per page
 CREATE OR REPLACE FUNCTION nexus_page_versions_single_active()
 RETURNS trigger AS $$
 BEGIN
@@ -18,7 +22,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ── Function: auto-create placeholder version on page insert ─────────────────
+-- Function: auto-insert placeholder version on new page
 CREATE OR REPLACE FUNCTION nexus_pages_placeholder_version()
 RETURNS trigger AS $$
 BEGIN
@@ -40,7 +44,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ── Triggers ─────────────────────────────────────────────────────────────────
+-- Trigger: single active version guard
 DROP TRIGGER IF EXISTS trg_page_versions_single_active ON page_versions;
 CREATE TRIGGER trg_page_versions_single_active
   BEFORE INSERT ON page_versions
@@ -48,6 +52,7 @@ CREATE TRIGGER trg_page_versions_single_active
   WHEN (NEW.is_active = true)
   EXECUTE FUNCTION nexus_page_versions_single_active();
 
+-- Trigger: placeholder version on page insert
 DROP TRIGGER IF EXISTS trg_pages_placeholder_version ON pages;
 CREATE TRIGGER trg_pages_placeholder_version
   AFTER INSERT ON pages
