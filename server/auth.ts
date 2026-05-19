@@ -51,6 +51,23 @@ function passFrontendRoute(req: Request, next: NextFunction): boolean {
   return false;
 }
 
+/**
+ * Re-fetch is_super_admin directly from the DB for a given userId.
+ * Guards against session flag being lost due to field-name mismatch
+ * (is_super_admin vs isSuperAdmin) in storage.getUserByEmail.
+ */
+async function resolveIsSuperAdmin(userId: string): Promise<boolean> {
+  try {
+    const result = await pool.query(
+      `SELECT is_super_admin FROM users WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    return result.rows[0]?.is_super_admin === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (passFrontendRoute(req, next)) return;
 
@@ -82,11 +99,22 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  if (!req.session.isSuperAdmin) {
-    return res.status(403).json({ message: "Forbidden: Super Admin only" });
+  // If session flag is already true, pass immediately
+  if (req.session.isSuperAdmin === true) {
+    return next();
   }
 
-  next();
+  // Session flag missing or false — re-verify from DB to handle
+  // cases where isSuperAdmin was not correctly set during login
+  // (e.g. field-name mismatch: is_super_admin vs isSuperAdmin)
+  const isAdmin = await resolveIsSuperAdmin(req.session.userId);
+  if (isAdmin) {
+    // Repair the session so future requests are fast
+    req.session.isSuperAdmin = true;
+    return next();
+  }
+
+  return res.status(403).json({ message: "Forbidden: Super Admin only" });
 }
 
 export async function requireAccountAccess(req: Request, res: Response, next: NextFunction) {
@@ -178,10 +206,16 @@ export async function loginUser(req: Request, email: string, password: string) {
 
   if (!user || !valid) return null;
 
-  req.session.userId = user.id;
-  req.session.isSuperAdmin = user.isSuperAdmin;
-  req.session.accountId = user.accountId;
-  req.session.role = user.role;
+  // Always re-fetch isSuperAdmin directly from DB to avoid any
+  // field-name mismatch (is_super_admin vs isSuperAdmin) in storage layer
+  const isSuperAdmin = await resolveIsSuperAdmin(user.id);
 
-  return user;
+  req.session.userId = user.id;
+  req.session.isSuperAdmin = isSuperAdmin;
+  req.session.accountId = user.accountId ?? null;
+  req.session.role = user.role ?? "user";
+
+  console.log(`[auth] loginUser: userId=${user.id} isSuperAdmin=${isSuperAdmin} role=${user.role}`);
+
+  return { ...user, isSuperAdmin };
 }
