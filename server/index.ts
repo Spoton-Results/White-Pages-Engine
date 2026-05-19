@@ -3,6 +3,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { ensureBulkTransactionSafety, repairPagesMissingActiveVersions } from "./services/bulk-transaction-safety";
+import { warmupDatabase } from "./db";
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 import authLiveRouter from "./routes/auth-live";
@@ -245,6 +246,11 @@ async function runBackgroundStartup() {
 
 // ── Boot ────────────────────────────────────────────────────────────────────────────
 (async () => {
+  // Eagerly wake Railway Postgres before the first user request arrives.
+  // Without this, the first request triggers DB cold-start (3-4 min) and
+  // every subsequent request queues behind it.
+  await warmupDatabase();
+
   // IMPORTANT: serveStatic MUST be registered before the error handler.
   // Express middleware runs in order — registering the error handler first
   // caused the app to never serve index.html, resulting in a blank screen.
