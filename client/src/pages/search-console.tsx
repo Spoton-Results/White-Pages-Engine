@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +25,63 @@ function propertyValueFromUrl(propertyUrl?: string | null) { const raw = String(
 function siteValueFromUrl(siteUrl?: string | null) { return cleanUrlValue(String(siteUrl || "")); }
 
 const baseForm: FormState = { accountId: "", websiteId: "", propertyType: "domain", propertyValue: "", propertyUrl: "", siteValue: "", siteUrl: "", adminGoogleUser: "", connectionStatus: "access_pending", sitemapSubmitted: false, indexedPages: "0", clicks: "0", impressions: "0", averagePosition: "", coverageWarnings: "0" };
-async function getJson<T>(url: string): Promise<T> { const res = await fetch(url, { credentials: "include" }); if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `Request failed: ${res.status}`); return res.json(); }
-async function sendJson<T>(url: string, method: "POST" | "PUT" | "DELETE", body?: unknown): Promise<T> { const res = await fetch(url, { method, credentials: "include", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); const json = await res.json().catch(() => null); if (!res.ok) throw new Error(json?.message || `Request failed: ${res.status}`); return json; }
+
+/** Safely extract a human-readable error message from any thrown value */
+function extractErrorMessage(e: unknown, fallback: string): string {
+  if (!e) return fallback;
+  if (typeof e === "string") return e || fallback;
+  if (typeof e === "object") {
+    const msg = (e as any).message;
+    if (typeof msg === "string" && msg.length > 0) return msg;
+  }
+  return fallback;
+}
+
+/** Fetch JSON safely — never throws (void 0) or SyntaxError, always a clean Error with a message */
+async function getJson<T>(url: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: "include" });
+  } catch (networkErr: unknown) {
+    throw new Error(extractErrorMessage(networkErr, `Network error fetching ${url}`));
+  }
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    // Response body was not JSON (e.g. HTML login redirect or 502 gateway page)
+    if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText || ""}`.trim());
+    throw new Error(`Unexpected non-JSON response from ${url} (${res.status})`);
+  }
+  if (!res.ok) {
+    const msg = typeof json?.message === "string" && json.message ? json.message : `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
+  return json as T;
+}
+
+/** POST/PUT/DELETE JSON safely */
+async function sendJson<T>(url: string, method: "POST" | "PUT" | "DELETE", body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method, credentials: "include", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  } catch (networkErr: unknown) {
+    throw new Error(extractErrorMessage(networkErr, `Network error on ${method} ${url}`));
+  }
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText || ""}`.trim());
+    throw new Error(`Unexpected non-JSON response from ${url} (${res.status})`);
+  }
+  if (!res.ok) {
+    const msg = typeof json?.message === "string" && json.message ? json.message : `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
+  return json as T;
+}
+
 function fmt(n?: number | null) { return Math.round(Number(n || 0)).toLocaleString(); }
 function dateText(v?: string | null) { return v ? new Date(v).toLocaleString() : "Not synced"; }
 function statusLabel(status: string) { return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
@@ -56,8 +111,30 @@ export default function SearchConsolePage() {
   const lastSync = properties.map((p) => p.lastSyncAt).filter(Boolean).sort().reverse()[0] || null;
   const propertyPrefix = form.propertyType === "domain" ? "sc-domain:" : "https://";
 
-  async function load() { setLoading(true); setError(null); try { const [configRow, accountRows, websiteRows, propertyRows] = await Promise.all([getJson<GscConfig>("/api/search-console/config"), getJson<Account[]>("/api/accounts"), getJson<Website[]>("/api/websites"), getJson<GscProperty[]>("/api/search-console/properties")]); setConfig(configRow); setAccounts(accountRows); setWebsites(websiteRows); setProperties(propertyRows); setForm((prev) => ({ ...prev, adminGoogleUser: prev.adminGoogleUser || configRow.adminGoogleUser || "" })); } catch (e: any) { setError(e.message || "Failed to load Search Console data"); } finally { setLoading(false); } }
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [configRow, accountRows, websiteRows, propertyRows] = await Promise.all([
+        getJson<GscConfig>("/api/search-console/config"),
+        getJson<Account[]>("/api/accounts"),
+        getJson<Website[]>("/api/websites"),
+        getJson<GscProperty[]>("/api/search-console/properties"),
+      ]);
+      setConfig(configRow);
+      setAccounts(accountRows);
+      setWebsites(websiteRows);
+      setProperties(propertyRows);
+      setForm((prev) => ({ ...prev, adminGoogleUser: prev.adminGoogleUser || configRow.adminGoogleUser || "" }));
+    } catch (e: unknown) {
+      setError(extractErrorMessage(e, "Failed to load Search Console data"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) { setForm((prev) => ({ ...prev, [key]: value })); }
   function setPropertyType(type: PropertyType) { setForm((prev) => ({ ...prev, propertyType: type, propertyValue: type === "domain" ? cleanDomain(prev.propertyValue || prev.propertyUrl) : cleanUrlValue(prev.propertyValue || prev.propertyUrl), propertyUrl: buildPropertyUrl(type, prev.propertyValue || prev.propertyUrl) })); }
   function setPropertyValue(value: string) { setForm((prev) => ({ ...prev, propertyValue: value, propertyUrl: buildPropertyUrl(prev.propertyType, value) })); }
@@ -66,11 +143,11 @@ export default function SearchConsolePage() {
   function reset() { setForm({ ...baseForm, adminGoogleUser: config.adminGoogleUser || "" }); setEditingId(null); }
   function edit(row: GscProperty) { const type = inferPropertyType(row.propertyUrl); const propertyValue = propertyValueFromUrl(row.propertyUrl); const siteValue = siteValueFromUrl(row.siteUrl) || propertyValue; setEditingId(row.id); setForm({ accountId: row.accountId, websiteId: row.websiteId || "", propertyType: type, propertyValue, propertyUrl: buildPropertyUrl(type, propertyValue), siteValue, siteUrl: buildSiteUrl(siteValue), adminGoogleUser: row.adminGoogleUser || config.adminGoogleUser || "", connectionStatus: row.connectionStatus || "access_pending", sitemapSubmitted: !!row.sitemapSubmitted, indexedPages: String(row.indexedPages || 0), clicks: String(row.clicks || 0), impressions: String(row.impressions || 0), averagePosition: row.averagePosition === null ? "" : String(row.averagePosition), coverageWarnings: String(row.coverageWarnings || 0) }); window.scrollTo({ top: 0, behavior: "smooth" }); }
   async function copyInstruction() { const text = config.clientInstruction || `Please add ${form.adminGoogleUser || config.adminGoogleUser} as a Full user in your Google Search Console property.`; await navigator.clipboard.writeText(text); setNotice("Client instruction copied."); setTimeout(() => setNotice(null), 3000); }
-  async function testServiceAccount() { setAuthTesting(true); setAuthResult(null); setError(null); try { const result = await getJson<TestResult>("/api/search-console/auth-test"); setAuthResult(result); setNotice(result.ok ? "Service account auth passed." : "Service account auth failed."); } catch (e: any) { setAuthResult({ ok: false, message: e.message || "Service account auth failed." }); } finally { setAuthTesting(false); } }
-  async function autoFillFromWebsites() { setAutoFilling(true); setAutoFillResult(null); setError(null); try { const result = await sendJson<TestResult>("/api/search-console/auto-create", "POST"); setAutoFillResult(result); setNotice(result.message || "Search Console tracking rows updated."); await load(); } catch (e: any) { setAutoFillResult({ ok: false, message: e.message || "Auto-fill failed." }); } finally { setAutoFilling(false); } }
-  async function runSyncTest(id: string) { setSyncTestingId(id); setSyncResult(null); setError(null); try { const result = await sendJson<TestResult>(`/api/search-console/properties/${id}/sync-test`, "POST"); setSyncResult(result); setNotice(result.ok ? "Sync test completed." : "Sync test failed."); await load(); } catch (e: any) { setSyncResult({ ok: false, message: e.message || "Sync test failed." }); } finally { setSyncTestingId(null); } }
-  async function save() { setSaving(true); setError(null); setNotice(null); try { const propertyUrl = buildPropertyUrl(form.propertyType, form.propertyValue || form.propertyUrl); const siteUrl = buildSiteUrl(form.siteValue || form.propertyValue || form.siteUrl); const payload = { accountId: form.accountId, websiteId: form.websiteId || null, propertyUrl, siteUrl: siteUrl || null, accessMethod: "delegated_admin_user", adminGoogleUser: form.adminGoogleUser || config.adminGoogleUser || null, connectionStatus: form.connectionStatus, sitemapSubmitted: form.sitemapSubmitted, indexedPages: Number(form.indexedPages || 0), clicks: Number(form.clicks || 0), impressions: Number(form.impressions || 0), averagePosition: form.averagePosition === "" ? null : Number(form.averagePosition), coverageWarnings: Number(form.coverageWarnings || 0), lastSyncAt: new Date().toISOString() }; if (!payload.accountId) throw new Error("Select a client first."); if (!payload.propertyUrl) throw new Error("Enter the GSC property domain or URL."); if (editingId) await sendJson(`/api/search-console/properties/${editingId}`, "PUT", payload); else await sendJson("/api/search-console/properties", "POST", payload); setNotice(editingId ? "Search Console property updated." : "Search Console property saved."); reset(); await load(); } catch (e: any) { setError(e.message || "Failed to save Search Console property"); } finally { setSaving(false); } }
-  async function remove(id: string) { setError(null); setNotice(null); try { await sendJson(`/api/search-console/properties/${id}`, "DELETE"); setNotice("Search Console property removed."); await load(); } catch (e: any) { setError(e.message || "Failed to remove property"); } }
+  async function testServiceAccount() { setAuthTesting(true); setAuthResult(null); setError(null); try { const result = await getJson<TestResult>("/api/search-console/auth-test"); setAuthResult(result); setNotice(result.ok ? "Service account auth passed." : "Service account auth failed."); } catch (e: unknown) { setAuthResult({ ok: false, message: extractErrorMessage(e, "Service account auth failed.") }); } finally { setAuthTesting(false); } }
+  async function autoFillFromWebsites() { setAutoFilling(true); setAutoFillResult(null); setError(null); try { const result = await sendJson<TestResult>("/api/search-console/auto-create", "POST"); setAutoFillResult(result); setNotice(result.message || "Search Console tracking rows updated."); await load(); } catch (e: unknown) { setAutoFillResult({ ok: false, message: extractErrorMessage(e, "Auto-fill failed.") }); } finally { setAutoFilling(false); } }
+  async function runSyncTest(id: string) { setSyncTestingId(id); setSyncResult(null); setError(null); try { const result = await sendJson<TestResult>(`/api/search-console/properties/${id}/sync-test`, "POST"); setSyncResult(result); setNotice(result.ok ? "Sync test completed." : "Sync test failed."); await load(); } catch (e: unknown) { setSyncResult({ ok: false, message: extractErrorMessage(e, "Sync test failed.") }); } finally { setSyncTestingId(null); } }
+  async function save() { setSaving(true); setError(null); setNotice(null); try { const propertyUrl = buildPropertyUrl(form.propertyType, form.propertyValue || form.propertyUrl); const siteUrl = buildSiteUrl(form.siteValue || form.propertyValue || form.siteUrl); const payload = { accountId: form.accountId, websiteId: form.websiteId || null, propertyUrl, siteUrl: siteUrl || null, accessMethod: "delegated_admin_user", adminGoogleUser: form.adminGoogleUser || config.adminGoogleUser || null, connectionStatus: form.connectionStatus, sitemapSubmitted: form.sitemapSubmitted, indexedPages: Number(form.indexedPages || 0), clicks: Number(form.clicks || 0), impressions: Number(form.impressions || 0), averagePosition: form.averagePosition === "" ? null : Number(form.averagePosition), coverageWarnings: Number(form.coverageWarnings || 0), lastSyncAt: new Date().toISOString() }; if (!payload.accountId) throw new Error("Select a client first."); if (!payload.propertyUrl) throw new Error("Enter the GSC property domain or URL."); if (editingId) await sendJson(`/api/search-console/properties/${editingId}`, "PUT", payload); else await sendJson("/api/search-console/properties", "POST", payload); setNotice(editingId ? "Search Console property updated." : "Search Console property saved."); reset(); await load(); } catch (e: unknown) { setError(extractErrorMessage(e, "Failed to save Search Console property")); } finally { setSaving(false); } }
+  async function remove(id: string) { setError(null); setNotice(null); try { await sendJson(`/api/search-console/properties/${id}`, "DELETE"); setNotice("Search Console property removed."); await load(); } catch (e: unknown) { setError(extractErrorMessage(e, "Failed to remove property")); } }
 
   return <DashboardLayout><div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><div className="rounded-lg bg-blue-50 p-2 text-blue-700"><SearchCheck className="h-5 w-5" /></div><h1 className="text-2xl font-bold tracking-tight text-gray-900">Search Console</h1></div><p className="mt-2 max-w-3xl text-sm text-gray-500">Admin-only delegated Search Console access tracker. Clients add your admin Google user to their GSC property; Nexus stores the property and reports the data back.</p></div><Button variant="outline" onClick={() => window.location.href = "/agency-dashboard"}><ExternalLink className="mr-2 h-4 w-4" />Agency Dashboard</Button></div>
