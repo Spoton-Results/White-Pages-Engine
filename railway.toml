@@ -1,5 +1,6 @@
 [build]
 builder = "nixpacks"
+buildCommand = "npm run build"
 
 [variables]
 NIXPACKS_NODE_VERSION = "20"
