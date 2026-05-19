@@ -236,6 +236,12 @@ async function runBackgroundStartup() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async () => {
+  // IMPORTANT: serveStatic MUST be registered before the error handler.
+  // Express middleware runs in order — registering the error handler first
+  // caused the app to never serve index.html, resulting in a blank screen.
+  serveStatic(app);
+
+  // Error handler must come LAST — after all routes and static serving
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (isDatabaseRecoveryError(err)) {
       console.warn("[db] Database recovery guard handled 57P03 for", req.method, req.originalUrl || req.url);
@@ -245,8 +251,6 @@ async function runBackgroundStartup() {
     const message = err.message || "Internal Server Error";
     res.status(status).json({ message });
   });
-
-  serveStatic(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, async () => {
