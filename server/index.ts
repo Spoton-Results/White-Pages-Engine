@@ -25,6 +25,7 @@ import spotonPagesRouter from "./routes/spoton-pages";
 import actionReviewActiveRouter from "./routes/action-review-active";
 import actionReviewDecisionRouter from "./routes/action-review-decision";
 import intentGovernanceRouter from "./routes/intent-governance";
+import intentGovernanceRunRouter from "./routes/intent-governance-run";
 import intentActionsRouter from "./routes/intent-actions";
 import intentBuildRouter from "./routes/intent-build";
 
@@ -154,6 +155,7 @@ app.use(clientDomainHomepageRouter);
 app.use(actionReviewActiveRouter);
 app.use(actionReviewDecisionRouter);
 app.use(intentGovernanceRouter);
+app.use(intentGovernanceRunRouter);
 app.use("/api/intent-actions", intentActionsRouter);
 app.use("/api/intent-build", intentBuildRouter);
 
