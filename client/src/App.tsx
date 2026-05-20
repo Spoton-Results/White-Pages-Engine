@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, Component, ReactNode } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { AccountProvider } from "@/contexts/account-context";
 import NotFound from "@/pages/not-found";
 import ClientReportPage from "@/pages/report";
 
@@ -23,7 +24,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           <div className="max-w-md w-full space-y-4 text-center">
             <h1 className="text-xl font-semibold text-destructive">Something went wrong</h1>
             <p className="text-sm text-muted-foreground font-mono bg-muted px-3 py-2 rounded text-left break-all">
-              {this.state.error.message}
+              {(this.state.error as Error).message}
             </p>
             <button
               className="text-sm text-primary underline"
@@ -73,8 +74,6 @@ import OnboardForm from "@/pages/OnboardForm";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard";
-
-// ── Restored pages (files exist on disk; were only unlinked from router) ─────────────────────
 import IntentBuildPage from "@/pages/intent-build-v2";
 import ActionReviewPage from "@/pages/action-review";
 import SearchConsolePage from "@/pages/search-console";
@@ -84,38 +83,25 @@ import ClientDomainsPage from "@/pages/client-domains";
 import ProductionValidationPage from "@/pages/production-validation";
 import PageIntelligencePage from "@/pages/page-intelligence";
 
-// ── Agency role helpers ────────────────────────────────────────────────────────────────────────
 function isAgencyRole(user: any): boolean {
   return user?.role === "agency" || user?.role === "agency_admin";
 }
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [, navigate] = useLocation();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      navigate("/login");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!isLoading && !isAuthenticated) navigate("/login");
   }, [isLoading, isAuthenticated]);
 
-  if (isLoading) {
+  if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   return <>{children}</>;
 }
 
@@ -125,14 +111,8 @@ function LoginGuard() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      // Agency users land on their dedicated dashboard
-      if (isAgencyRole(user)) {
-        navigate("/agency-dashboard");
-      } else {
-        navigate("/");
-      }
+      navigate(isAgencyRole(user) ? "/agency-dashboard" : "/");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, isAuthenticated, user]);
 
   if (isLoading) {
@@ -142,7 +122,6 @@ function LoginGuard() {
       </div>
     );
   }
-
   return <Login />;
 }
 
@@ -162,127 +141,46 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/login">
-        <LoginGuard />
-      </Route>
-      <Route path="/">
-        <AuthGuard><Dashboard /></AuthGuard>
-      </Route>
-      <Route path="/agencies">
-        <AuthGuard><AgenciesPage /></AuthGuard>
-      </Route>
-      <Route path="/agencies/:agencyId/onboard">
-        <AuthGuard><OnboardWizard /></AuthGuard>
-      </Route>
-      <Route path="/accounts">
-        <AuthGuard><AccountsPage /></AuthGuard>
-      </Route>
-      {/* Account detail — must be before /accounts so wouter doesn't swallow it */}
-      <Route path="/accounts/:id">
-        <AuthGuard><AccountDetailPage /></AuthGuard>
-      </Route>
-      <Route path="/websites">
-        <AuthGuard><WebsitesPage /></AuthGuard>
-      </Route>
-      <Route path="/brand-profiles">
-        <AuthGuard><BrandProfilesPage /></AuthGuard>
-      </Route>
-      <Route path="/locations">
-        <AuthGuard><LocationsPage /></AuthGuard>
-      </Route>
-      <Route path="/services">
-        <AuthGuard><ServicesPage /></AuthGuard>
-      </Route>
-      <Route path="/industries">
-        <AuthGuard><IndustriesPage /></AuthGuard>
-      </Route>
-      <Route path="/query-clusters">
-        <AuthGuard><QueryClustersPage /></AuthGuard>
-      </Route>
-      <Route path="/blueprints">
-        <AuthGuard><BlueprintsPage /></AuthGuard>
-      </Route>
-      <Route path="/drafts">
-        <AuthGuard><DraftsPage /></AuthGuard>
-      </Route>
-      <Route path="/publish-queue">
-        <AuthGuard><PublishQueuePage /></AuthGuard>
-      </Route>
-      <Route path="/published">
-        <AuthGuard><PublishedPagesPage /></AuthGuard>
-      </Route>
-      <Route path="/jobs">
-        <AuthGuard><JobsPage /></AuthGuard>
-      </Route>
-      <Route path="/sitemaps">
-        <AuthGuard><SitemapsPage /></AuthGuard>
-      </Route>
-      <Route path="/users">
-        <AuthGuard><UsersPage /></AuthGuard>
-      </Route>
-      <Route path="/guide">
-        <AuthGuard><GuidePage /></AuthGuard>
-      </Route>
-      <Route path="/bulk-generator">
-        <AuthGuard><BulkGeneratorPage /></AuthGuard>
-      </Route>
-      <Route path="/leads">
-        <AuthGuard><LeadsPage /></AuthGuard>
-      </Route>
-      <Route path="/agency-dashboard">
-        <AuthGuard><AgencyDashboardPage /></AuthGuard>
-      </Route>
-      <Route path="/search-control">
-        <AuthGuard><SearchControlPage /></AuthGuard>
-      </Route>
-      <Route path="/hub-pages">
-        <AuthGuard><HubPagesPage /></AuthGuard>
-      </Route>
-      <Route path="/internal-links">
-        <AuthGuard><InternalLinksPage /></AuthGuard>
-      </Route>
-      <Route path="/automation">
-        <AuthGuard><AutomationPage /></AuthGuard>
-      </Route>
-      <Route path="/bank-health">
-        <AuthGuard><BankHealthPage /></AuthGuard>
-      </Route>
-      <Route path="/onboarding-test">
-        <AuthGuard><OnboardingTestPage /></AuthGuard>
-      </Route>
-
-      {/* ── Restored routes ──────────────────────────────────────────────────────────── */}
-      <Route path="/intent-build">
-        <AuthGuard><IntentBuildPage /></AuthGuard>
-      </Route>
-      <Route path="/action-review">
-        <AuthGuard><ActionReviewPage /></AuthGuard>
-      </Route>
-      <Route path="/search-console">
-        <AuthGuard><SearchConsolePage /></AuthGuard>
-      </Route>
-      <Route path="/operations">
-        <AuthGuard><OperationsPage /></AuthGuard>
-      </Route>
-      <Route path="/report-links">
-        <AuthGuard><ReportLinksPage /></AuthGuard>
-      </Route>
-      <Route path="/client-domains">
-        <AuthGuard><ClientDomainsPage /></AuthGuard>
-      </Route>
-      <Route path="/production-validation">
-        <AuthGuard><ProductionValidationPage /></AuthGuard>
-      </Route>
-      <Route path="/page-intelligence">
-        <AuthGuard><PageIntelligencePage /></AuthGuard>
-      </Route>
-
-      <Route path="/report/:token">
-        <ClientReportPage />
-      </Route>
-      <Route>
-        <NotFound />
-      </Route>
+      <Route path="/login"><LoginGuard /></Route>
+      <Route path="/"><AuthGuard><Dashboard /></AuthGuard></Route>
+      <Route path="/agencies"><AuthGuard><AgenciesPage /></AuthGuard></Route>
+      <Route path="/agencies/:agencyId/onboard"><AuthGuard><OnboardWizard /></AuthGuard></Route>
+      <Route path="/accounts"><AuthGuard><AccountsPage /></AuthGuard></Route>
+      <Route path="/accounts/:id"><AuthGuard><AccountDetailPage /></AuthGuard></Route>
+      <Route path="/websites"><AuthGuard><WebsitesPage /></AuthGuard></Route>
+      {/* Feature pages — all use shared AccountContext via AccountProvider */}
+      <Route path="/brand-profiles"><AuthGuard><BrandProfilesPage /></AuthGuard></Route>
+      <Route path="/locations"><AuthGuard><LocationsPage /></AuthGuard></Route>
+      <Route path="/services"><AuthGuard><ServicesPage /></AuthGuard></Route>
+      <Route path="/industries"><AuthGuard><IndustriesPage /></AuthGuard></Route>
+      <Route path="/query-clusters"><AuthGuard><QueryClustersPage /></AuthGuard></Route>
+      <Route path="/blueprints"><AuthGuard><BlueprintsPage /></AuthGuard></Route>
+      <Route path="/drafts"><AuthGuard><DraftsPage /></AuthGuard></Route>
+      <Route path="/publish-queue"><AuthGuard><PublishQueuePage /></AuthGuard></Route>
+      <Route path="/published"><AuthGuard><PublishedPagesPage /></AuthGuard></Route>
+      <Route path="/jobs"><AuthGuard><JobsPage /></AuthGuard></Route>
+      <Route path="/sitemaps"><AuthGuard><SitemapsPage /></AuthGuard></Route>
+      <Route path="/users"><AuthGuard><UsersPage /></AuthGuard></Route>
+      <Route path="/guide"><AuthGuard><GuidePage /></AuthGuard></Route>
+      <Route path="/bulk-generator"><AuthGuard><BulkGeneratorPage /></AuthGuard></Route>
+      <Route path="/leads"><AuthGuard><LeadsPage /></AuthGuard></Route>
+      <Route path="/agency-dashboard"><AuthGuard><AgencyDashboardPage /></AuthGuard></Route>
+      <Route path="/search-control"><AuthGuard><SearchControlPage /></AuthGuard></Route>
+      <Route path="/hub-pages"><AuthGuard><HubPagesPage /></AuthGuard></Route>
+      <Route path="/internal-links"><AuthGuard><InternalLinksPage /></AuthGuard></Route>
+      <Route path="/automation"><AuthGuard><AutomationPage /></AuthGuard></Route>
+      <Route path="/bank-health"><AuthGuard><BankHealthPage /></AuthGuard></Route>
+      <Route path="/onboarding-test"><AuthGuard><OnboardingTestPage /></AuthGuard></Route>
+      <Route path="/intent-build"><AuthGuard><IntentBuildPage /></AuthGuard></Route>
+      <Route path="/action-review"><AuthGuard><ActionReviewPage /></AuthGuard></Route>
+      <Route path="/search-console"><AuthGuard><SearchConsolePage /></AuthGuard></Route>
+      <Route path="/operations"><AuthGuard><OperationsPage /></AuthGuard></Route>
+      <Route path="/report-links"><AuthGuard><ReportLinksPage /></AuthGuard></Route>
+      <Route path="/client-domains"><AuthGuard><ClientDomainsPage /></AuthGuard></Route>
+      <Route path="/production-validation"><AuthGuard><ProductionValidationPage /></AuthGuard></Route>
+      <Route path="/page-intelligence"><AuthGuard><PageIntelligencePage /></AuthGuard></Route>
+      <Route path="/report/:token"><ClientReportPage /></Route>
+      <Route><NotFound /></Route>
     </Switch>
   );
 }
@@ -291,10 +189,13 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <ErrorBoundary>
-          <Router />
-        </ErrorBoundary>
+        {/* AccountProvider wraps everything so selected account persists across page navigation */}
+        <AccountProvider>
+          <Toaster />
+          <ErrorBoundary>
+            <Router />
+          </ErrorBoundary>
+        </AccountProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
