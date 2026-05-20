@@ -6,6 +6,7 @@
  *
  * Covers:
  *   - /api/accounts
+ *   - /api/agencies  (alias for /api/accounts — "agency" and "account" are the same entity)
  *   - /api/websites  (and nested /api/websites/:id/...)
  *   - /api/locations
  *   - /api/services
@@ -108,6 +109,42 @@ router.post("/api/accounts/:accountId/users", requireAuth, async (req: Request, 
   const user = await storage.createUser({ ...rest, password: hashedPassword });
   const { password: _, ...safeUser } = user;
   return res.status(201).json(safeUser);
+});
+
+// ── Agencies (alias for Accounts — same entity, different UI label) ───────────
+// The frontend "Create Agency" form POSTs to /api/agencies. Without these
+// routes the server returns an HTML 404 page, causing the
+// "Unexpected token '<', <!DOCTYPE..." JSON parse error in the browser.
+router.get("/api/agencies", requireAuth, async (_req: Request, res: Response) => {
+  const accounts = await storage.getAccounts();
+  return res.json(accounts);
+});
+
+router.get("/api/agencies/:id", requireAuth, async (req: Request, res: Response) => {
+  const account = await storage.getAccount(req.params.id);
+  if (!account) return res.status(404).json({ message: "Agency not found" });
+  return res.json(account);
+});
+
+router.post("/api/agencies", requireAuth, async (req: Request, res: Response) => {
+  // Map agency-specific field names to account schema if needed
+  const body = { ...req.body };
+  // The Create Agency form sends "name" — insertAccountSchema expects "name" too, so no transform needed.
+  const parsed = insertAccountSchema.safeParse(body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const account = await storage.createAccount(parsed.data);
+  return res.status(201).json(account);
+});
+
+router.put("/api/agencies/:id", requireAuth, async (req: Request, res: Response) => {
+  const account = await storage.updateAccount(req.params.id, req.body);
+  if (!account) return res.status(404).json({ message: "Agency not found" });
+  return res.json(account);
+});
+
+router.delete("/api/agencies/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  await storage.deleteAccount(req.params.id);
+  return res.json({ message: "Agency deleted" });
 });
 
 // ── Websites ──────────────────────────────────────────────────────────────────
