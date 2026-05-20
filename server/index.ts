@@ -4,11 +4,12 @@ import { mountSubRouters } from "./route-mounts";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
+import { sessionMiddleware } from "./auth";
 
 const app = express();
 const httpServer = createServer(app);
 
-// Trust Replit's reverse proxy so secure cookies and req.secure work correctly
+// Trust Railway's / Replit's reverse proxy so secure cookies and req.secure work correctly
 app.set("trust proxy", 1);
 
 declare module "http" {
@@ -27,6 +28,12 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// ── Session middleware ─────────────────────────────────────────────────────
+// MUST be registered before any route handler that calls requireAuth /
+// requireSuperAdmin / loginUser, otherwise req.session is undefined and
+// all login attempts return "Session middleware not initialized" (500).
+app.use(sessionMiddleware());
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -198,7 +205,6 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
       `CREATE INDEX IF NOT EXISTS idx_page_versions_active     ON page_versions(page_id, is_active)`,
       `CREATE INDEX IF NOT EXISTS idx_websites_account_id      ON websites(account_id)`,
-      // Functional index so getWebsiteByDomain's lower(domain) lookup uses an index scan
       `CREATE INDEX IF NOT EXISTS idx_websites_domain_lower     ON websites(lower(domain))`,
       `CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`,
       `CREATE INDEX IF NOT EXISTS idx_users_account_id         ON users(account_id)`,
@@ -231,13 +237,9 @@ async function runBackgroundStartup() {
       `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
       `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at)`,
-      // These unique indexes are also in the Drizzle schema — these are noops after first deploy.
       `CREATE UNIQUE INDEX IF NOT EXISTS state_data_state_abbr_unique              ON state_data(state_abbr)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS call_tracking_numbers_dynamic_number_unique ON call_tracking_numbers(dynamic_number)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS onboarding_submissions_token_unique        ON onboarding_submissions(token)`,
-      // ── Partial indexes for published pages (billions-scale) ──────────────────
-      // Partial indexes skip non-published rows entirely — ~10-100x smaller than full indexes.
-      // Critical for COUNT, tier-filtering, scoring, and sitemap queries on large datasets.
       `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier
          ON pages(website_id, tier)
          WHERE status = 'published'`,
@@ -262,8 +264,6 @@ async function runBackgroundStartup() {
     console.log("[startup] Database indexes ensured.");
 
     // ── Incremental publishedPages counter trigger ─────────────────────────────
-    // Maintains websites.published_pages automatically on page INSERT/UPDATE/DELETE.
-    // Eliminates full COUNT(*) scans which become painfully slow at billions of rows.
     await db.execute(sql`
       CREATE OR REPLACE FUNCTION fn_sync_published_pages_count()
       RETURNS trigger AS $$
@@ -307,7 +307,6 @@ async function runBackgroundStartup() {
     `);
     console.log("[startup] Published-pages counter trigger installed.");
 
-    // Domain migration: update old subdomain-based domains to root domain + /pages proxyPath
     await db.execute(sql`
       UPDATE websites
       SET domain = 'spotonresults.com',
@@ -315,11 +314,7 @@ async function runBackgroundStartup() {
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
     `);
-    // ── pages.subdraw.com — SEO white-label pages only ─────────────────────────
-    // Moves all pages from any old subdraw.com / subtrackers records → pages.subdraw.com
-    // This is idempotent: safe to run on every boot.
 
-    // Step A: Ensure pages.subdraw.com record exists first
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
       VALUES (
@@ -333,7 +328,6 @@ async function runBackgroundStartup() {
       ON CONFLICT (domain) DO NOTHING
     `);
 
-    // Step B: Reassign all pages from old domain records → pages.subdraw.com
     await db.execute(sql`
       UPDATE pages
       SET website_id = (SELECT id FROM websites WHERE domain = 'pages.subdraw.com')
@@ -343,13 +337,11 @@ async function runBackgroundStartup() {
       )
     `);
 
-    // Step C: Delete the now-empty old domain records
     await db.execute(sql`
       DELETE FROM websites
       WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
     `);
 
-    // Step D: Always ensure correct settings on pages.subdraw.com
     await db.execute(sql`
       UPDATE websites
       SET settings = (settings
@@ -359,7 +351,6 @@ async function runBackgroundStartup() {
     `);
     console.log("[startup] pages.subdraw.com: all pages migrated, old subdraw.com records removed (idempotent).");
 
-    // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
     const patch = await db.execute(sql`
       UPDATE pages
       SET
@@ -376,14 +367,12 @@ async function runBackgroundStartup() {
     console.error("[startup] Schema migration failed (non-fatal):", err);
   }
 
-  // Seed database
   try {
     await seedDatabase();
   } catch (err) {
     console.error("Seeding failed (non-fatal):", err);
   }
 
-  // Sync ALL website published-page counters — runs 5 min after boot
   setTimeout(async () => {
     try {
       const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
@@ -398,9 +387,8 @@ async function runBackgroundStartup() {
     } catch (err) {
       console.error("[startup] Page count sync failed (non-fatal):", err);
     }
-  }, 5 * 60 * 1000); // 5 minutes
+  }, 5 * 60 * 1000);
 
-  // Resume any background jobs that were interrupted by a server restart
   try {
     const { getStaleRunningJobs, updateGenerationJob } = await import("./storage");
     const { runBulkBackgroundJob } = await import("./services/bulk-background");
@@ -460,10 +448,6 @@ async function runBackgroundStartup() {
 }
 
 (async () => {
-  // ── Mount all sub-routers BEFORE registering inline routes ─────────────────
-  // callTrackingRouter, formTrackingRouter, leadsRouter, dashboardAgencyRouter,
-  // dashboardAdminRouter, and widgetRouter were imported in routes.ts but never
-  // wired up with app.use(). This call activates them.
   mountSubRouters(app);
 
   await registerRoutes(httpServer, app);
@@ -498,9 +482,6 @@ async function runBackgroundStartup() {
     () => {
       log(`serving on port ${port}`);
 
-      // Keep startup light so admin workflows stay responsive.
-
-      // Daily database backup — runs at 03:00 UTC, keeps last 7 files
       setImmediate(async () => {
         try {
           const { scheduleDailyBackup } = await import("./backup");
@@ -510,7 +491,6 @@ async function runBackgroundStartup() {
         }
       });
 
-      // Auto 6: Weekly auto-demote — run once 5 min after startup, then every 7 days
       setTimeout(async () => {
         try {
           const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
@@ -528,7 +508,6 @@ async function runBackgroundStartup() {
         }, 7 * 24 * 60 * 60 * 1000);
       }, 5 * 60 * 1000);
 
-      // Phase 7: Daily wave readiness check — unlocks Wave 2+ on 14-day cadence
       setTimeout(async () => {
         try {
           const { runDailyWaveCheck } = await import("./services/launch-governors");
@@ -546,7 +525,6 @@ async function runBackgroundStartup() {
         }, 24 * 60 * 60 * 1000);
       }, 10 * 60 * 1000);
 
-      // Auto 8: Weekly summary email — check every hour, send on Monday mornings (UTC)
       setInterval(async () => {
         const now = new Date();
         if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 60) {
@@ -559,7 +537,6 @@ async function runBackgroundStartup() {
         }
       }, 60 * 60 * 1000);
 
-      // Phase 9: Weekly Launch Health calculation — Monday 06:00 UTC
       setInterval(async () => {
         const now = new Date();
         if (now.getUTCDay() === 1 && now.getUTCHours() === 6 && now.getUTCMinutes() < 60) {
@@ -572,7 +549,6 @@ async function runBackgroundStartup() {
         }
       }, 60 * 60 * 1000);
 
-      // Phase 9: Weekly Client Digest — Monday 09:00 UTC
       setInterval(async () => {
         const now = new Date();
         if (now.getUTCDay() === 1 && now.getUTCHours() === 9 && now.getUTCMinutes() < 60) {
