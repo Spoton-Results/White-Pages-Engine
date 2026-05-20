@@ -21,6 +21,37 @@ function setCachedMetrics(key: string, data: unknown) {
   metricsCache.set(key, { data, exp: Date.now() + 30_000 });
 }
 
+// GET /api/leads  ← ALL leads across all websites (no websiteId filter)
+router.get("/", requireAuth, async (_req, res) => {
+  try {
+    const leads = await db
+      .select()
+      .from(trackedLeads)
+      .orderBy(desc(trackedLeads.formTimestamp));
+
+    const leadIds = leads.map((l) => l.id);
+    const jobs =
+      leadIds.length > 0
+        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
+        : [];
+
+    const jobsByLeadId: Record<string, typeof jobs[number]> = {};
+    for (const job of jobs) {
+      if (job.leadId) jobsByLeadId[job.leadId] = job;
+    }
+
+    const enrichedLeads = leads.map((lead) => ({
+      ...lead,
+      bookedJob: jobsByLeadId[lead.id] ?? null,
+    }));
+
+    return res.json({ leads: enrichedLeads });
+  } catch (error) {
+    console.error("Error fetching all leads:", error);
+    return res.status(500).json({ error: "Failed to fetch leads" });
+  }
+});
+
 // POST /api/leads/update-status  ← registered FIRST (static path)
 router.post("/update-status", requireAuth, async (req, res) => {
   try {

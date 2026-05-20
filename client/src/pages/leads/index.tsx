@@ -68,7 +68,7 @@ export default function LeadsPage() {
     queryFn: () =>
       selectedWebsite === "all"
         ? api.get<any>("/api/leads")
-        : api.get<any>(`/api/websites/${selectedWebsite}/leads`),
+        : api.get<any>(`/api/leads/${selectedWebsite}`),
   });
 
   const allLeads: any[] = leadsData?.leads ?? [];
