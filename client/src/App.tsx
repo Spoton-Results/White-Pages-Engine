@@ -73,8 +73,23 @@ import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard";
 
+// ── Restored pages (files exist on disk; were only unlinked from router) ──────
+import IntentBuildPage from "@/pages/intent-build-v2";
+import ActionReviewPage from "@/pages/action-review";
+import SearchConsolePage from "@/pages/search-console";
+import OperationsPage from "@/pages/operations";
+import ReportLinksPage from "@/pages/report-links";
+import ClientDomainsPage from "@/pages/client-domains";
+import ProductionValidationPage from "@/pages/production-validation";
+import PageIntelligencePage from "@/pages/page-intelligence";
+
+// ── Agency role helpers ───────────────────────────────────────────────────────
+function isAgencyRole(user: any): boolean {
+  return user?.role === "agency" || user?.role === "agency_admin";
+}
+
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -104,15 +119,20 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 function LoginGuard() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [, navigate] = useLocation();
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate("/");
+      // Agency users land on their dedicated dashboard
+      if (isAgencyRole(user)) {
+        navigate("/agency-dashboard");
+      } else {
+        navigate("/");
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, isAuthenticated]);
+  }, [isLoading, isAuthenticated, user]);
 
   if (isLoading) {
     return (
@@ -225,6 +245,33 @@ function Router() {
       <Route path="/onboarding-test">
         <AuthGuard><OnboardingTestPage /></AuthGuard>
       </Route>
+
+      {/* ── Restored routes ────────────────────────────────────────────────── */}
+      <Route path="/intent-build">
+        <AuthGuard><IntentBuildPage /></AuthGuard>
+      </Route>
+      <Route path="/action-review">
+        <AuthGuard><ActionReviewPage /></AuthGuard>
+      </Route>
+      <Route path="/search-console">
+        <AuthGuard><SearchConsolePage /></AuthGuard>
+      </Route>
+      <Route path="/operations">
+        <AuthGuard><OperationsPage /></AuthGuard>
+      </Route>
+      <Route path="/report-links">
+        <AuthGuard><ReportLinksPage /></AuthGuard>
+      </Route>
+      <Route path="/client-domains">
+        <AuthGuard><ClientDomainsPage /></AuthGuard>
+      </Route>
+      <Route path="/production-validation">
+        <AuthGuard><ProductionValidationPage /></AuthGuard>
+      </Route>
+      <Route path="/page-intelligence">
+        <AuthGuard><PageIntelligencePage /></AuthGuard>
+      </Route>
+
       <Route path="/report/:token">
         <ClientReportPage />
       </Route>
