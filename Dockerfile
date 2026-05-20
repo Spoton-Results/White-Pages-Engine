@@ -12,8 +12,10 @@ RUN npm ci --prefer-offline
 # ---- build ----
 FROM deps AS builder
 COPY . .
-# Generate drizzle migrations so /app/drizzle exists for the runner stage
-RUN npx drizzle-kit generate --config=drizzle.config.ts || npx drizzle-kit generate || true
+# Generate SQL migration files from schema (no live DB needed for generate)
+# Use a placeholder DATABASE_URL so drizzle.config.ts doesn't throw on import
+RUN DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/placeholder \
+    npx drizzle-kit generate || true
 RUN npm run build
 
 # ---- production ----
@@ -27,11 +29,12 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle.config.* ./
-# Copy drizzle migrations (generated in builder stage)
-COPY --from=builder /app/drizzle ./drizzle
+# migrations dir is the output of drizzle-kit generate (out: './migrations' in drizzle.config.ts)
+COPY --from=builder /app/migrations ./migrations
 
 ENV NODE_ENV=production
 
 EXPOSE 5000
 
+# Run migrations then start server
 CMD ["sh", "-c", "npx drizzle-kit migrate && node dist/index.cjs"]
