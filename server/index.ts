@@ -72,12 +72,14 @@ app.use((req, res, next) => {
 });
 
 async function runBackgroundStartup() {
-  // Run safe schema migrations (idempotent). Parallelised for speed:
-  //   • Batch ALTER TABLE per table (one round-trip per table instead of one per column)
-  //   • Run CREATE TABLE + CREATE INDEX groups in parallel
+  // Run safe schema migrations (idempotent).
+  // IMPORTANT: CREATE INDEX uses CONCURRENTLY so it never takes an AccessExclusiveLock
+  // on live tables. Trigger DDL (which requires AccessExclusiveLock on `pages`) is
+  // guarded by an existence check so it only runs once, not on every boot.
   try {
     const { pool: pgPool, db } = await import("./db");
     const { sql } = await import("drizzle-orm");
+    // exec silently swallows errors so one bad migration never crashes the rest
     const exec = (stmt: string) => pgPool.query(stmt).catch(() => {});
 
     // ── Batch 1: ALTER TABLE — one statement per table (parallel across tables) ──
@@ -193,119 +195,137 @@ async function runBackgroundStartup() {
     ]);
     console.log("[startup] Schema migrations: CREATE TABLE ensured.");
 
-    // ── Batch 3: CREATE INDEX — all in parallel ────────────────────────────────
-    await Promise.all([
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug       ON pages(website_id, slug)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_status             ON pages(status)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_recent_activity    ON pages(website_id, updated_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_id         ON pages(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_duplicate_flag     ON pages(website_id, duplicate_flag)`,
-      `CREATE INDEX IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_page_versions_active     ON page_versions(page_id, is_active)`,
-      `CREATE INDEX IF NOT EXISTS idx_websites_account_id      ON websites(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_websites_domain_lower     ON websites(lower(domain))`,
-      `CREATE INDEX IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`,
-      `CREATE INDEX IF NOT EXISTS idx_users_account_id         ON users(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_locations_account_id     ON locations(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_services_account_id      ON services(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_blueprints_account_id    ON blueprints(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_blueprints_website_id    ON blueprints(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_hub_pages_account_id     ON hub_pages(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_hub_pages_website_id     ON hub_pages(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_generation_jobs_account_id ON generation_jobs(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_generation_jobs_website_id ON generation_jobs(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_sitemaps_website_id      ON sitemaps(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_query_clusters_account_id ON query_clusters(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_internal_links_website_id ON internal_links(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_accounts_agency_id       ON accounts(agency_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_launch_health_website    ON launch_health_scores(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_launch_health_date       ON launch_health_scores(calculated_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_client_digest_website    ON client_weekly_digests(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_client_digest_status     ON client_weekly_digests(status)`,
-      `CREATE INDEX IF NOT EXISTS idx_call_tracking_page       ON call_tracking_numbers(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_call_tracking_website    ON call_tracking_numbers(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_page       ON tracked_calls(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_timestamp  ON tracked_calls(call_timestamp)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_calls_website    ON tracked_calls(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_page       ON tracked_leads(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_website    ON tracked_leads(website_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_tracked_leads_timestamp  ON tracked_leads(form_timestamp)`,
-      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_account      ON booked_jobs(account_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_page         ON booked_jobs(page_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
-      `CREATE INDEX IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at)`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS state_data_state_abbr_unique              ON state_data(state_abbr)`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS call_tracking_numbers_dynamic_number_unique ON call_tracking_numbers(dynamic_number)`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS onboarding_submissions_token_unique        ON onboarding_submissions(token)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier
+    // ── Batch 3: CREATE INDEX CONCURRENTLY ────────────────────────────────────
+    // CONCURRENTLY = no AccessExclusiveLock, never blocks reads/writes on live tables.
+    // Must be run sequentially (not in Promise.all) — Postgres forbids CONCURRENTLY
+    // inside a transaction and parallel CONCURRENTLY on the same table can deadlock.
+    const indexes = [
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_slug       ON pages(website_id, slug)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_status             ON pages(status)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_updated_at         ON pages(updated_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_recent_activity    ON pages(website_id, updated_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_id         ON pages(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_duplicate_flag     ON pages(website_id, duplicate_flag)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_page_versions_page_id    ON page_versions(page_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_page_versions_active     ON page_versions(page_id, is_active)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_websites_account_id      ON websites(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_websites_domain_lower    ON websites(lower(domain))`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_websites_protection_mode ON websites(protection_mode)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_account_id         ON users(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_locations_account_id     ON locations(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_services_account_id      ON services(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_blueprints_account_id    ON blueprints(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_blueprints_website_id    ON blueprints(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_hub_pages_account_id     ON hub_pages(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_hub_pages_website_id     ON hub_pages(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_jobs_account_id ON generation_jobs(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_jobs_website_id ON generation_jobs(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sitemaps_website_id      ON sitemaps(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_query_clusters_account_id ON query_clusters(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_internal_links_website_id ON internal_links(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_accounts_agency_id       ON accounts(agency_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_launch_health_website    ON launch_health_scores(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_launch_health_date       ON launch_health_scores(calculated_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_client_digest_website    ON client_weekly_digests(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_client_digest_status     ON client_weekly_digests(status)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_call_tracking_page       ON call_tracking_numbers(page_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_call_tracking_website    ON call_tracking_numbers(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_calls_page       ON tracked_calls(page_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_calls_timestamp  ON tracked_calls(call_timestamp)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_calls_website    ON tracked_calls(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_leads_page       ON tracked_leads(page_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_leads_website    ON tracked_leads(website_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracked_leads_timestamp  ON tracked_leads(form_timestamp)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booked_jobs_account      ON booked_jobs(account_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booked_jobs_page         ON booked_jobs(page_id)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booked_jobs_date         ON booked_jobs(booked_date)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_admin_notif_website      ON admin_notifications(website_id, created_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_demotion_logs_website    ON demotion_logs(website_id, created_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fallback_hit_logs_site_slug ON fallback_hit_logs(website_id, slug)`,
+      `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS state_data_state_abbr_unique               ON state_data(state_abbr)`,
+      `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS call_tracking_numbers_dynamic_number_unique ON call_tracking_numbers(dynamic_number)`,
+      `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS onboarding_submissions_token_unique         ON onboarding_submissions(token)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_pub_tier
          ON pages(website_id, tier)
          WHERE status = 'published'`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_pub_tier_qscore
-         ON pages(website_id, tier)
-         WHERE status = 'published'`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_pub_quality
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_pub_quality
          ON pages(website_id, quality_score)
          WHERE status = 'published' AND quality_score IS NOT NULL`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_pub_updated
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_pub_updated
          ON pages(website_id, updated_at)
          WHERE status = 'published'`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_pub_slug
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_pub_slug
          ON pages(website_id, slug)
          WHERE status = 'published'`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_slug      ON pages(website_id, slug)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_updated   ON pages(website_id, updated_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_gsc_submitted     ON pages(website_id, gsc_submitted_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_publish_wave      ON pages(website_id, publish_wave)`,
-      `CREATE INDEX IF NOT EXISTS idx_pages_website_created   ON pages(website_id, created_at)`,
-    ].map(exec));
-    console.log("[startup] Database indexes ensured.");
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_updated   ON pages(website_id, updated_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_gsc_submitted     ON pages(website_id, gsc_submitted_at)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_publish_wave      ON pages(website_id, publish_wave)`,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_created   ON pages(website_id, created_at)`,
+    ];
+    // Sequential to avoid CONCURRENTLY deadlock on same-table indexes
+    for (const idx of indexes) {
+      await exec(idx);
+    }
+    console.log("[startup] Database indexes ensured (CONCURRENTLY — no locks).");
 
-    // ── Incremental publishedPages counter trigger ─────────────────────────────
-    await db.execute(sql`
-      CREATE OR REPLACE FUNCTION fn_sync_published_pages_count()
-      RETURNS trigger AS $$
-      BEGIN
-        IF TG_OP = 'INSERT' THEN
-          IF NEW.status = 'published' THEN
-            UPDATE websites
-              SET published_pages = GREATEST(0, COALESCE(published_pages, 0) + 1)
-              WHERE id = NEW.website_id;
-          END IF;
-        ELSIF TG_OP = 'UPDATE' THEN
-          IF OLD.status IS DISTINCT FROM NEW.status THEN
+    // ── Trigger: install only if it doesn't already exist ─────────────────────
+    // CREATE TRIGGER requires AccessExclusiveLock on `pages`. We check pg_trigger
+    // first so this only runs once (on first deploy), not on every boot restart.
+    const triggerExists = await pgPool.query(`
+      SELECT 1 FROM pg_trigger
+      WHERE tgname = 'trg_sync_published_pages'
+        AND tgrelid = 'pages'::regclass
+      LIMIT 1
+    `).catch(() => ({ rows: [] }));
+
+    if (triggerExists.rows.length === 0) {
+      console.log("[startup] Installing published-pages trigger (first boot only)...");
+      await db.execute(sql`
+        CREATE OR REPLACE FUNCTION fn_sync_published_pages_count()
+        RETURNS trigger AS $$
+        BEGIN
+          IF TG_OP = 'INSERT' THEN
             IF NEW.status = 'published' THEN
               UPDATE websites
                 SET published_pages = GREATEST(0, COALESCE(published_pages, 0) + 1)
                 WHERE id = NEW.website_id;
-            ELSIF OLD.status = 'published' THEN
+            END IF;
+          ELSIF TG_OP = 'UPDATE' THEN
+            IF OLD.status IS DISTINCT FROM NEW.status THEN
+              IF NEW.status = 'published' THEN
+                UPDATE websites
+                  SET published_pages = GREATEST(0, COALESCE(published_pages, 0) + 1)
+                  WHERE id = NEW.website_id;
+              ELSIF OLD.status = 'published' THEN
+                UPDATE websites
+                  SET published_pages = GREATEST(0, COALESCE(published_pages, 0) - 1)
+                  WHERE id = OLD.website_id;
+              END IF;
+            END IF;
+          ELSIF TG_OP = 'DELETE' THEN
+            IF OLD.status = 'published' THEN
               UPDATE websites
                 SET published_pages = GREATEST(0, COALESCE(published_pages, 0) - 1)
                 WHERE id = OLD.website_id;
             END IF;
           END IF;
-        ELSIF TG_OP = 'DELETE' THEN
-          IF OLD.status = 'published' THEN
-            UPDATE websites
-              SET published_pages = GREATEST(0, COALESCE(published_pages, 0) - 1)
-              WHERE id = OLD.website_id;
-          END IF;
-        END IF;
-        RETURN COALESCE(NEW, OLD);
-      END;
-      $$ LANGUAGE plpgsql;
-    `);
-    await db.execute(sql`
-      DROP TRIGGER IF EXISTS trg_sync_published_pages ON pages;
-    `);
-    await db.execute(sql`
-      CREATE TRIGGER trg_sync_published_pages
-        AFTER INSERT OR UPDATE OF status OR DELETE ON pages
-        FOR EACH ROW EXECUTE FUNCTION fn_sync_published_pages_count();
-    `);
-    console.log("[startup] Published-pages counter trigger installed.");
+          RETURN COALESCE(NEW, OLD);
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+      await db.execute(sql`
+        DROP TRIGGER IF EXISTS trg_sync_published_pages ON pages;
+      `);
+      await db.execute(sql`
+        CREATE TRIGGER trg_sync_published_pages
+          AFTER INSERT OR UPDATE OF status OR DELETE ON pages
+          FOR EACH ROW EXECUTE FUNCTION fn_sync_published_pages_count();
+      `);
+      console.log("[startup] Published-pages trigger installed.");
+    } else {
+      console.log("[startup] Published-pages trigger already exists — skipping DDL lock.");
+    }
 
     await db.execute(sql`
       UPDATE websites
@@ -313,7 +333,7 @@ async function runBackgroundStartup() {
           name   = CASE WHEN name = 'SpotOn Results Main' THEN 'SpotOn Results' ELSE name END,
           settings = settings || '{"proxyPath":"/pages","parentDomain":"spotonresults.com"}'::jsonb
       WHERE domain = 'pages.spotonresults.com'
-    `);
+    `).catch(() => {});
 
     await db.execute(sql`
       INSERT INTO websites (id, domain, name, account_id, settings, created_at, updated_at)
@@ -326,7 +346,7 @@ async function runBackgroundStartup() {
         NOW(), NOW()
       )
       ON CONFLICT (domain) DO NOTHING
-    `);
+    `).catch(() => {});
 
     await db.execute(sql`
       UPDATE pages
@@ -335,12 +355,12 @@ async function runBackgroundStartup() {
         SELECT id FROM websites
         WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
       )
-    `);
+    `).catch(() => {});
 
     await db.execute(sql`
       DELETE FROM websites
       WHERE domain IN ('subdraw.com','subtrackers.spotonresults.com','pagessubtrackers.spotonresults.com')
-    `);
+    `).catch(() => {});
 
     await db.execute(sql`
       UPDATE websites
@@ -348,8 +368,8 @@ async function runBackgroundStartup() {
         || '{"proxyPath":"","parentDomain":"pages.subdraw.com","primaryColor":"#1e40af"}'::jsonb)
         - 'mainWebsiteUrl'
       WHERE domain = 'pages.subdraw.com'
-    `);
-    console.log("[startup] pages.subdraw.com: all pages migrated, old subdraw.com records removed (idempotent).");
+    `).catch(() => {});
+    console.log("[startup] pages.subdraw.com migration: idempotent patch applied.");
 
     const patch = await db.execute(sql`
       UPDATE pages
@@ -358,7 +378,7 @@ async function runBackgroundStartup() {
         title = replace(title, ', ' || split_part(split_part(h1, ' in ', 2), ', ', 1) || ' | ', ' | ')
       WHERE page_type = 'state_hub'
         AND h1 LIKE '% in %, %'
-    `);
+    `).catch(() => ({ rowCount: 0 }));
     const patched = (patch as any).rowCount ?? 0;
     if (patched > 0) {
       console.log(`[startup] Data patch: fixed ${patched} state_hub pages with duplicate "State, State" in title/H1.`);
