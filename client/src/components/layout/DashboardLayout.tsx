@@ -4,8 +4,9 @@ import {
   LayoutDashboard, Users, Globe,
   Bell, LogOut, Building2, MapPin, Wrench,
   Search as SearchIcon, Layers, Briefcase, Zap, BarChart3,
-  Map, Menu, X, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
-  ChevronDown, Handshake, FlaskConical, PhoneCall,
+  Map, Menu, BookOpen, Inbox, Factory, ShieldCheck, Activity, Network, Link2, Bot,
+  Handshake, FlaskConical, PhoneCall, Brain, CheckSquare, MonitorCheck,
+  ServerCog, FileBarChart2, Tv2, Shield,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -30,36 +31,48 @@ interface DashboardLayoutProps {
 }
 
 const navigation = [
-  { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Agencies", href: "/agencies", icon: Handshake },
-  { name: "Accounts", href: "/accounts", icon: Building2 },
-  { name: "Websites", href: "/websites", icon: Globe },
+  { name: "Overview",       href: "/",              icon: LayoutDashboard },
+  { name: "Agencies",       href: "/agencies",       icon: Handshake },
+  { name: "Accounts",       href: "/accounts",       icon: Building2 },
+  // Websites is rendered as a dynamic item (WebsitesNavItem) to append ?accountId=
   { name: "Brand Profiles", href: "/brand-profiles", icon: Briefcase },
-  { name: "Industries", href: "/industries", icon: Factory },
-  { name: "Locations", href: "/locations", icon: MapPin },
-  { name: "Services", href: "/services", icon: Wrench },
+  { name: "Industries",     href: "/industries",     icon: Factory },
+  { name: "Locations",      href: "/locations",      icon: MapPin },
+  { name: "Services",       href: "/services",       icon: Wrench },
   { name: "Query Clusters", href: "/query-clusters", icon: SearchIcon },
-  { name: "Blueprints", href: "/blueprints", icon: Layers },
-  { name: "Hub Pages", href: "/hub-pages", icon: Network },
+  { name: "Blueprints",     href: "/blueprints",     icon: Layers },
+  { name: "Hub Pages",      href: "/hub-pages",      icon: Network },
+];
+
+const contentNav = [
+  { name: "Published Pages",    href: "/published",       icon: Globe },
+  { name: "Leads",              href: "/leads",           icon: Inbox },
+  { name: "Leads & Conversions",href: "/agency-dashboard",icon: PhoneCall },
+  { name: "Bulk Generator",     href: "/bulk-generator",  icon: Zap },
+  { name: "Generation Jobs",    href: "/jobs",            icon: BarChart3 },
+  { name: "Sitemap Manager",    href: "/sitemaps",        icon: Map },
+  { name: "Internal Links",     href: "/internal-links",  icon: Link2 },
+  { name: "Automation",         href: "/automation",      icon: Bot },
+  { name: "Bank Health",        href: "/bank-health",     icon: Activity },
+  { name: "SEO Control",        href: "/search-control",  icon: ShieldCheck },
+  { name: "Users & Roles",      href: "/users",           icon: Users },
+  { name: "Operations Guide",   href: "/guide",           icon: BookOpen },
+];
+
+// ── Intelligence / Governance nav group ───────────────────────────────────────
+const intelligenceNav = [
+  { name: "Intent Build",          href: "/intent-build",          icon: Brain },
+  { name: "Action Review",         href: "/action-review",         icon: CheckSquare },
+  { name: "Page Intelligence",     href: "/page-intelligence",     icon: BarChart3 },
+  { name: "Production Validation", href: "/production-validation", icon: MonitorCheck },
+  { name: "Search Console",        href: "/search-console",        icon: SearchIcon },
+  { name: "Client Domains",        href: "/client-domains",        icon: Tv2 },
+  { name: "Report Center",         href: "/report-links",          icon: FileBarChart2 },
+  { name: "Operations",            href: "/operations",            icon: ServerCog },
 ];
 
 const testingNav = [
   { name: "Onboarding Test", href: "/onboarding-test", icon: FlaskConical },
-];
-
-const contentNav = [
-  { name: "Published Pages", href: "/published", icon: Globe },
-  { name: "Leads", href: "/leads", icon: Inbox },
-  { name: "Leads & Conversions", href: "/agency-dashboard", icon: PhoneCall },
-  { name: "Bulk Generator", href: "/bulk-generator", icon: Zap },
-  { name: "Generation Jobs", href: "/jobs", icon: BarChart3 },
-  { name: "Sitemap Manager", href: "/sitemaps", icon: Map },
-  { name: "Internal Links", href: "/internal-links", icon: Link2 },
-  { name: "Automation", href: "/automation", icon: Bot },
-  { name: "Bank Health", href: "/bank-health", icon: Activity },
-  { name: "SEO Control", href: "/search-control", icon: ShieldCheck },
-  { name: "Users & Roles", href: "/users", icon: Users },
-  { name: "Operations Guide", href: "/guide", icon: BookOpen },
 ];
 
 function NavItem({ item, onClick }: { item: { name: string; href: string; icon: any }; onClick?: () => void }) {
@@ -77,6 +90,35 @@ function NavItem({ item, onClick }: { item: { name: string; href: string; icon: 
       >
         <item.icon className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
         {item.name}
+      </a>
+    </Link>
+  );
+}
+
+/**
+ * Dynamic Websites nav item — appends ?accountId=<selected> when a client is
+ * selected in the Agency/Client switcher, matching the pre-rollback behaviour.
+ */
+function WebsitesNavItem({ onClick }: { onClick?: () => void }) {
+  const { selectedAccountId } = useAccountContext();
+  const [location] = useLocation();
+  const href = selectedAccountId
+    ? `/websites?accountId=${selectedAccountId}`
+    : "/websites";
+  const isActive = location === "/websites" || location.startsWith("/websites");
+
+  return (
+    <Link href={href}>
+      <a
+        onClick={onClick}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          isActive
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`}
+      >
+        <Globe className={`size-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+        Websites
       </a>
     </Link>
   );
@@ -110,18 +152,33 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
       </div>
 
       <div className="flex-1 py-4 px-3 flex flex-col gap-0.5 overflow-y-auto">
+        {/* ── Platform ─────────────────────────────────────────────── */}
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
           Platform
         </div>
         {navigation.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+        {/* Dynamic websites link with ?accountId= */}
+        <WebsitesNavItem onClick={onNav} />
 
         <Separator className="my-3" />
+
+        {/* ── Content ──────────────────────────────────────────────── */}
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
           Content
         </div>
         {contentNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
 
         <Separator className="my-3" />
+
+        {/* ── Intelligence ─────────────────────────────────────────── */}
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
+          Intelligence
+        </div>
+        {intelligenceNav.map(item => <NavItem key={item.name} item={item} onClick={onNav} />)}
+
+        <Separator className="my-3" />
+
+        {/* ── Testing ──────────────────────────────────────────────── */}
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 px-2">
           Testing
         </div>
