@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { mountSubRouters } from "./route-mounts";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
@@ -359,11 +360,6 @@ async function runBackgroundStartup() {
     console.log("[startup] pages.subdraw.com: all pages migrated, old subdraw.com records removed (idempotent).");
 
     // Data patch: fix "State, State" duplicate in state_hub page titles/H1s.
-    // Caused by blueprint templates using {city}, {state} applied to state-level targets
-    // where location === state name (e.g. "New Mexico, New Mexico" → "New Mexico").
-    // Uses string ops (no backreference regex): extracts the state name from the h1, then
-    // removes the trailing ", StateName" from h1 and ", StateName | " from title.
-    // This patch is idempotent — pages without the pattern are unaffected by the LIKE filter.
     const patch = await db.execute(sql`
       UPDATE pages
       SET
@@ -387,15 +383,13 @@ async function runBackgroundStartup() {
     console.error("Seeding failed (non-fatal):", err);
   }
 
-  // Sync ALL website published-page counters — runs 5 min after boot so page serving
-  // gets all DB connections first. COUNT(*) on 3.8M rows is slow; don't block startup.
+  // Sync ALL website published-page counters — runs 5 min after boot
   setTimeout(async () => {
     try {
       const { getWebsites, syncWebsitePublishedCount } = await import("./storage");
       const allWebsites = await getWebsites();
       if (allWebsites.length > 0) {
         console.log(`[startup] Syncing published-page counts for ${allWebsites.length} website(s)...`);
-        // Serialize to avoid stacking heavy COUNT queries on the pool simultaneously
         for (const w of allWebsites) {
           await syncWebsitePublishedCount(w.id).catch(() => {});
         }
@@ -405,10 +399,6 @@ async function runBackgroundStartup() {
       console.error("[startup] Page count sync failed (non-fatal):", err);
     }
   }, 5 * 60 * 1000); // 5 minutes
-
-  // NOTE: startup tier assignment removed — running bulkUpdatePageTiers on 3.8M rows
-  // at boot holds DB connections for 3+ minutes and causes page serving timeouts.
-  // Tier assignment runs via the normal scoring/automation pipeline instead.
 
   // Resume any background jobs that were interrupted by a server restart
   try {
@@ -421,8 +411,6 @@ async function runBackgroundStartup() {
     if (bulkJobs.length > 0) {
       console.log(`[startup] Resuming ${bulkJobs.length} interrupted bulk job(s)...`);
       for (const j of bulkJobs) {
-        // Death-spiral guard: if this job has been interrupted many times or crashed very recently,
-        // it is likely causing OOM on every restart. Cancel it rather than re-entering the loop.
         const settings = j.settings as any;
         const interruptCount = (settings._interruptCount ?? 0) + 1;
         const newSettings = { ...settings, _interruptCount: interruptCount };
@@ -472,6 +460,12 @@ async function runBackgroundStartup() {
 }
 
 (async () => {
+  // ── Mount all sub-routers BEFORE registering inline routes ─────────────────
+  // callTrackingRouter, formTrackingRouter, leadsRouter, dashboardAgencyRouter,
+  // dashboardAdminRouter, and widgetRouter were imported in routes.ts but never
+  // wired up with app.use(). This call activates them.
+  mountSubRouters(app);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -590,6 +584,8 @@ async function runBackgroundStartup() {
           }
         }
       }, 60 * 60 * 1000);
+
+      runBackgroundStartup();
     },
   );
 })();
