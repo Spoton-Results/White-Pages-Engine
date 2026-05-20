@@ -32,4 +32,5 @@ ENV NODE_ENV=production
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "npx drizzle-kit migrate && node dist/index.cjs"]
+# server/index.ts runs all DB migrations inline at startup — no drizzle-kit migrate needed
+CMD ["node", "dist/index.cjs"]
