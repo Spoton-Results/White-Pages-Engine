@@ -11,14 +11,21 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,
+  // Keep pool small — fewer slots means fewer frozen connections when DB is unreachable.
+  max: 5,
   idleTimeoutMillis: 30000,
-  // Railway Postgres can take up to 2 minutes to wake from sleep.
-  // 8s was too short — the pool would time out and retry in a loop,
-  // stalling all requests for the full 3-4 minute cold-start window.
-  connectionTimeoutMillis: 120000,
+  // 15s matches Railway's request timeout — if DB can't connect in 15s the
+  // request would 502 anyway. Previously 120s caused ALL 10 pool slots to
+  // freeze for 2 minutes, blocking every HTTP request behind them.
+  connectionTimeoutMillis: 15000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
+});
+
+// Prevent unhandled 'error' events from crashing the process when a
+// background pool client loses its connection (e.g. Railway DB restart).
+pool.on("error", (err) => {
+  console.error("[db] Pool background client error (non-fatal):", err.message);
 });
 
 export const schema = {
@@ -29,19 +36,34 @@ export const schema = {
 export const db = drizzle(pool, { schema });
 
 /**
- * Eagerly acquire one connection at boot so Railway DB wakes up
- * before the first real request arrives. Called from server/index.ts
- * boot sequence. Logs clearly instead of silently stalling.
+ * Non-blocking DB warmup with exponential backoff retry.
+ * Fires-and-forgets — never blocks the HTTP server from starting.
+ * Retries up to 8 times (total ~4 minutes) so Railway DB cold-starts
+ * are handled gracefully without freezing the request pool.
  */
-export async function warmupDatabase(): Promise<void> {
-  const start = Date.now();
-  try {
-    const client = await pool.connect();
-    await client.query("SELECT 1");
-    client.release();
-    const ms = Date.now() - start;
-    console.log(`[db] Warmup connected in ${ms}ms`);
-  } catch (err: any) {
-    console.error(`[db] Warmup failed after ${Date.now() - start}ms:`, err?.message);
+export function warmupDatabase(): void {
+  const MAX_ATTEMPTS = 8;
+  const BASE_DELAY_MS = 3000;
+
+  async function attempt(n: number): Promise<void> {
+    const start = Date.now();
+    try {
+      const client = await pool.connect();
+      await client.query("SELECT 1");
+      client.release();
+      console.log(`[db] Warmup connected in ${Date.now() - start}ms (attempt ${n})`);
+    } catch (err: any) {
+      const elapsed = Date.now() - start;
+      if (n >= MAX_ATTEMPTS) {
+        console.error(`[db] Warmup giving up after ${n} attempts (${elapsed}ms): ${err?.message}`);
+        return;
+      }
+      const delay = BASE_DELAY_MS * Math.pow(1.8, n - 1);
+      console.warn(`[db] Warmup attempt ${n} failed (${elapsed}ms): ${err?.message} — retrying in ${Math.round(delay / 1000)}s`);
+      setTimeout(() => attempt(n + 1), delay);
+    }
   }
+
+  // Fire without awaiting — never blocks server boot or request handling
+  attempt(1);
 }
