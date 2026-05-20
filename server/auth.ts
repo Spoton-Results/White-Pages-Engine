@@ -40,7 +40,10 @@ function hasSession(req: Request): boolean {
 }
 
 function isApiRequest(req: Request): boolean {
-  return String(req.originalUrl || req.url || "").startsWith("/api");
+  // Use originalUrl to ensure full path is checked — req.path can be
+  // stripped of prefixes by sub-routers which causes session MW to be skipped
+  const url = String(req.originalUrl || req.url || "");
+  return url.startsWith("/api") || url.startsWith("/api/");
 }
 
 function passFrontendRoute(req: Request, next: NextFunction): boolean {
