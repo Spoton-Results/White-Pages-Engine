@@ -17,7 +17,7 @@
  *   - /api/pages  (CRUD + publish/unpublish/reorder)
  *   - /api/generation-jobs
  *   - /api/generation
- *   - /api/variation-banks
+ *   - /api/variation-banks  (CRUD + fill-missing + bank-completeness + write + write-thin + fill-missing-all-job)
  *   - /api/variation-writer
  *   - /api/sitemaps
  *   - /api/public/contact
@@ -47,6 +47,11 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { generateSitemapsForWebsite, generateRobotsTxt } from "../services/sitemap";
+import {
+  writeVariationsForService,
+  fillMissingSectionsForService,
+  type BrandContext,
+} from "../services/variation-writer";
 
 // ── Cache invalidation stubs ──────────────────────────────────────────────────
 // The old routes.ts monolith held in-memory Maps for sitemap and page caches.
@@ -58,6 +63,30 @@ function invalidateSitemapCache(_websiteId: string): void {
 function invalidatePageCache(_websiteId: string, _slug: string): void {
   // no-op: cache layer removed with routes.ts monolith
 }
+
+// ── In-memory job store for background fill-missing-all jobs ─────────────────
+interface FillMissingJob {
+  jobId: string;
+  websiteId: string;
+  status: "running" | "completed" | "failed";
+  totalPages: number;
+  processedPages: number;
+  errors: string[];
+  startedAt: number;
+}
+const fillMissingJobs = new Map<string, FillMissingJob>();
+
+// ── In-memory job store for background write-thin jobs ───────────────────────
+interface WriteThinJob {
+  jobId: string;
+  websiteId: string;
+  status: "running" | "done" | "error";
+  total: number;
+  done: number;
+  errors: string[];
+  startedAt: number;
+}
+const writeThinJobs = new Map<string, WriteThinJob>();
 
 const router = Router();
 
@@ -398,6 +427,21 @@ router.get("/api/generation-jobs/:id", requireAuth, async (req: Request, res: Re
   return res.json(job);
 });
 
+// Generic job polling endpoint used by the Bank Health fill-missing-all job
+router.get("/api/jobs/:jobId", requireAuth, async (req: Request, res: Response) => {
+  const { jobId } = req.params;
+  // Check fill-missing jobs first
+  const fillJob = fillMissingJobs.get(jobId);
+  if (fillJob) return res.json(fillJob);
+  // Check write-thin jobs
+  const thinJob = writeThinJobs.get(jobId);
+  if (thinJob) return res.json(thinJob);
+  // Fall back to generation jobs table
+  const job = await storage.getGenerationJob(jobId).catch(() => null);
+  if (job) return res.json(job);
+  return res.status(404).json({ message: "Job not found" });
+});
+
 // ── Variation Banks ───────────────────────────────────────────────────────────
 router.get("/api/websites/:websiteId/variation-banks", requireAuth, async (req: Request, res: Response) => {
   const { service } = req.query as { service?: string };
@@ -412,6 +456,282 @@ router.get("/api/websites/:websiteId/variation-banks", requireAuth, async (req: 
 router.get("/api/websites/:websiteId/variation-banks/completeness", requireAuth, async (req: Request, res: Response) => {
   const completeness = await storage.getBankCompleteness(req.params.websiteId);
   return res.json(completeness);
+});
+
+// ── Bank Completeness (Bank Health page) ──────────────────────────────────────
+
+// GET  /api/websites/:websiteId/bank-completeness
+// Returns cached completeness rows for the Bank Health dashboard
+router.get("/api/websites/:websiteId/bank-completeness", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rows = await storage.getBankCompleteness(req.params.websiteId);
+    return res.json(rows);
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message ?? "Failed to load bank completeness" });
+  }
+});
+
+// POST /api/websites/:websiteId/bank-completeness/recompute
+// Recomputes completeness scores for every service in the website's bank
+router.post("/api/websites/:websiteId/bank-completeness/recompute", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { websiteId } = req.params;
+    const services = await storage.getVariationBankServices(websiteId);
+    let computed = 0;
+    for (const service of services) {
+      await storage.recomputeBankCompleteness(websiteId, service).catch(() => {});
+      computed++;
+    }
+    return res.json({ computed });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message ?? "Recompute failed" });
+  }
+});
+
+// ── Variation Bank Write (single service, full 14-section rewrite) ────────────
+
+// POST /api/websites/:websiteId/variation-banks/write
+// Rewrites ALL 14 sections (Core + Extended + SEO Expansion) for a single service.
+router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { websiteId } = req.params;
+    const { service } = req.body as { service: string };
+    if (!service?.trim()) return res.status(400).json({ message: "service is required" });
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const account = website.accountId ? await storage.getAccount(website.accountId).catch(() => null) : null;
+    const brand = await storage.getBrandProfile(websiteId).catch(() => null);
+    const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
+
+    const ctx: BrandContext = {
+      brandName: brand?.name || website.name || website.domain,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name ?? undefined,
+      industryDescription: industry?.description ?? undefined,
+    };
+
+    const result = await writeVariationsForService(service.trim(), website.accountId ?? websiteId, websiteId, ctx);
+    await storage.recomputeBankCompleteness(websiteId, service.trim()).catch(() => {});
+    return res.json({ written: result.written, errors: result.errors });
+  } catch (err: any) {
+    console.error("[variation-banks/write]", err);
+    return res.status(500).json({ message: err.message ?? "Write failed" });
+  }
+});
+
+// ── Fill Missing (single service) ─────────────────────────────────────────────
+
+// POST /api/websites/:websiteId/variation-banks/fill-missing
+// Fills ONLY the sections that don't yet exist for the given service.
+// Includes SEO Expansion sections: comparison, pricing_factors, best_fit, software_integration.
+router.post("/api/websites/:websiteId/variation-banks/fill-missing", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { websiteId } = req.params;
+    const { service } = req.body as { service: string };
+    if (!service?.trim()) return res.status(400).json({ message: "service is required" });
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const brand = await storage.getBrandProfile(websiteId).catch(() => null);
+    const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
+
+    const ctx: BrandContext = {
+      brandName: brand?.name || website.name || website.domain,
+      brandDescription: brand?.description ?? undefined,
+      voiceAndTone: brand?.voiceAndTone ?? undefined,
+      industryName: industry?.name ?? undefined,
+      industryDescription: industry?.description ?? undefined,
+    };
+
+    const result = await fillMissingSectionsForService(service.trim(), website.accountId ?? websiteId, websiteId, ctx);
+
+    // Recompute completeness score after filling
+    if (result.filled.length > 0) {
+      await storage.recomputeBankCompleteness(websiteId, service.trim()).catch(() => {});
+    }
+
+    return res.json({ filled: result.filled, skipped: result.skipped, errors: result.errors });
+  } catch (err: any) {
+    console.error("[variation-banks/fill-missing]", err);
+    return res.status(500).json({ message: err.message ?? "Fill missing failed" });
+  }
+});
+
+// ── Fill Missing All (background job — all services for a website) ─────────────
+
+// POST /api/websites/:websiteId/variation-banks/fill-missing-all-job
+// Starts a background job that fills missing sections for multiple services.
+// Returns { started: true, jobId, total } immediately.
+router.post("/api/websites/:websiteId/variation-banks/fill-missing-all-job", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { websiteId } = req.params;
+    const { services } = req.body as { services?: string[] };
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const targetServices: string[] = Array.isArray(services) && services.length > 0
+      ? services
+      : await storage.getVariationBankServices(websiteId);
+
+    if (targetServices.length === 0) {
+      return res.json({ started: false, message: "No services found to fill" });
+    }
+
+    const jobId = `fill-all-${Date.now()}-${randomBytes(4).toString("hex")}`;
+    const job: FillMissingJob = {
+      jobId,
+      websiteId,
+      status: "running",
+      totalPages: targetServices.length,
+      processedPages: 0,
+      errors: [],
+      startedAt: Date.now(),
+    };
+    fillMissingJobs.set(jobId, job);
+
+    // Store jobId on website for restore-on-reload
+    storage.updateWebsiteSettings(websiteId, { fillMissingJobId: jobId }).catch(() => {});
+
+    // Run in background
+    setImmediate(async () => {
+      const brand = await storage.getBrandProfile(websiteId).catch(() => null);
+      const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
+      const ctx: BrandContext = {
+        brandName: brand?.name || website.name || website.domain,
+        brandDescription: brand?.description ?? undefined,
+        voiceAndTone: brand?.voiceAndTone ?? undefined,
+        industryName: industry?.name ?? undefined,
+        industryDescription: industry?.description ?? undefined,
+      };
+
+      for (const service of targetServices) {
+        try {
+          const result = await fillMissingSectionsForService(service, website.accountId ?? websiteId, websiteId, ctx);
+          if (result.filled.length > 0) {
+            await storage.recomputeBankCompleteness(websiteId, service).catch(() => {});
+          }
+          if (result.errors.length > 0) {
+            job.errors.push(...result.errors.map(e => `${service}: ${e}`));
+          }
+        } catch (err: any) {
+          job.errors.push(`${service}: ${err?.message ?? String(err)}`);
+        }
+        job.processedPages++;
+      }
+
+      job.status = job.errors.length > 0 && job.processedPages === 0 ? "failed" : "completed";
+      // Clean up stored jobId
+      storage.updateWebsiteSettings(websiteId, { fillMissingJobId: null }).catch(() => {});
+    });
+
+    return res.json({ started: true, jobId, total: targetServices.length });
+  } catch (err: any) {
+    console.error("[fill-missing-all-job]", err);
+    return res.status(500).json({ message: err.message ?? "Failed to start fill job" });
+  }
+});
+
+// GET /api/websites/:websiteId/fill-missing-job
+// Returns the active fill-missing-all job for this website (for restore-on-reload)
+router.get("/api/websites/:websiteId/fill-missing-job", requireAuth, async (req: Request, res: Response) => {
+  const { websiteId } = req.params;
+  // Find the most recent running job for this website
+  let latestJob: FillMissingJob | null = null;
+  for (const job of fillMissingJobs.values()) {
+    if (job.websiteId === websiteId && job.status === "running") {
+      if (!latestJob || job.startedAt > latestJob.startedAt) latestJob = job;
+    }
+  }
+  if (latestJob) return res.json({ jobId: latestJob.jobId });
+  return res.json({ jobId: null });
+});
+
+// ── Write Thin Banks (bulk background job) ────────────────────────────────────
+
+// POST /api/websites/:websiteId/variation-banks/write-thin
+// Starts a background job that rewrites all services whose completeness
+// score is below the given threshold (default 70). Rewrites ALL 14 sections.
+router.post("/api/websites/:websiteId/variation-banks/write-thin", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { websiteId } = req.params;
+    const threshold: number = typeof req.body.threshold === "number" ? req.body.threshold : 70;
+
+    const website = await storage.getWebsite(websiteId);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const allRows = await storage.getBankCompleteness(websiteId);
+    const thinServices: string[] = allRows
+      .filter((r: any) => (r.completenessScore ?? 0) < threshold)
+      .map((r: any) => r.service as string);
+
+    if (thinServices.length === 0) {
+      return res.json({ started: false, message: `No services below ${threshold}% completeness` });
+    }
+
+    const jobId = `write-thin-${Date.now()}-${randomBytes(4).toString("hex")}`;
+    const job: WriteThinJob = {
+      jobId,
+      websiteId,
+      status: "running",
+      total: thinServices.length,
+      done: 0,
+      errors: [],
+      startedAt: Date.now(),
+    };
+    writeThinJobs.set(jobId, job);
+
+    // Store jobId on website for restore-on-reload
+    storage.updateWebsiteSettings(websiteId, { writeThinJobId: jobId }).catch(() => {});
+
+    setImmediate(async () => {
+      const brand = await storage.getBrandProfile(websiteId).catch(() => null);
+      const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
+      const ctx: BrandContext = {
+        brandName: brand?.name || website.name || website.domain,
+        brandDescription: brand?.description ?? undefined,
+        voiceAndTone: brand?.voiceAndTone ?? undefined,
+        industryName: industry?.name ?? undefined,
+        industryDescription: industry?.description ?? undefined,
+      };
+
+      for (const service of thinServices) {
+        try {
+          await writeVariationsForService(service, website.accountId ?? websiteId, websiteId, ctx);
+          await storage.recomputeBankCompleteness(websiteId, service).catch(() => {});
+        } catch (err: any) {
+          job.errors.push(`${service}: ${err?.message ?? String(err)}`);
+        }
+        job.done++;
+      }
+
+      job.status = "done";
+      storage.updateWebsiteSettings(websiteId, { writeThinJobId: null }).catch(() => {});
+    });
+
+    return res.json({ started: true, jobId, total: thinServices.length });
+  } catch (err: any) {
+    console.error("[write-thin]", err);
+    return res.status(500).json({ message: err.message ?? "Failed to start write-thin job" });
+  }
+});
+
+// GET /api/websites/:websiteId/bank-write-job
+// Returns the active write-thin job status for this website (for restore-on-reload)
+router.get("/api/websites/:websiteId/bank-write-job", requireAuth, async (req: Request, res: Response) => {
+  const { websiteId } = req.params;
+  let latestJob: WriteThinJob | null = null;
+  for (const job of writeThinJobs.values()) {
+    if (job.websiteId === websiteId && job.status === "running") {
+      if (!latestJob || job.startedAt > latestJob.startedAt) latestJob = job;
+    }
+  }
+  if (latestJob) return res.json({ jobId: latestJob.jobId, status: latestJob.status, total: latestJob.total, done: latestJob.done });
+  return res.json({ jobId: null });
 });
 
 // ── Sitemaps ──────────────────────────────────────────────────────────────────
