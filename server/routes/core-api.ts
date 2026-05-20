@@ -150,12 +150,11 @@ router.delete("/api/agencies/:id", requireAuth, requireSuperAdmin, async (req: R
 // ── Websites ──────────────────────────────────────────────────────────────────
 router.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
   const accountId = req.query.accountId as string | undefined;
-  if (accountId) {
-    const websiteList = await storage.getWebsites(accountId);
-    return res.json(websiteList);
-  }
-  const all = await storage.getAllWebsites();
-  return res.json(all);
+  // getWebsites(accountId?) handles both filtered and unfiltered cases:
+  // - with accountId → returns websites for that account only
+  // - without accountId → returns all websites across all accounts
+  const websiteList = await storage.getWebsites(accountId);
+  return res.json(websiteList);
 });
 
 router.get("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
