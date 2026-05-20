@@ -12,6 +12,8 @@ RUN npm ci --prefer-offline
 # ---- build ----
 FROM deps AS builder
 COPY . .
+# Generate drizzle migrations so /app/drizzle exists for the runner stage
+RUN npx drizzle-kit generate --config=drizzle.config.ts || npx drizzle-kit generate || true
 RUN npm run build
 
 # ---- production ----
@@ -25,6 +27,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle.config.* ./
+# Copy drizzle migrations (generated in builder stage)
 COPY --from=builder /app/drizzle ./drizzle
 
 ENV NODE_ENV=production
