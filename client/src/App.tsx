@@ -43,6 +43,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
+import AccountDetailPage from "@/pages/accounts/detail";
 import WebsitesPage from "@/pages/websites";
 import BrandProfilesPage from "@/pages/brand-profiles";
 import LocationsPage from "@/pages/locations";
@@ -73,7 +74,7 @@ import CustomerDashboard from "@/pages/CustomerDashboard";
 import OnboardingTestPage from "@/pages/onboarding-test";
 import AgencyDashboardPage from "@/pages/agency-dashboard";
 
-// ── Restored pages (files exist on disk; were only unlinked from router) ──────
+// ── Restored pages (files exist on disk; were only unlinked from router) ─────────────────────
 import IntentBuildPage from "@/pages/intent-build-v2";
 import ActionReviewPage from "@/pages/action-review";
 import SearchConsolePage from "@/pages/search-console";
@@ -83,7 +84,7 @@ import ClientDomainsPage from "@/pages/client-domains";
 import ProductionValidationPage from "@/pages/production-validation";
 import PageIntelligencePage from "@/pages/page-intelligence";
 
-// ── Agency role helpers ───────────────────────────────────────────────────────
+// ── Agency role helpers ────────────────────────────────────────────────────────────────────────
 function isAgencyRole(user: any): boolean {
   return user?.role === "agency" || user?.role === "agency_admin";
 }
@@ -176,6 +177,10 @@ function Router() {
       <Route path="/accounts">
         <AuthGuard><AccountsPage /></AuthGuard>
       </Route>
+      {/* Account detail — must be before /accounts so wouter doesn't swallow it */}
+      <Route path="/accounts/:id">
+        <AuthGuard><AccountDetailPage /></AuthGuard>
+      </Route>
       <Route path="/websites">
         <AuthGuard><WebsitesPage /></AuthGuard>
       </Route>
@@ -246,7 +251,7 @@ function Router() {
         <AuthGuard><OnboardingTestPage /></AuthGuard>
       </Route>
 
-      {/* ── Restored routes ────────────────────────────────────────────────── */}
+      {/* ── Restored routes ──────────────────────────────────────────────────────────── */}
       <Route path="/intent-build">
         <AuthGuard><IntentBuildPage /></AuthGuard>
       </Route>

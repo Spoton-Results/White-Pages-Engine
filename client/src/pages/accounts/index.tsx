@@ -9,17 +9,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil, AlertTriangle, Handshake } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash, Eye, RefreshCw, Pencil, AlertTriangle, Handshake, ChevronRight } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function AccountsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editAccount, setEditAccount] = useState<any>(null);
@@ -172,8 +173,18 @@ export default function AccountsPage() {
                   </TableCell>
                 </TableRow>
               ) : filtered.map((account: any) => (
-                <TableRow key={account.id} data-testid={`row-account-${account.id}`}>
-                  <TableCell className="font-medium">{account.name}</TableCell>
+                <TableRow
+                  key={account.id}
+                  data-testid={`row-account-${account.id}`}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/accounts/${account.id}`)}
+                >
+                  <TableCell className="font-medium">
+                    <span className="flex items-center gap-1.5">
+                      {account.name}
+                      <ChevronRight className="size-3.5 text-muted-foreground opacity-50" />
+                    </span>
+                  </TableCell>
                   <TableCell className="text-muted-foreground font-mono text-xs">{account.slug}</TableCell>
                   <TableCell>
                     <Badge variant="secondary" className={account.plan === "enterprise" ? "bg-primary/10 text-primary" : ""}>
@@ -188,7 +199,7 @@ export default function AccountsPage() {
                       {account.status}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="h-8 w-8 p-0" data-testid={`menu-account-${account.id}`}>
@@ -196,6 +207,9 @@ export default function AccountsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => navigate(`/accounts/${account.id}`)}>
+                          <Eye className="size-4" />View Details
+                        </DropdownMenuItem>
                         <Link href={`/websites?accountId=${account.id}`}>
                           <DropdownMenuItem className="gap-2 cursor-pointer"><Eye className="size-4" />View Websites</DropdownMenuItem>
                         </Link>
