@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
 import { formatDistanceToNow } from "date-fns";
+import { useAccountContext } from "@/hooks/use-account-context";
 
 const SLUG_RE = /^[a-z]+(-[a-z]+)*$/;
 
@@ -22,6 +23,7 @@ export default function PublishedPagesPage() {
   const { toast } = useToast();
   const search = useSearch();
   const params = new URLSearchParams(search);
+  const { selectedAccountId } = useAccountContext();
   const [overrideWebsite, setOverrideWebsite] = useState(params.get("websiteId") || "");
   const [searchText, setSearchText] = useState("");
   const [showDns, setShowDns] = useState(false);
@@ -45,11 +47,17 @@ export default function PublishedPagesPage() {
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [showDrafts, setShowDrafts] = useState(false);
 
+  // Build the websites query URL — scope by account when one is selected
+  const websitesUrl = selectedAccountId
+    ? `/api/accounts/${selectedAccountId}/websites`
+    : "/api/websites";
+
   const { data: websites = [] } = useQuery({
-    queryKey: ["/api/websites"],
-    queryFn: () => api.get<any[]>("/api/websites"),
+    queryKey: ["/api/websites", selectedAccountId],
+    queryFn: () => api.get<any[]>(websitesUrl),
   });
 
+  // Reset website override when account context changes so we don't hold a stale id
   const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
 
   const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
@@ -259,7 +267,7 @@ export default function PublishedPagesPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Published Pages</h1>
             <p className="text-muted-foreground text-sm mt-0.5">
-              {pagesData?.total ? `${pagesData.total} pages live` : "Manage live published pages."}
+              {pagesData?.total ? `${pagesData.total} pages live` : "Server-side search across 0 pages."}
               {reviewData?.total > 0 && (
                 <span className="ml-2 text-amber-600 font-medium">{reviewData.total} awaiting publish</span>
               )}
@@ -377,7 +385,7 @@ export default function PublishedPagesPage() {
                 <SelectValue placeholder="Select website" />
               </SelectTrigger>
               <SelectContent>
-                {websites.map((w: any) => (
+                {(websites as any[]).map((w: any) => (
                   <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>
                 ))}
               </SelectContent>
@@ -453,7 +461,11 @@ export default function PublishedPagesPage() {
         {!selectedWebsite ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
             <Globe className="size-12 text-muted-foreground/30" />
-            <p className="text-muted-foreground">Select a website to view published pages</p>
+            <p className="text-muted-foreground">
+              {(websites as any[]).length === 0
+                ? "Select a client from the top bar to load websites"
+                : "Select a website to view published pages"}
+            </p>
           </div>
         ) : (
           <div className="bg-card rounded-lg border overflow-hidden">
@@ -587,7 +599,7 @@ export default function PublishedPagesPage() {
         )}
       </div>
 
-      {/* Fix 5 — Bulk Set Tier Dialog */}
+      {/* Bulk Set Tier Dialog */}
       <Dialog open={showBulkTier} onOpenChange={v => { if (!v) { setShowBulkTier(false); setTierPreview(null); setAiSuggestion(null); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Filter className="size-4" />Bulk Set Page Tier</DialogTitle></DialogHeader>
