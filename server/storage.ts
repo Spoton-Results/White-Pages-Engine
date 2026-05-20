@@ -58,7 +58,7 @@ export async function deleteAgency(id: string): Promise<void> {
 }
 
 export async function getAgencyAccounts(agencyId: string): Promise<Account[]> {
-  // Use raw SQL to avoid Drizzle compiled-schema issues in production
+  // Use raw SQL to avoid Drizzle ORM camelCase→snake_case issues in production
   const res = await pool.query(
     `SELECT * FROM accounts WHERE agency_id = $1 ORDER BY name ASC`,
     [agencyId]
@@ -206,6 +206,26 @@ export async function deleteBrandProfile(id: string): Promise<void> {
 
 // ─── Websites ─────────────────────────────────────────────────────────────────
 
+// Helper to map raw DB snake_case rows to Website camelCase type
+function mapWebsiteRow(r: any): Website {
+  return {
+    id: r.id,
+    accountId: r.account_id,
+    brandProfileId: r.brand_profile_id,
+    name: r.name,
+    domain: r.domain,
+    subdomain: r.subdomain,
+    status: r.status,
+    primaryColor: r.primary_color,
+    secondaryColor: r.secondary_color,
+    settings: r.settings,
+    publishedPages: r.published_pages,
+    pageCount: r.page_count,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  } as Website;
+}
+
 export async function getWebsites(accountId?: string): Promise<Website[]> {
   const { pool } = await import("./db");
   if (accountId) {
@@ -214,24 +234,12 @@ export async function getWebsites(accountId?: string): Promise<Website[]> {
       `SELECT * FROM websites WHERE account_id = $1 ORDER BY created_at DESC`,
       [accountId]
     );
-    return res.rows.map((r: any) => ({
-      id: r.id,
-      accountId: r.account_id,
-      brandProfileId: r.brand_profile_id,
-      name: r.name,
-      domain: r.domain,
-      subdomain: r.subdomain,
-      status: r.status,
-      primaryColor: r.primary_color,
-      secondaryColor: r.secondary_color,
-      settings: r.settings,
-      publishedPages: r.published_pages,
-      pageCount: r.page_count,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    }));
+    return res.rows.map(mapWebsiteRow);
   }
-  return db.select().from(websites).orderBy(desc(websites.createdAt));
+  // Use raw SQL for the all-websites path too — same Drizzle camelCase→snake_case
+  // bug affects account_id, published_pages, brand_profile_id etc. in production builds.
+  const res = await pool.query(`SELECT * FROM websites ORDER BY created_at DESC`);
+  return res.rows.map(mapWebsiteRow);
 }
 
 export async function getWebsite(id: string): Promise<Website | undefined> {
@@ -1582,125 +1590,4 @@ export async function getUnreadNotificationCount(websiteId: string): Promise<num
   return row?.n ?? 0;
 }
 
-// ─── Fallback Hit – single-row lookup (Auto 5) ────────────────────────────────
-
-export async function getFallbackHit(websiteId: string, slug: string): Promise<FallbackHitLog | undefined> {
-  const [row] = await db.select().from(fallbackHitLogs)
-    .where(and(eq(fallbackHitLogs.websiteId, websiteId), eq(fallbackHitLogs.slug, slug)));
-  return row;
-}
-
-export async function getPromotionQueue(websiteId: string, minHits = 10, windowDays = 30): Promise<FallbackHitLog[]> {
-  const since = new Date();
-  since.setDate(since.getDate() - windowDays);
-  return db.select().from(fallbackHitLogs)
-    .where(and(
-      eq(fallbackHitLogs.websiteId, websiteId),
-      eq(fallbackHitLogs.promoted, false),
-      gte(fallbackHitLogs.hitCount, minHits),
-      gte(fallbackHitLogs.lastSeenAt, since),
-    ))
-    .orderBy(desc(fallbackHitLogs.hitCount))
-    .limit(100) as any;
-}
-
-export async function markFallbackPromoted(id: string): Promise<void> {
-  await db.update(fallbackHitLogs).set({ promoted: true, promotedAt: new Date() } as any).where(eq(fallbackHitLogs.id, id));
-}
-
-// ─── Demotion Logs (Auto 6) ───────────────────────────────────────────────────
-
-export async function createDemotionLog(data: InsertDemotionLog): Promise<DemotionLog> {
-  const [row] = await db.insert(demotionLogs).values(data as any).returning();
-  return row;
-}
-
-export async function getDemotionLogs(websiteId: string, limit = 50): Promise<DemotionLog[]> {
-  return db.select().from(demotionLogs)
-    .where(eq(demotionLogs.websiteId, websiteId))
-    .orderBy(desc(demotionLogs.createdAt))
-    .limit(limit);
-}
-
-// ─── Zero-impression Tier 1 candidates (Auto 6) ───────────────────────────────
-
-export async function getZeroImpressionTier1Pages(
-  websiteId: string,
-  zeroImpressionDays: number,
-): Promise<Array<{ id: string; slug: string; title: string }>> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - zeroImpressionDays);
-  // Pages that are Tier 1 published, have no metrics row at all, and were published before the cutoff
-  const rows = await db.execute(sql`
-    SELECT p.id, p.slug, p.title
-    FROM pages p
-    WHERE p.website_id = ${websiteId}
-      AND p.tier = 1
-      AND p.status = 'published'
-      AND p.published_at < ${cutoff}
-      AND NOT EXISTS (
-        SELECT 1 FROM page_metrics pm
-        WHERE pm.page_id = p.id AND pm.impressions > 0
-      )
-    LIMIT 500
-  `);
-  return (rows as any).rows ?? [];
-}
-
-// ─── Weekly summary stats (Auto 8) ───────────────────────────────────────────
-
-export async function getWeeklySummaryStats(websiteId: string): Promise<{
-  pagesGeneratedLastWeek: number;
-  pagesPromotedToTier1: number;
-  pagesDemoted: number;
-  topFallbackHits: Array<{ slug: string; hitCount: number }>;
-  thinBanks: Array<{ service: string; completenessScore: number }>;
-  avgQualityScore: number | null;
-}> {
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-
-  const [genRow] = await db.select({ n: count() }).from(pages)
-    .where(and(eq(pages.websiteId, websiteId), gte(pages.createdAt, weekAgo)));
-
-  const [promRow] = await db.select({ n: count() }).from(pages)
-    .where(and(eq(pages.websiteId, websiteId), eq(pages.tier, 1), gte(pages.updatedAt, weekAgo)));
-
-  const demotedCount = await db.select({ n: count() }).from(demotionLogs)
-    .where(and(eq(demotionLogs.websiteId, websiteId), gte(demotionLogs.createdAt, weekAgo)));
-
-  const topFallback = await db.select({ slug: fallbackHitLogs.slug, hitCount: fallbackHitLogs.hitCount })
-    .from(fallbackHitLogs).where(eq(fallbackHitLogs.websiteId, websiteId))
-    .orderBy(desc(fallbackHitLogs.hitCount)).limit(5);
-
-  const thinBankRows = await db.select({ service: variationBankCompleteness.service, completenessScore: variationBankCompleteness.completenessScore })
-    .from(variationBankCompleteness)
-    .where(and(eq(variationBankCompleteness.websiteId, websiteId), lt(variationBankCompleteness.completenessScore, 60)))
-    .orderBy(asc(variationBankCompleteness.completenessScore))
-    .limit(5);
-
-  const [avgRow] = await db.execute(sql`
-    SELECT ROUND(AVG(quality_score), 1) AS avg_score
-    FROM pages
-    WHERE website_id = ${websiteId} AND quality_score IS NOT NULL AND status = 'published'
-  `);
-  const avgScore = (avgRow as any)?.avg_score ? parseFloat((avgRow as any).avg_score) : null;
-
-  return {
-    pagesGeneratedLastWeek: genRow?.n ?? 0,
-    pagesPromotedToTier1: promRow?.n ?? 0,
-    pagesDemoted: demotedCount[0]?.n ?? 0,
-    topFallbackHits: topFallback as any,
-    thinBanks: thinBankRows as any,
-    avgQualityScore: avgScore,
-  };
-}
-
-// Re-export IStorage interface for backwards compatibility
-export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-}
-
-export const storage = { getUser, getUserByUsername, createUser };
+// ─── Fallback Hit – single-row lo
