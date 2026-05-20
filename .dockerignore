@@ -1,26 +1,67 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules
-.git
-*.log
-
-# Next.js
-.next
-client/next-app/.next
+**/node_modules
 client/next-app/node_modules
 
-# Test/dev
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Build outputs (never send pre-built artifacts to builder) ─────────────────
+dist
+.next
+client/next-app/.next
+client/next-app/out
+build
+out
+
+# ── Caches ────────────────────────────────────────────────────────────────────
+.npm
+.cache
+.parcel-cache
+.turbo
+.eslintcache
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ── Test / Coverage ───────────────────────────────────────────────────────────
 __tests__
 coverage
+.nyc_output
 *.test.ts
 *.test.tsx
 *.spec.ts
 *.spec.tsx
 
-# OS / IDE
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 .vscode
 .idea
+*.swp
+*.swo
 
-# Temp
+# ── Env files (use Railway environment variables instead) ─────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Temp / misc ───────────────────────────────────────────────────────────────
 tmp
 .tmp
+*.tmp
+*.bak
+*.orig
+
+# ── Large local data / uploads ────────────────────────────────────────────────
+uploads
+public/uploads
+attached_assets
