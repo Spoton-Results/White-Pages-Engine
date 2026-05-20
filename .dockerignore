@@ -1,0 +1,30 @@
+# Prevent Railway Nix builder from running out of disk space
+node_modules
+.git
+*.log
+*.md
+
+# Next.js build artifacts
+.next
+client/next-app/.next
+client/next-app/node_modules
+
+# Test and dev files
+__tests__
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+
+# Temp files
+tmp
+.tmp
