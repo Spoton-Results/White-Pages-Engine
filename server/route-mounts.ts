@@ -23,12 +23,32 @@ import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyDashboardRouter from "./routes/agency-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 
+// ── Restored post-rollback routers ────────────────────────────────
+// These routers all define their own full /api/* paths internally,
+// so they must be mounted at root "/" to avoid double-prefixing.
+import pageIntelligenceRouter from "./routes/page-intelligence";
+import clientDomainsRouter from "./routes/client-domains";
+import searchConsoleAdminRouter from "./routes/search-console-admin";
+import intentActionsRouter from "./routes/intent-actions";
+import actionReviewDecisionRouter from "./routes/action-review-decision";
+import deploymentQaRouter from "./routes/deployment-qa";
+import systemIntegrityRouter from "./routes/system-integrity";
+
 export function mountSubRouters(app: Express) {
   // Agency ROI Dashboard routes include the full /api/agency-dashboard/* prefix
   // internally, so mount at root to avoid double-prefixing.
   app.use("/", agencyRoiDashboardRouter);
   app.use("/", agencyDashboardRouter);
   app.use("/", agencyMonthlyReportRouter);
+
+  // ── Restored post-rollback routers ──────────────────────────────
+  app.use("/", pageIntelligenceRouter);
+  app.use("/", clientDomainsRouter);
+  app.use("/", searchConsoleAdminRouter);
+  app.use("/", intentActionsRouter);
+  app.use("/", actionReviewDecisionRouter);
+  app.use("/", deploymentQaRouter);
+  app.use("/", systemIntegrityRouter);
 
   // ── Other unmounted routers ────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
