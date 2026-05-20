@@ -9,22 +9,26 @@ import leadsRouter from "./routes/leads";
 import dashboardAgencyRouter from "./routes/dashboard-agency";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import widgetRouter from "./routes/widget";
+
 // ── THE REAL FIX ───────────────────────────────────────────────────
-// agency-roi-dashboard.ts handles /api/agency-dashboard/* endpoints
-// (summary, activity, coverage, clients) which the Executive ROI Dashboard
-// page fetches. It was NEVER imported or mounted anywhere, causing Express to
-// fall through to the Vite SPA catch-all and return HTML instead of JSON.
+// agency-roi-dashboard.ts registers routes with FULL paths already inside the
+// router itself (e.g. router.get("/api/agency-dashboard/summary", ...)).
+// That means it must be mounted at "/" (root), NOT at a sub-prefix like
+// "/api/agency-dashboard" — otherwise Express would double the prefix.
+//
+// It was NEVER imported or mounted anywhere, causing Express to fall through
+// to the Vite SPA catch-all and return <!DOCTYPE html> instead of JSON,
+// producing the "Unexpected token '<'" error in the Executive ROI Dashboard.
 import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyDashboardRouter from "./routes/agency-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 
 export function mountSubRouters(app: Express) {
-  // ── Agency ROI Dashboard (Executive ROI Dashboard page) ──────────────────
-  // Must come before the generic agencyDashboardRouter so the more specific
-  // /api/agency-dashboard/summary|activity|coverage|clients routes match first.
-  app.use("/api/agency-dashboard", agencyRoiDashboardRouter);
-  app.use("/api/agency-dashboard", agencyDashboardRouter);
-  app.use("/api/agency-dashboard", agencyMonthlyReportRouter);
+  // Agency ROI Dashboard routes include the full /api/agency-dashboard/* prefix
+  // internally, so mount at root to avoid double-prefixing.
+  app.use("/", agencyRoiDashboardRouter);
+  app.use("/", agencyDashboardRouter);
+  app.use("/", agencyMonthlyReportRouter);
 
   // ── Other unmounted routers ────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
