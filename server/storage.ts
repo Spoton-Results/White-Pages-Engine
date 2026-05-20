@@ -1256,6 +1256,12 @@ export async function getFallbackHits(websiteId: string, limit = 50): Promise<Fa
     .limit(limit) as any;
 }
 
+export async function getFallbackHit(websiteId: string, slug: string): Promise<FallbackHitLog | undefined> {
+  const [row] = await db.select().from(fallbackHitLogs)
+    .where(and(eq(fallbackHitLogs.websiteId, websiteId), eq(fallbackHitLogs.slug, slug)));
+  return row as any;
+}
+
 export async function promoteFallbackSlug(websiteId: string, slug: string): Promise<void> {
   await db.update(fallbackHitLogs)
     .set({ promoted: true, promotedAt: new Date() })
@@ -1590,4 +1596,107 @@ export async function getUnreadNotificationCount(websiteId: string): Promise<num
   return row?.n ?? 0;
 }
 
-// ─── Fallback Hit – single-row lo
+// ─── Demotion Logs ────────────────────────────────────────────────────────────
+
+export async function createDemotionLog(data: InsertDemotionLog): Promise<DemotionLog> {
+  const [row] = await db.insert(demotionLogs).values(data).returning();
+  return row;
+}
+
+export async function getDemotionLogs(websiteId: string, limit = 50): Promise<DemotionLog[]> {
+  return db.select().from(demotionLogs)
+    .where(eq(demotionLogs.websiteId, websiteId))
+    .orderBy(desc(demotionLogs.createdAt))
+    .limit(limit);
+}
+
+export async function getPromotionQueue(websiteId: string, limit = 50): Promise<FallbackHitLog[]> {
+  return db.select().from(fallbackHitLogs)
+    .where(and(
+      eq(fallbackHitLogs.websiteId, websiteId),
+      eq(fallbackHitLogs.promoted, false),
+    ))
+    .orderBy(desc(fallbackHitLogs.hitCount))
+    .limit(limit) as any;
+}
+
+export async function markFallbackPromoted(logId: string): Promise<void> {
+  await db.update(fallbackHitLogs)
+    .set({ promoted: true, promotedAt: new Date() })
+    .where(eq(fallbackHitLogs.id, logId));
+}
+
+// ─── Weekly Summary Stats ─────────────────────────────────────────────────────
+
+export async function getWeeklySummaryStats(websiteId: string): Promise<{
+  totalPublished: number;
+  tier1Count: number;
+  tier2Count: number;
+  tier3Count: number;
+  avgScore: number | null;
+  newPagesThisWeek: number;
+  fallbackHitsThisWeek: number;
+}> {
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const [tierRes, newPagesRes, fallbackRes] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'published')::int AS total_published,
+        COUNT(*) FILTER (WHERE status = 'published' AND tier = 1)::int AS tier1,
+        COUNT(*) FILTER (WHERE status = 'published' AND (tier = 2 OR tier IS NULL))::int AS tier2,
+        COUNT(*) FILTER (WHERE status = 'published' AND tier = 3)::int AS tier3,
+        ROUND(AVG(quality_score) FILTER (WHERE status = 'published' AND quality_score IS NOT NULL))::int AS avg_score
+      FROM pages
+      WHERE website_id = ${websiteId}
+    `),
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM pages
+      WHERE website_id = ${websiteId}
+        AND status = 'published'
+        AND created_at >= ${oneWeekAgo}
+    `),
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM fallback_hit_logs
+      WHERE website_id = ${websiteId}
+        AND last_seen_at >= ${oneWeekAgo}
+    `),
+  ]);
+
+  const t = (tierRes as any).rows?.[0] ?? {};
+  return {
+    totalPublished: t.total_published ?? 0,
+    tier1Count: t.tier1 ?? 0,
+    tier2Count: t.tier2 ?? 0,
+    tier3Count: t.tier3 ?? 0,
+    avgScore: t.avg_score ?? null,
+    newPagesThisWeek: (newPagesRes as any).rows?.[0]?.count ?? 0,
+    fallbackHitsThisWeek: (fallbackRes as any).rows?.[0]?.count ?? 0,
+  };
+}
+
+// ─── Zero-Impression Tier 1 Pages ─────────────────────────────────────────────
+
+export async function getZeroImpressionTier1Pages(
+  websiteId: string,
+  daysOld = 30,
+  limit = 100,
+): Promise<Array<{ id: string; title: string; slug: string; qualityScore: number | null; createdAt: Date }>> {
+  const cutoff = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
+  const rows = await db.execute(sql`
+    SELECT p.id, p.title, p.slug, p.quality_score AS "qualityScore", p.created_at AS "createdAt"
+    FROM pages p
+    LEFT JOIN page_metrics pm ON pm.page_id = p.id
+    WHERE p.website_id = ${websiteId}
+      AND p.status = 'published'
+      AND p.tier = 1
+      AND p.created_at <= ${cutoff}
+    GROUP BY p.id, p.title, p.slug, p.quality_score, p.created_at
+    HAVING COALESCE(SUM(pm.impressions), 0) = 0
+    ORDER BY p.created_at ASC
+    LIMIT ${limit}
+  `);
+  return (rows as any).rows ?? [];
+}
