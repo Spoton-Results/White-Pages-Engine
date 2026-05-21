@@ -4,7 +4,11 @@ import { mountSubRouters } from "./route-mounts";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
-import { sessionMiddleware } from "./auth";
+// NOTE: sessionMiddleware is NOT applied globally here.
+// routes.ts mounts it selectively on /api/* only to avoid running
+// the Postgres session store on every public SEO page request.
+// Applying it here AND in routes.ts causes double-session middleware
+// which can create a blank second session that masks the real one.
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,11 +33,9 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-// ── Session middleware ─────────────────────────────────────────────────────
-// MUST be registered before any route handler that calls requireAuth /
-// requireSuperAdmin / loginUser, otherwise req.session is undefined and
-// all login attempts return "Session middleware not initialized" (500).
-app.use(sessionMiddleware());
+// Session middleware is mounted per-route inside routes.ts (API routes only).
+// Do NOT add app.use(sessionMiddleware()) here — it would double-mount the
+// session store and can cause stale/blank sessions on API requests.
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -196,9 +198,6 @@ async function runBackgroundStartup() {
     console.log("[startup] Schema migrations: CREATE TABLE ensured.");
 
     // ── Batch 3: CREATE INDEX CONCURRENTLY ────────────────────────────────────
-    // CONCURRENTLY = no AccessExclusiveLock, never blocks reads/writes on live tables.
-    // Must be run sequentially (not in Promise.all) — Postgres forbids CONCURRENTLY
-    // inside a transaction and parallel CONCURRENTLY on the same table can deadlock.
     const indexes = [
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_slug       ON pages(website_id, slug)`,
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_status     ON pages(website_id, status)`,
@@ -263,15 +262,11 @@ async function runBackgroundStartup() {
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_publish_wave      ON pages(website_id, publish_wave)`,
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pages_website_created   ON pages(website_id, created_at)`,
     ];
-    // Sequential to avoid CONCURRENTLY deadlock on same-table indexes
     for (const idx of indexes) {
       await exec(idx);
     }
     console.log("[startup] Database indexes ensured (CONCURRENTLY — no locks).");
 
-    // ── Trigger: install only if it doesn't already exist ─────────────────────
-    // CREATE TRIGGER requires AccessExclusiveLock on `pages`. We check pg_trigger
-    // first so this only runs once (on first deploy), not on every boot restart.
     const triggerExists = await pgPool.query(`
       SELECT 1 FROM pg_trigger
       WHERE tgname = 'trg_sync_published_pages'
@@ -314,9 +309,7 @@ async function runBackgroundStartup() {
         END;
         $$ LANGUAGE plpgsql;
       `);
-      await db.execute(sql`
-        DROP TRIGGER IF EXISTS trg_sync_published_pages ON pages;
-      `);
+      await db.execute(sql`DROP TRIGGER IF EXISTS trg_sync_published_pages ON pages;`);
       await db.execute(sql`
         CREATE TRIGGER trg_sync_published_pages
           AFTER INSERT OR UPDATE OF status OR DELETE ON pages

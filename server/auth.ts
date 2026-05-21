@@ -21,6 +21,11 @@ export function sessionMiddleware() {
   // cookie MUST be sameSite:"none" + secure:true so the browser sends it
   // on cross-origin API calls, AND the proxy must forward the real protocol
   // via X-Forwarded-Proto.  We keep sameSite:"lax" for local dev.
+  //
+  // admin.spotonnexus.com is same-origin (frontend + API on same domain),
+  // so sameSite:"lax" is correct in both dev and prod.
+  // If you ever split the frontend to a separate origin, change to "none"
+  // and verify secure:true is also set (browsers reject none + !secure).
   const isProd = process.env.NODE_ENV === "production";
 
   return session({
@@ -33,14 +38,11 @@ export function sessionMiddleware() {
     resave: false,
     saveUninitialized: false,
     cookie: {
-      // secure:true is required when the browser sees https://
-      // trust proxy:1 in index.ts makes express honour X-Forwarded-Proto
+      // secure:true requires trust proxy:1 in index.ts (already set)
+      // so Express honours X-Forwarded-Proto from Railway's load balancer.
       secure: isProd,
       httpOnly: true,
-      // "lax" works for same-origin (admin.spotonnexus.com serving its own API).
-      // If the front-end and API are ever on different origins, change to "none"
-      // and make sure secure:true is also set (browsers reject none+!secure).
-      sameSite: isProd ? "lax" : "lax",
+      sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   });
