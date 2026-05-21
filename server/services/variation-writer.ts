@@ -1,3 +1,4 @@
+import { pool } from "../db";
 import * as db from "../storage";
 import { logApiUsage } from "./usage-logger";
 import { callAI } from "./ai-provider";
@@ -194,8 +195,9 @@ export async function writeVariationsForService(
 }
 
 /**
- * Fill only missing bank sections. This keeps the upgrade path reliable:
- * older 10-section banks only request the 4 new SEO expansion sections.
+ * Fill only missing bank sections.
+ * Uses raw SQL to avoid Drizzle ORM camelCase->snake_case bug where
+ * sectionName is returned as undefined instead of the actual section_name value.
  */
 export async function fillMissingSectionsForService(
   serviceName: string,
@@ -203,10 +205,20 @@ export async function fillMissingSectionsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<{ filled: string[]; skipped: string[]; errors: string[] }> {
-  const existing = await db.getVariationBanks(websiteId, serviceName);
-  const existingSet = new Set(existing.map((b: any) => b.sectionName));
+  // Raw SQL to reliably read section_name — Drizzle maps it to sectionName
+  // inconsistently in the compiled production build, causing existingSet to
+  // always be empty and every section to appear "missing".
+  const result = await pool.query(
+    `SELECT section_name FROM content_variation_banks
+     WHERE website_id = $1 AND service = $2`,
+    [websiteId, serviceName],
+  );
+
+  const existingSet = new Set<string>(result.rows.map((r: any) => String(r.section_name ?? "").trim()));
   const skipped = SECTIONS.filter(s => existingSet.has(s));
-  const missing = SECTIONS.filter(s => !existingSet.has(s));
+  const missing = SECTIONS.filter(s => !existingSet.has(s)) as Section[];
+
+  console.log(`[variation-writer] fillMissing "${serviceName}" — existing: [${[...existingSet].join(", ")}] | missing: [${missing.join(", ")}]`);
 
   if (missing.length === 0) return { filled: [], skipped: skipped as string[], errors: [] };
 
@@ -219,10 +231,10 @@ export async function fillMissingSectionsForService(
     `variation_writing:fill_missing_${missing.length}_sections`,
   );
 
-  const result = await writeBankPayload(payload, missing, serviceName, accountId, websiteId);
+  const writeResult = await writeBankPayload(payload, missing, serviceName, accountId, websiteId);
   return {
-    filled: result.written,
+    filled: writeResult.written,
     skipped: skipped as string[],
-    errors: Object.entries(result.errors).map(([section, message]) => `${section}: ${message}`),
+    errors: Object.entries(writeResult.errors).map(([section, message]) => `${section}: ${message}`),
   };
 }
