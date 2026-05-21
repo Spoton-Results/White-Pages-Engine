@@ -21,6 +21,45 @@ export interface BrandContext {
   industryDescription?: string;
 }
 
+// ── Alias map (mirrors SECTION_ALIASES in bank-health.ts) ────────────────────
+// Must stay in sync. Any section_name stored in the DB — regardless of how it
+// was capitalised, spaced, or aliased — resolves to one canonical Section key.
+const SECTION_ALIASES: Record<Section, string[]> = {
+  intro:                ["intro", "introduction", "introduction paragraph", "hero headline", "hero"],
+  how_it_works:         ["how it works", "process", "process how it works", "how_it_works"],
+  benefits:             ["benefits", "why choose us", "why_choose_us"],
+  faq:                  ["faq", "faqs", "frequently asked questions"],
+  cta:                  ["cta", "call to action", "call_to_action"],
+  local_context:        ["local context", "service area", "service_area", "local_context"],
+  use_case:             ["use case", "use_case", "service details", "service_details"],
+  proof_trust:          ["proof trust", "proof & trust", "proof_trust"],
+  pain_point:           ["pain point", "pain_point", "problem intent", "problem_intent"],
+  local_stat:           ["local stat", "local_stat"],
+  comparison:           ["comparison", "compare", "alternatives"],
+  pricing_factors:      ["pricing factors", "pricing_factors", "cost factors", "cost_factors", "pricing"],
+  best_fit:             ["best fit", "best_fit", "who it is for", "fit checklist"],
+  software_integration: ["software integration", "software_integration", "integrations", "software compatibility"],
+};
+
+function normalizeName(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Resolve any stored section_name to its canonical Section key, or null. */
+function resolveCanonicalKey(storedName: unknown): Section | null {
+  const normalized = normalizeName(storedName);
+  for (const [key, aliases] of Object.entries(SECTION_ALIASES) as [Section, string[]][]) {
+    if (aliases.map(normalizeName).includes(normalized)) return key;
+  }
+  return null;
+}
+
 const SECTION_INSTRUCTIONS: Record<Section, string> = {
   intro: "5 variations. Each variation: 2 short HTML paragraphs, 90-120 words total. Use {{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}}.",
   how_it_works: "5 variations. Each variation: 3 short HTML paragraphs, 120-160 words total. Use {{service}} {{city}} {{state}} {{brand}} {{business_count}}. Explain process from review to implementation.",
@@ -226,8 +265,14 @@ export async function writeVariationsForService(
 
 /**
  * Fill only missing bank sections.
- * Uses raw SQL to avoid Drizzle ORM camelCase->snake_case bug where
- * sectionName is returned as undefined instead of the actual section_name value.
+ *
+ * Uses raw SQL to avoid Drizzle ORM camelCase->snake_case bug.
+ *
+ * FIX: stored section_name values are resolved to their canonical Section key
+ * via the same alias map used by buildFlagsFromBanks in bank-health.ts.
+ * This prevents the mismatch where the UI shows a section as missing (✗) but
+ * fillMissingSectionsForService finds the row via a different alias and skips it,
+ * reporting "all sections already present" while the checklist stays red.
  */
 export async function fillMissingSectionsForService(
   serviceName: string,
@@ -241,11 +286,20 @@ export async function fillMissingSectionsForService(
     [websiteId, serviceName],
   );
 
-  const existingSet = new Set<string>(result.rows.map((r: any) => String(r.section_name ?? "").trim()));
-  const skipped = SECTIONS.filter(s => existingSet.has(s));
-  const missing = SECTIONS.filter(s => !existingSet.has(s)) as Section[];
+  // Resolve every stored section_name to its canonical key via alias map.
+  // Rows with unrecognised names are ignored (they won't block a fill).
+  const existingCanonical = new Set<Section>();
+  for (const row of result.rows) {
+    const key = resolveCanonicalKey(row.section_name);
+    if (key) existingCanonical.add(key);
+  }
 
-  console.log(`[variation-writer] fillMissing "${serviceName}" — existing: [${[...existingSet].join(", ")}] | missing: [${missing.join(", ")}]`);
+  const skipped = SECTIONS.filter(s => existingCanonical.has(s));
+  const missing = SECTIONS.filter(s => !existingCanonical.has(s)) as Section[];
+
+  console.log(
+    `[variation-writer] fillMissing "${serviceName}" — existing (canonical): [${[...existingCanonical].join(", ")}] | missing: [${missing.join(", ")}]`,
+  );
 
   if (missing.length === 0) return { filled: [], skipped: skipped as string[], errors: [] };
 
