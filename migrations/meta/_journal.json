@@ -29,6 +29,13 @@
       "when": 1747699203000,
       "tag": "0003_page_version_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1748041200000,
+      "tag": "0004_add_cvb_unique_index",
+      "breakpoints": true
     }
   ]
 }
