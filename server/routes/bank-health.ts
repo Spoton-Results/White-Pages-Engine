@@ -323,6 +323,14 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
 // ── POST /api/websites/:websiteId/variation-banks/fill-missing ────────────────
 // Called by the per-service card "Fill Missing" button.
 // Body: { service: string }
+//
+// FIX: Previously awaited fillMissingSectionsForService inline — that makes up
+// to 70 sequential Claude AI calls (14 sections × 5 variations) which takes
+// 60-120 seconds and exceeds Railway's 60s HTTP timeout → 502.
+//
+// Now mirrors fill-missing-all-job: returns a jobId immediately and runs
+// generation in a setImmediate background task. The client polls
+// GET /api/jobs/:jobId for progress.
 router.post(
   "/api/websites/:websiteId/variation-banks/fill-missing",
   requireAuth,
@@ -333,9 +341,57 @@ router.post(
       if (!serviceName) return res.status(400).json({ error: "service is required" });
 
       const { ctx, accountId } = await getBrandCtx(websiteId);
-      const result = await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
 
-      return res.json(result);
+      const jobId = `fill-missing-${websiteId}-${Date.now()}`;
+
+      // Persist job row (best-effort)
+      try {
+        await pool.query(
+          `INSERT INTO generation_jobs (
+             id, website_id, account_id, type, status,
+             total_pages, processed_pages, created_at, updated_at
+           ) VALUES ($1, $2, $3, 'fill_missing', 'running', 1, 0, NOW(), NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [jobId, websiteId, accountId],
+        );
+      } catch (e: any) {
+        console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
+      }
+
+      // Track active job for restore-on-refresh
+      try {
+        await pool.query(
+          `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
+           VALUES ($1, 'fill_missing', $2, NOW())
+           ON CONFLICT (website_id, job_type)
+           DO UPDATE SET job_id = EXCLUDED.job_id, created_at = EXCLUDED.created_at`,
+          [websiteId, jobId],
+        );
+      } catch { /* non-fatal */ }
+
+      // Run fill in background — HTTP response returns immediately
+      setImmediate(async () => {
+        try {
+          await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
+          await pool.query(
+            `UPDATE generation_jobs SET status = 'completed', processed_pages = 1, updated_at = NOW() WHERE id = $1`,
+            [jobId],
+          ).catch(() => {});
+        } catch (err: any) {
+          console.error(`[bank-health] fill-missing failed for "${serviceName}":`, err?.message || err);
+          await pool.query(
+            `UPDATE generation_jobs SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+            [jobId],
+          ).catch(() => {});
+        }
+        // Clean up active job tracker
+        await pool.query(
+          `DELETE FROM active_jobs WHERE website_id = $1 AND job_type = 'fill_missing'`,
+          [websiteId],
+        ).catch(() => {});
+      });
+
+      return res.json({ started: true, jobId, service: serviceName });
     } catch (err: any) {
       if ((err as any).status === 404) return res.status(404).json({ error: (err as any).message });
       console.error("[bank-health] fill-missing error:", err?.message || err);
@@ -393,11 +449,11 @@ router.post(
       // Run fill in background — HTTP response returns immediately
       setImmediate(async () => {
         let processed = 0;
-        for (const serviceName of services) {
+        for (const svc of services) {
           try {
-            await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
+            await fillMissingSectionsForService(svc, accountId, websiteId, ctx);
           } catch (err: any) {
-            console.error(`[bank-health] fill-missing-all failed for "${serviceName}":`, err?.message || err);
+            console.error(`[bank-health] fill-missing-all failed for "${svc}":`, err?.message || err);
           }
           processed++;
           try {
@@ -433,7 +489,7 @@ router.post(
 );
 
 // ── GET /api/jobs/:jobId ──────────────────────────────────────────────────────
-// Polls progress of a fill-missing-all background job.
+// Polls progress of a fill-missing background job.
 router.get(
   "/api/jobs/:jobId",
   requireAuth,
