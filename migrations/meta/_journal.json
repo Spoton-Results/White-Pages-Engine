@@ -36,6 +36,20 @@
       "when": 1748041200000,
       "tag": "0004_add_cvb_unique_index",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1748041260000,
+      "tag": "0005_r2_page_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1748041320000,
+      "tag": "0006_startup_schema_adds",
+      "breakpoints": true
     }
   ]
 }
