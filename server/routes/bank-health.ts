@@ -175,6 +175,8 @@ function camelExpansion(flags: Record<string, boolean>) {
 }
 
 // ── Helper: build brand context for a website ─────────────────────────────────
+// NOTE: brand_profiles does NOT have a website_id column — it has account_id.
+// We join via websites.account_id → brand_profiles.account_id.
 async function getBrandCtx(websiteId: string): Promise<{ ctx: BrandContext; accountId: string }> {
   const websiteResult = await pool.query(
     `SELECT id, account_id, name, domain FROM websites WHERE id = $1 LIMIT 1`,
@@ -184,8 +186,11 @@ async function getBrandCtx(websiteId: string): Promise<{ ctx: BrandContext; acco
   if (!website) throw Object.assign(new Error("Website not found"), { status: 404 });
 
   const brandResult = await pool.query(
-    `SELECT name, description, voice_and_tone FROM brand_profiles WHERE website_id = $1 LIMIT 1`,
-    [websiteId],
+    `SELECT name, description, voice_and_tone
+     FROM brand_profiles
+     WHERE account_id = $1
+     LIMIT 1`,
+    [website.account_id],
   );
   const brand = brandResult.rows[0] ?? null;
 
