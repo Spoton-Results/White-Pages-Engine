@@ -3,7 +3,8 @@ import Anthropic from "@anthropic-ai/sdk";
 // ─── Provider chain: Anthropic → OpenAI → Perplexity ─────────────────────────
 // Each provider is only tried if its API key is configured.
 // Credit / quota exhaustion errors cause an immediate switch to the next provider.
-// Transient errors (rate limit, server overload) are retried within the same provider.
+// Transient errors (rate limit, server overload, network timeout) are retried
+// within the same provider before failing over.
 
 export interface AIRequest {
   prompt: string;
@@ -24,6 +25,10 @@ const PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-chat";
 
 const RETRY_DELAYS = [3000, 6000, 12000];
 
+// 90s per-request timeout. Long enough for large prompts, short enough to avoid
+// freezing the Node.js event loop indefinitely when a provider is unreachable.
+const FETCH_TIMEOUT_MS = 90_000;
+
 type ProviderName = "anthropic" | "openai" | "perplexity";
 
 function getProviderKey(name: ProviderName): string | undefined {
@@ -34,6 +39,21 @@ function getProviderKey(name: ProviderName): string | undefined {
       return process.env.OPENAI_API_KEY;
     case "perplexity":
       return process.env.PERPLEXITY_API_KEY;
+  }
+}
+
+/**
+ * Wraps fetch() with an AbortController timeout.
+ * If the request takes longer than FETCH_TIMEOUT_MS, it throws an AbortError
+ * which isRetryable() treats as a transient network error.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -57,12 +77,29 @@ function isCreditError(err: any): boolean {
 /** True if the error is transient and worth retrying */
 function isRetryable(err: any): boolean {
   if (isCreditError(err)) return false;
+  const msg = (err?.message || "").toLowerCase();
+  const code = (err?.code || "").toLowerCase();
+  // Network-level failures: connection refused, DNS, timeout, socket reset, AbortError
+  const isNetworkError =
+    err?.name === "AbortError" ||
+    msg.includes("fetch failed") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("enotfound") ||
+    msg.includes("socket hang up") ||
+    msg.includes("network") ||
+    msg.includes("aborted") ||
+    code === "econnreset" ||
+    code === "etimedout" ||
+    code === "enotfound";
   return (
+    isNetworkError ||
     err?.status === 429 ||
     err?.status === 529 ||
     err?.status >= 500 ||
-    (err?.message || "").includes("overloaded") ||
-    (err?.message || "").includes("rate_limit")
+    msg.includes("overloaded") ||
+    msg.includes("rate_limit")
   );
 }
 
@@ -86,11 +123,20 @@ async function callAnthropic(req: AIRequest): Promise<AIResponse> {
   let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const msg = await anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: req.maxTokens ?? 4096,
-        messages: [{ role: "user", content: req.prompt }],
-      });
+      // AbortSignal.timeout() available Node 18+; gives the SDK a hard deadline.
+      const timeoutSignal =
+        typeof AbortSignal !== "undefined" && typeof (AbortSignal as any).timeout === "function"
+          ? (AbortSignal as any).timeout(FETCH_TIMEOUT_MS)
+          : undefined;
+
+      const msg = await anthropic.messages.create(
+        {
+          model: ANTHROPIC_MODEL,
+          max_tokens: req.maxTokens ?? 4096,
+          messages: [{ role: "user", content: req.prompt }],
+        },
+        timeoutSignal ? { signal: timeoutSignal } : undefined,
+      );
       const text = msg.content[0].type === "text" ? msg.content[0].text : "";
       return {
         text,
@@ -117,7 +163,7 @@ async function callOpenAI(req: AIRequest): Promise<AIResponse> {
   let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -166,7 +212,7 @@ async function callPerplexity(req: AIRequest): Promise<AIResponse> {
   let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch("https://api.perplexity.ai/chat/completions", {
+      const res = await fetchWithTimeout("https://api.perplexity.ai/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
