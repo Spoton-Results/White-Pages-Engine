@@ -17,11 +17,21 @@ import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "@shared/schema";
 
+// Pool kept small to avoid starving the main HTTP pool (max:5) and lockPool (max:3).
+// Total connections budget: main(5) + bulk(3) + lock(3) = 11, well under Postgres max.
+// Each bulk job holds at most 1 connection at a time (flush transactions are sequential).
+// Reducing from 8→3 has zero throughput impact — bulk jobs are CPU/IO bound, not
+// connection-bound.
 const bulkPool = new pg.Pool({
   connectionString: process.env.DATABASE_URL!,
-  max: Number(process.env.BULK_DB_POOL_MAX || 8),
+  max: Number(process.env.BULK_DB_POOL_MAX || 3),
   idleTimeoutMillis: 60000,
-  connectionTimeoutMillis: 30000,
+  // Match the main pool's 15s timeout — long enough for busy DB, short enough to
+  // fail fast instead of freezing all slots when DB is under pressure.
+  connectionTimeoutMillis: 15000,
+  // Kill any single query that runs longer than 60s — prevents rogue UPDATE/INSERT
+  // from holding a connection indefinitely.
+  statement_timeout: 60000,
 });
 const bulkDb = drizzle(bulkPool, { schema });
 

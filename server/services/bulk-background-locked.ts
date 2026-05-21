@@ -2,11 +2,17 @@ import pg from "pg";
 import * as storage from "../storage";
 import { runBulkBackgroundJob as runUnlockedBulkBackgroundJob } from "./bulk-background";
 
+// Small pool — this is used only for pg advisory lock acquisition/release.
+// Lock queries are near-instant; 3 connections is plenty for MAX_CONCURRENT_BULK_JOBS=2.
+// connectionTimeoutMillis reduced to 15s to match the main HTTP pool and fail fast
+// if Postgres is overwhelmed rather than queuing indefinitely.
 const lockPool = new pg.Pool({
   connectionString: process.env.DATABASE_URL!,
   max: 3,
   idleTimeoutMillis: 60000,
-  connectionTimeoutMillis: 30000,
+  connectionTimeoutMillis: 15000,
+  // Advisory lock queries should never take more than 5s — kill if they do.
+  statement_timeout: 5000,
 });
 
 const MAX_CONCURRENT_BULK_JOBS = Math.max(1, Number(process.env.MAX_CONCURRENT_BULK_JOBS || 2));
