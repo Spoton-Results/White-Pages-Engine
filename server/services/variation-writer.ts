@@ -273,6 +273,11 @@ export async function writeVariationsForService(
  * This prevents the mismatch where the UI shows a section as missing (✗) but
  * fillMissingSectionsForService finds the row via a different alias and skips it,
  * reporting "all sections already present" while the checklist stays red.
+ *
+ * FIX 2: rows with variations = [] are treated as missing, not present.
+ * The SQL query now filters to only rows where variations IS NOT NULL and
+ * jsonb_array_length(variations) > 0 — matching the same definition of
+ * "healthy" used by buildFlagsFromBanks in the UI health check.
  */
 export async function fillMissingSectionsForService(
   serviceName: string,
@@ -282,7 +287,9 @@ export async function fillMissingSectionsForService(
 ): Promise<{ filled: string[]; skipped: string[]; errors: string[] }> {
   const result = await pool.query(
     `SELECT section_name FROM content_variation_banks
-     WHERE website_id = $1 AND service = $2`,
+     WHERE website_id = $1 AND service = $2
+       AND variations IS NOT NULL
+       AND jsonb_array_length(variations) > 0`,
     [websiteId, serviceName],
   );
 
