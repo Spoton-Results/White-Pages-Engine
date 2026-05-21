@@ -804,8 +804,33 @@ export async function getVariationBankServices(websiteId: string): Promise<strin
   return rows.map(r => r.service);
 }
 
+/**
+ * UPSERT a variation bank row.
+ *
+ * Bug fix: the previous plain INSERT would throw a unique-constraint error when
+ * a row already existed (e.g. one that was written with an empty variations
+ * array). That error was silently swallowed by writeBankPayload's try/catch,
+ * meaning the section remained empty and the UI health-check kept showing ❌.
+ *
+ * The ON CONFLICT clause targets the unique index on
+ * (website_id, service, section_name) and overwrites variations so that any
+ * previously empty row gets properly populated.
+ */
 export async function createVariationBank(data: InsertContentVariationBank): Promise<ContentVariationBank> {
-  const [row] = await db.insert(contentVariationBanks).values(data).returning();
+  const [row] = await db
+    .insert(contentVariationBanks)
+    .values(data)
+    .onConflictDoUpdate({
+      target: [
+        contentVariationBanks.websiteId,
+        contentVariationBanks.service,
+        contentVariationBanks.sectionName,
+      ],
+      set: {
+        variations: sql`EXCLUDED.variations`,
+      },
+    })
+    .returning();
   return row;
 }
 
