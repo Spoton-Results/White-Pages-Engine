@@ -99,21 +99,34 @@ function ServiceCard({
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  // The server now returns { started: true, jobId } immediately — generation runs in background.
-  // We propagate the jobId up to the page so the shared fillJobQ poll handles completion.
   const fillMissing = useMutation({
     mutationFn: () =>
       apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: bank.service }).then(r => r.json()),
     onSuccess: (data: any) => {
       if (data?.started && data?.jobId) {
+        // New async path: server returns {started:true, jobId}
         onFillStarted(data.jobId);
         toast({
-          title: `Filling missing sections for "${bank.service}"…`,
-          description: "Running in background — the card will update when done.",
+          title: `Filling missing sections for "${bank.service}"\u2026`,
+          description: "Running in background \u2014 the card will update when done.",
         });
+      } else if (data?.ok === true) {
+        // Legacy sync path: server returns {ok:true, filled:[], skipped:[]}
+        // (old build still running, or all sections already present)
+        const filled: string[] = data?.filled ?? [];
+        if (filled.length > 0) {
+          toast({ title: `Filled ${filled.length} section(s) for "${bank.service}"` });
+          qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+        } else {
+          toast({ title: `All sections already present for "${bank.service}"`, description: "Nothing was missing." });
+        }
+      } else if (data?.error) {
+        // Explicit server error object
+        toast({ title: data.error, variant: "destructive" });
       } else {
-        // Unexpected response shape — surface it
-        toast({ title: data?.error ?? "Unexpected response from server", variant: "destructive" });
+        // True unexpected shape — log it for debugging but don't alarm the user
+        console.warn("[fill-missing] Unexpected response shape:", data);
+        toast({ title: "Fill request sent", description: "Response format changed \u2014 refresh to see updates." });
       }
       onAction();
     },
@@ -131,7 +144,6 @@ function ServiceCard({
   });
 
   const color = scoreColor(bank.completenessScore);
-  // Disable both buttons while THIS card's fill job is running OR a rewrite is pending
   const isFilling = fillMissing.isPending || !!activeFillJobId;
   const isBusy = isFilling || rewriteAll.isPending;
   const missingAll = [...missing(bank, CORE_SECTIONS), ...missing(bank, EXTENDED_SECTIONS), ...missing(bank, SEO_EXPANSION_SECTIONS)];
@@ -173,7 +185,7 @@ function ServiceCard({
       {missingAll.length > 0 && (
         <div style={{ background: "#fef9f0", border: "1px solid #fed7aa", borderRadius: 8, padding: "8px 12px", fontSize: ".78rem", color: "#92400e" }}>
           {isFilling && activeFillJobId
-            ? "⏳ Generating missing sections in background…"
+            ? "\u23F3 Generating missing sections in background\u2026"
             : `Missing: ${missingAll.join(", ")}`}
         </div>
       )}
@@ -185,7 +197,7 @@ function ServiceCard({
           disabled={isBusy || missingAll.length === 0}
           style={{ background: (missingAll.length > 0 && !isBusy) ? "#2563eb" : "#e5e7eb", color: (missingAll.length > 0 && !isBusy) ? "#fff" : "#9ca3af", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}
         >
-          {fillMissing.isPending ? "Starting…" : activeFillJobId ? "Filling…" : "Fill Missing"}
+          {fillMissing.isPending ? "Starting\u2026" : activeFillJobId ? "Filling\u2026" : "Fill Missing"}
         </button>
         <button
           data-testid={`btn-rewrite-${bank.service}`}
@@ -193,7 +205,7 @@ function ServiceCard({
           disabled={isBusy}
           style={{ background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}
         >
-          {rewriteAll.isPending ? "Rewriting…" : "Rewrite All"}
+          {rewriteAll.isPending ? "Rewriting\u2026" : "Rewrite All"}
         </button>
       </div>
     </div>
@@ -207,7 +219,6 @@ export default function BankHealthPage() {
   const [thinJobId, setThinJobId] = useState<string | null>(null);
   const [thinWriting, setThinWriting] = useState(false);
   const [fillJobId, setFillJobId] = useState<string | null>(null);
-  // Track which service card triggered the active fill job (for per-card busy state)
   const [fillJobService, setFillJobService] = useState<string | null>(null);
 
   const websitesQ = useQuery<Website[]>({ queryKey: ["/api/websites"], queryFn: () => fetch("/api/websites", { credentials: "include" }).then(r => r.json()) });
@@ -221,7 +232,6 @@ export default function BankHealthPage() {
 
   const thinJobQ = useQuery<any>({ queryKey: ["/api/websites", websiteId, "bank-write-job"], queryFn: () => fetch(`/api/websites/${websiteId}/bank-write-job`, { credentials: "include" }).then(r => r.json()), enabled: !!thinJobId && !!websiteId, refetchInterval: (q: any) => { const status = q.state.data?.status; return status === "done" || status === "error" || !status ? false : 1500; } });
 
-  // fillJobQ polls both per-card and bulk fill-missing jobs via the same /api/jobs/:jobId endpoint
   const fillJobQ = useQuery<any>({
     queryKey: ["/api/jobs", fillJobId],
     queryFn: () => fetch(`/api/jobs/${fillJobId}`, { credentials: "include" }).then(r => r.json()),
@@ -247,7 +257,6 @@ export default function BankHealthPage() {
     }
   }, [thinJobQ.data?.status, thinJobId]);
 
-  // Unified fill job completion handler — covers both per-card and bulk fill jobs
   useEffect(() => {
     const status = fillJobQ.data?.status;
     if ((status === "completed" || status === "failed") && fillJobId) {
@@ -256,7 +265,7 @@ export default function BankHealthPage() {
       qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
       toast({
         title: status === "completed" ? "Fill Missing complete" : "Fill Missing finished with errors",
-        description: status === "completed" ? "Sections generated — cards updated." : "Some sections may not have filled. Check logs.",
+        description: status === "completed" ? "Sections generated \u2014 cards updated." : "Some sections may not have filled. Check logs.",
       });
     }
   }, [fillJobQ.data?.status, fillJobId]);
@@ -270,7 +279,7 @@ export default function BankHealthPage() {
     setThinWriting(true);
     try {
       const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/write-thin`, { threshold: 70 }).then(r => r.json());
-      if (result.started) { setThinJobId(result.jobId); toast({ title: `Writing ${result.total} thin bank(s)…` }); }
+      if (result.started) { setThinJobId(result.jobId); toast({ title: `Writing ${result.total} thin bank(s)\u2026` }); }
       else { toast({ title: result.message || "No thin banks found" }); setThinWriting(false); }
     } catch (e: any) { toast({ title: "Failed", description: e.message, variant: "destructive" }); setThinWriting(false); }
   };
@@ -282,8 +291,8 @@ export default function BankHealthPage() {
       const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing-all-job`, { services: banksWithMissing.map(b => b.service) }).then(r => r.json());
       if (result.started) {
         setFillJobId(result.jobId);
-        setFillJobService(null); // bulk — not tied to a single card
-        toast({ title: `Filling missing sections for ${result.total} service(s)…`, description: "Running in background — you can navigate away." });
+        setFillJobService(null);
+        toast({ title: `Filling missing sections for ${result.total} service(s)\u2026`, description: "Running in background \u2014 you can navigate away." });
       } else {
         toast({ title: result.message || "Nothing to fill" });
       }
@@ -296,15 +305,15 @@ export default function BankHealthPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.75rem", flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#111827", margin: 0 }}>Bank Health</h1>
-            <p style={{ color: "#6b7280", marginTop: 4, fontSize: ".9rem" }}>Variation bank completeness — manage content quality before scaling to Google.</p>
+            <p style={{ color: "#6b7280", marginTop: 4, fontSize: ".9rem" }}>Variation bank completeness \u2014 manage content quality before scaling to Google.</p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <select data-testid="select-website" value={websiteId} onChange={e => setWebsiteId(e.target.value)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: ".9rem", minWidth: 220, cursor: "pointer" }}>
-              <option value="">— Select website —</option>
+              <option value="">\u2014 Select website \u2014</option>
               {websites.map(w => <option key={w.id} value={w.id}>{w.name} ({w.domain})</option>)}
             </select>
             {websiteId && <>
-              <button data-testid="btn-write-thin-banks" onClick={writeThinBanks} disabled={thinWriting || !!thinJobId} style={{ background: thinWriting || thinJobId ? "#e5e7eb" : "#2563eb", color: thinWriting || thinJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: thinWriting || thinJobId ? "not-allowed" : "pointer" }}>{thinWriting ? "Starting…" : thinJobId ? `Writing ${thinJobQ.data?.done ?? 0}/${thinJobQ.data?.total ?? "?"} banks…` : "Bulk Write Thin Banks"}</button>
+              <button data-testid="btn-write-thin-banks" onClick={writeThinBanks} disabled={thinWriting || !!thinJobId} style={{ background: thinWriting || thinJobId ? "#e5e7eb" : "#2563eb", color: thinWriting || thinJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: thinWriting || thinJobId ? "not-allowed" : "pointer" }}>{thinWriting ? "Starting\u2026" : thinJobId ? `Writing ${thinJobQ.data?.done ?? 0}/${thinJobQ.data?.total ?? "?"} banks\u2026` : "Bulk Write Thin Banks"}</button>
               <button
                 data-testid="btn-fill-missing-all"
                 onClick={fillAllMissing}
@@ -312,18 +321,18 @@ export default function BankHealthPage() {
                 style={{ background: fillJobId ? "#e5e7eb" : "#059669", color: fillJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: fillJobId ? "not-allowed" : "pointer" }}
               >
                 {fillJobId && !fillJobService
-                  ? `Filling ${fillJobQ.data?.processedPages ?? 0}/${fillJobQ.data?.totalPages ?? "…"}…`
+                  ? `Filling ${fillJobQ.data?.processedPages ?? 0}/${fillJobQ.data?.totalPages ?? "\u2026"}\u2026`
                   : fillJobId && fillJobService
-                  ? "Filling…"
+                  ? "Filling\u2026"
                   : "Fill Missing All"}
               </button>
-              <button data-testid="btn-recompute-all" onClick={() => recompute.mutate()} disabled={recompute.isPending} style={{ background: "#111827", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer" }}>{recompute.isPending ? "Recomputing…" : "Recompute All"}</button>
+              <button data-testid="btn-recompute-all" onClick={() => recompute.mutate()} disabled={recompute.isPending} style={{ background: "#111827", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer" }}>{recompute.isPending ? "Recomputing\u2026" : "Recompute All"}</button>
             </>}
           </div>
         </div>
 
         {!websiteId && <div style={{ textAlign: "center", padding: "3rem", color: "#9ca3af" }}>Select a website to view bank health.</div>}
-        {websiteId && healthQ.isLoading && <div style={{ textAlign: "center", padding: "3rem", color: "#9ca3af" }}>Loading…</div>}
+        {websiteId && healthQ.isLoading && <div style={{ textAlign: "center", padding: "3rem", color: "#9ca3af" }}>Loading\u2026</div>}
         {websiteId && !healthQ.isLoading && banks.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#9ca3af" }}>No bank completeness data yet. Run the bulk generator or click Recompute All.</div>}
 
         {websiteId && banks.length > 0 && <>
@@ -332,9 +341,9 @@ export default function BankHealthPage() {
           </div>
 
           <div style={{ fontSize: ".8rem", color: "#6b7280", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <span><strong>Core (5):</strong> Intro · How It Works · Benefits · FAQ · CTA — required for Tier 1 eligibility</span>
-            <span><strong>Extended (5):</strong> Local Context · Use Case · Proof & Trust · Pain Point · Local Stat — boost completeness</span>
-            <span><strong>SEO Expansion (4):</strong> Comparison · Pricing Factors · Best Fit · Software Integration — topical depth</span>
+            <span><strong>Core (5):</strong> Intro \u00b7 How It Works \u00b7 Benefits \u00b7 FAQ \u00b7 CTA \u2014 required for Tier 1 eligibility</span>
+            <span><strong>Extended (5):</strong> Local Context \u00b7 Use Case \u00b7 Proof & Trust \u00b7 Pain Point \u00b7 Local Stat \u2014 boost completeness</span>
+            <span><strong>SEO Expansion (4):</strong> Comparison \u00b7 Pricing Factors \u00b7 Best Fit \u00b7 Software Integration \u2014 topical depth</span>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
