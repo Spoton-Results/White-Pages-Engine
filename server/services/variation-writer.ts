@@ -57,12 +57,17 @@ function buildBankPrompt(service: string, sections: readonly Section[], ctx?: Br
 
 You are writing reusable SEO variation-bank content for a white-pages/local SEO publishing engine.
 
-IMPORTANT CONTRACT:
+CRITICAL OUTPUT RULE:
+- Your ENTIRE response must be a single raw JSON object.
+- Do NOT wrap in markdown, code fences, backticks, or any other formatting.
+- Do NOT write \`\`\`json or \`\`\` anywhere.
+- Start your response with { and end with }. Nothing before or after.
+
+CONTENT CONTRACT:
 - Generate ONLY these sections in this response: ${sections.join(", ")}.
 - Each requested section must contain exactly 5 reusable variations.
 - Content must be location-agnostic and use placeholders only.
 - Never use literal city names, state names, regions, landmarks, or geographic references.
-- Return valid JSON only. No markdown. No code fences.
 
 ALLOWED PLACEHOLDERS:
 {{service}} {{city}} {{state}} {{state_abbr}} {{landmark}} {{business_culture}} {{brand}} {{business_count}} {{payment_regulations}}
@@ -78,19 +83,36 @@ QUALITY RULES:
 ${ctx?.voiceAndTone ? `- Match this voice and tone: ${ctx.voiceAndTone}` : ""}
 ${ctx?.industryName ? `- Make the content accurate for the ${ctx.industryName} industry.` : ""}
 
-OUTPUT JSON SHAPE:
+OUTPUT JSON SHAPE (raw, no code fences):
 {
 ${outputShape}
 }`;
 }
 
+/**
+ * Strip all markdown code fence variants and extract the outermost balanced JSON object.
+ * Handles: ```json ... ```, ``` ... ```, and raw JSON.
+ */
 function extractBalancedJson(raw: string): string | null {
-  const stripped = raw.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
+  // Step 1: aggressively strip all code fence patterns
+  let stripped = raw
+    .replace(/^[\s\S]*?```(?:json)?\s*/i, "")  // remove everything up to and including opening fence
+    .replace(/```[\s\S]*$/i, "")               // remove closing fence and anything after
+    .trim();
+
+  // If no fence was found, work from raw directly
+  if (!stripped || !stripped.includes("{")) {
+    stripped = raw.trim();
+  }
+
+  // Step 2: find the first { and walk balanced braces
   const start = stripped.indexOf("{");
   if (start === -1) return null;
+
   let depth = 0;
   let inString = false;
   let escape = false;
+
   for (let i = start; i < stripped.length; i++) {
     const ch = stripped[i];
     if (escape) { escape = false; continue; }
@@ -103,6 +125,7 @@ function extractBalancedJson(raw: string): string | null {
       if (depth === 0) return stripped.slice(start, i + 1);
     }
   }
+
   return null;
 }
 
@@ -119,8 +142,9 @@ function validatePayload(parsed: any, sections: readonly Section[]): BankPayload
 
 function maxTokensForSections(sectionCount: number): number {
   if (sectionCount <= 4) return 7000;
-  if (sectionCount <= 8) return 8000;
-  return 8000;
+  if (sectionCount <= 8) return 10000;
+  // 9-14 sections: give Claude enough room to complete all variations without truncating
+  return 12000;
 }
 
 async function writeBankPayload(
@@ -170,11 +194,17 @@ async function generateBankPayload(
   }
 
   const json = extractBalancedJson(raw);
-  if (!json) throw new Error(`Claude did not return valid JSON for ${generationType}. Response starts: ${raw.slice(0, 300)}`);
+  if (!json) {
+    const preview = raw.slice(0, 300).replace(/\n/g, "\\n");
+    throw new Error(`Claude did not return valid JSON for ${generationType}. Response starts: ${preview}`);
+  }
 
   let parsed: any;
   try { parsed = JSON.parse(json); }
-  catch (err: any) { throw new Error(`Variation bank JSON parse failed for ${generationType}: ${err?.message ?? String(err)}`); }
+  catch (err: any) {
+    const preview = json.slice(0, 200).replace(/\n/g, "\\n");
+    throw new Error(`Variation bank JSON parse failed for ${generationType}: ${err?.message ?? String(err)}. JSON starts: ${preview}`);
+  }
 
   return validatePayload(parsed, sections);
 }
@@ -205,9 +235,6 @@ export async function fillMissingSectionsForService(
   websiteId: string,
   ctx?: BrandContext,
 ): Promise<{ filled: string[]; skipped: string[]; errors: string[] }> {
-  // Raw SQL to reliably read section_name — Drizzle maps it to sectionName
-  // inconsistently in the compiled production build, causing existingSet to
-  // always be empty and every section to appear "missing".
   const result = await pool.query(
     `SELECT section_name FROM content_variation_banks
      WHERE website_id = $1 AND service = $2`,
