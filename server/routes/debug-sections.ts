@@ -1,13 +1,15 @@
 import type { Express, Request, Response } from "express";
-import { requireAuth } from "../auth";
 import * as storage from "../storage";
 
 /**
  * Debug route: GET /api/debug/page-sections/:websiteId/:slug
  *
- * Returns the raw section map for a page so we can verify exactly which
- * of the 14 expected sections are filled vs missing — without going
- * through the full render pipeline.
+ * Protected by a simple bearer token (DEBUG_SECRET env var, or the string
+ * "spoton-debug" as a fallback) so it doesn't depend on the session
+ * middleware being initialised yet.
+ *
+ * Pass the token as:  Authorization: Bearer <token>
+ * or as query param:  ?secret=<token>
  *
  * Expected sections (14):
  *   1. Introduction / Overview
@@ -67,7 +69,17 @@ function matchExpected(found: string[], expected: string[]): { matched: string[]
 export function registerDebugSectionsRoute(app: Express): void {
   app.get(
     "/api/debug/page-sections/:websiteId/:slug",
-    requireAuth,
+    (req: Request, res: Response, next: any) => {
+      // Simple token guard — does NOT require session middleware
+      const expected = process.env.DEBUG_SECRET || "spoton-debug";
+      const authHeader = req.headers["authorization"] || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      const queryToken = (req.query.secret as string) || "";
+      if (bearer !== expected && queryToken !== expected) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      return next();
+    },
     async (req: Request, res: Response) => {
       try {
         const { websiteId, slug } = req.params;
