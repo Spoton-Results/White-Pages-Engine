@@ -4,11 +4,12 @@ import { mountSubRouters } from "./route-mounts";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
-// NOTE: sessionMiddleware is NOT applied globally here.
-// routes.ts mounts it selectively on /api/* only to avoid running
-// the Postgres session store on every public SEO page request.
-// Applying it here AND in routes.ts causes double-session middleware
-// which can create a blank second session that masks the real one.
+import { sessionMiddleware } from "./auth";
+// Session middleware is now mounted ONCE here — before mountSubRouters and
+// registerRoutes — so req.session is always populated regardless of which
+// sub-router or hostname middleware runs first.
+// DO NOT add a second app.use(sessionMiddleware()) anywhere else.
+// The conditional /api/-only wrapper that was in routes.ts has been removed.
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,9 +34,12 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-// Session middleware is mounted per-route inside routes.ts (API routes only).
-// Do NOT add app.use(sessionMiddleware()) here — it would double-mount the
-// session store and can cause stale/blank sessions on API requests.
+// ── Session middleware — mount ONCE, globally, before all routers ─────────────
+// Previously this was conditionally applied only to /api/ requests inside
+// routes.ts, but mountSubRouters() (domain middleware) runs before that check
+// so req.path was evaluated before session was attached on admin subdomains.
+// saveUninitialized:false means no session row is created for public pages.
+app.use(sessionMiddleware());
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
