@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Loader2, Play, XCircle, Zap } from "lucide-react";
 import { api } from "@/lib/api";
@@ -16,6 +17,22 @@ type ProgressRow = { service: string; status: string; created: number; updated: 
 type CityLimit = "100" | "500" | "1000" | "5000" | "all";
 type QueryCluster = { id: string; serviceId?: string | null; name: string; intentType: string; primaryKeyword: string; secondaryKeywords?: string[] };
 type ClusterMode = "none" | "selected" | "all";
+
+interface BrandOverrides {
+  brandName: string;
+  websiteUrl: string;
+  phone: string;
+  ctaHeading: string;
+  ctaBody: string;
+  ctaButtonLabel: string;
+}
+
+interface DemoBannerFields {
+  url: string;
+  heading: string;
+  subtext: string;
+  buttonLabel: string;
+}
 
 async function apiFetch<T = any>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...opts });
@@ -54,6 +71,22 @@ function cityPayload(cities: any[]) {
   };
 }
 
+const DEFAULT_BRAND_OVERRIDES: BrandOverrides = {
+  brandName: "",
+  websiteUrl: "",
+  phone: "",
+  ctaHeading: "",
+  ctaBody: "",
+  ctaButtonLabel: "",
+};
+
+const DEFAULT_DEMO_BANNER: DemoBannerFields = {
+  url: "",
+  heading: "See This Platform in Action",
+  subtext: "This page was generated automatically. Want 100,000+ pages like it for your business?",
+  buttonLabel: "Try the Live Demo →",
+};
+
 export default function BulkGeneratorPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -79,6 +112,10 @@ export default function BulkGeneratorPage() {
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[]; warning?: string } | null>(null);
   const [lastFailure, setLastFailure] = useState("");
   const [bpQueueDisplay, setBpQueueDisplay] = useState({ idx: 0, total: 1, label: "" });
+
+  // ── Brand & CTA overrides (appear on every generated page) ────────────────
+  const [brandOverrides, setBrandOverrides] = useState<BrandOverrides>(DEFAULT_BRAND_OVERRIDES);
+  const [demoBanner, setDemoBanner] = useState<DemoBannerFields>(DEFAULT_DEMO_BANNER);
 
   const bpQueueRef = useRef<QueueItem[]>([]);
   const bpQueueIdxRef = useRef(0);
@@ -111,6 +148,26 @@ export default function BulkGeneratorPage() {
   const blueprints = blueprintsQ.data ?? [];
   const queryClusters = queryClustersQ.data ?? [];
   const selectedBlueprint = blueprints.find((bp: any) => bp.id === blueprintId);
+
+  // ── Pre-fill brand overrides from the selected website's saved settings ───
+  useEffect(() => {
+    if (!selectedWebsite) return;
+    const s = selectedWebsite.settings ?? {};
+    setBrandOverrides({
+      brandName: s.brandNameOverride ?? "",
+      websiteUrl: s.mainWebsiteUrl ?? "",
+      phone: s.phone ?? "",
+      ctaHeading: s.ctaHeading ?? "",
+      ctaBody: s.ctaText ?? "",
+      ctaButtonLabel: s.ctaButtonLabel ?? "",
+    });
+    setDemoBanner({
+      url: s.demoBannerUrl ?? "",
+      heading: s.demoBannerHeading ?? DEFAULT_DEMO_BANNER.heading,
+      subtext: s.demoBannerSubtext ?? DEFAULT_DEMO_BANNER.subtext,
+      buttonLabel: s.demoBannerButtonLabel ?? DEFAULT_DEMO_BANNER.buttonLabel,
+    });
+  }, [websiteId]);
 
   const dbStates = useMemo(() => {
     const seen = new Set<string>();
@@ -239,6 +296,8 @@ export default function BulkGeneratorPage() {
     setActiveJobId("");
     setIsRunningAll(false);
     setCycleBlueprints(false);
+    setBrandOverrides(DEFAULT_BRAND_OVERRIDES);
+    setDemoBanner(DEFAULT_DEMO_BANNER);
     bpQueueRef.current = [];
     bpQueueIdxRef.current = 0;
     handledTerminalJobRef.current = "";
@@ -298,12 +357,48 @@ export default function BulkGeneratorPage() {
     return [];
   }
 
+  // Build brandOverrides payload — only send fields that have actual values
+  function buildBrandOverridesPayload() {
+    const out: Record<string, string> = {};
+    if (brandOverrides.brandName.trim()) out.brandNameOverride = brandOverrides.brandName.trim();
+    if (brandOverrides.websiteUrl.trim()) out.mainWebsiteUrl = brandOverrides.websiteUrl.trim();
+    if (brandOverrides.phone.trim()) out.phone = brandOverrides.phone.trim();
+    if (brandOverrides.ctaHeading.trim()) out.ctaHeading = brandOverrides.ctaHeading.trim();
+    if (brandOverrides.ctaBody.trim()) out.ctaText = brandOverrides.ctaBody.trim();
+    if (brandOverrides.ctaButtonLabel.trim()) out.ctaButtonLabel = brandOverrides.ctaButtonLabel.trim();
+    return Object.keys(out).length ? out : null;
+  }
+
+  // Build demoBanner payload — only send if URL is set (blank = hide banner)
+  function buildDemoBannerPayload() {
+    const url = demoBanner.url.trim();
+    if (!url) return null; // null = no banner on generated pages
+    return {
+      demoBannerUrl: url,
+      demoBannerHeading: demoBanner.heading.trim() || DEFAULT_DEMO_BANNER.heading,
+      demoBannerSubtext: demoBanner.subtext.trim() || DEFAULT_DEMO_BANNER.subtext,
+      demoBannerButtonLabel: demoBanner.buttonLabel.trim() || DEFAULT_DEMO_BANNER.buttonLabel,
+    };
+  }
+
   async function submitJobForBlueprint(item: QueueItem) {
     try {
       const queryClusterIds = selectedQueryClusterIds();
       const payload: Record<string, any> = { services: Array.from(selectedServices), ...item.locPayload, overwrite };
       if (item.bpId) payload.blueprintId = item.bpId;
       if (queryClusterIds.length > 0) payload.queryClusterIds = queryClusterIds;
+
+      // ── Brand & CTA overrides ──────────────────────────────────────────────
+      // These are merged into website.settings before page HTML is rendered
+      // so renderPageHtml() picks them up automatically via website.settings.*
+      const brandPayload = buildBrandOverridesPayload();
+      if (brandPayload) payload.brandOverrides = brandPayload;
+
+      // ── Demo Banner ────────────────────────────────────────────────────────
+      // null = leave blank = banner hidden on generated pages
+      const bannerPayload = buildDemoBannerPayload();
+      if (bannerPayload) payload.demoBanner = bannerPayload;
+
       const data = await apiFetch<{ jobId: string }>(`/api/websites/${websiteId}/bulk-generate-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       handledTerminalJobRef.current = "";
       setActiveJobId(data.jobId);
@@ -377,6 +472,54 @@ export default function BulkGeneratorPage() {
   const showCityPicker = runBothLocations || mode === "specific_cities";
   const isClusterReady = clusterMode === "none" || (clusterMode === "all" && queryClusters.length > 0) || (clusterMode === "selected" && selectedClusterIds.size > 0);
 
+  function brandField(key: keyof BrandOverrides, label: string, placeholder: string, type: "input" | "textarea" = "input") {
+    return (
+      <div className="space-y-1">
+        <Label htmlFor={`brand-${key}`}>{label}</Label>
+        {type === "textarea" ? (
+          <Textarea
+            id={`brand-${key}`}
+            placeholder={placeholder}
+            value={brandOverrides[key]}
+            onChange={(e) => setBrandOverrides((prev) => ({ ...prev, [key]: e.target.value }))}
+            rows={2}
+          />
+        ) : (
+          <Input
+            id={`brand-${key}`}
+            placeholder={placeholder}
+            value={brandOverrides[key]}
+            onChange={(e) => setBrandOverrides((prev) => ({ ...prev, [key]: e.target.value }))}
+          />
+        )}
+      </div>
+    );
+  }
+
+  function bannerField(key: keyof DemoBannerFields, label: string, placeholder: string, type: "input" | "textarea" = "input") {
+    return (
+      <div className="space-y-1">
+        <Label htmlFor={`banner-${key}`}>{label}</Label>
+        {type === "textarea" ? (
+          <Textarea
+            id={`banner-${key}`}
+            placeholder={placeholder}
+            value={demoBanner[key]}
+            onChange={(e) => setDemoBanner((prev) => ({ ...prev, [key]: e.target.value }))}
+            rows={2}
+          />
+        ) : (
+          <Input
+            id={`banner-${key}`}
+            placeholder={placeholder}
+            value={demoBanner[key]}
+            onChange={(e) => setDemoBanner((prev) => ({ ...prev, [key]: e.target.value }))}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -397,6 +540,58 @@ export default function BulkGeneratorPage() {
             </Select>
           </CardContent>
         </Card>
+
+        {/* ── Brand & Contact ─────────────────────────────────────────────── */}
+        {websiteId && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Brand &amp; Contact</CardTitle>
+              <CardDescription>Appears on every generated page. Leave blank to use saved website settings.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                {brandField("brandName", "Brand Name", selectedWebsite?.name || "Your brand name")}
+                {brandField("websiteUrl", "Main Website URL", "https://example.com")}
+                {brandField("phone", "Phone Number", "(800) 000-0000")}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── CTA Section ─────────────────────────────────────────────────── */}
+        {websiteId && (
+          <Card>
+            <CardHeader>
+              <CardTitle>CTA Section</CardTitle>
+              <CardDescription>The call-to-action block at the bottom of every generated page.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {brandField("ctaHeading", "CTA Heading", "Ready to Get Started?")}
+              {brandField("ctaBody", "CTA Body Text", "Contact us today to learn how we can help.", "textarea")}
+              {brandField("ctaButtonLabel", "CTA Button Label", "Get a Free Quote")}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Demo Banner ─────────────────────────────────────────────────── */}
+        {websiteId && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Demo Banner</CardTitle>
+              <CardDescription>Appears at the top of every generated page. Leave Demo URL blank to hide the banner entirely.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {bannerField("url", "Demo URL (leave blank to hide banner)", "https://demo.yourdomain.com")}
+              {demoBanner.url.trim() && (
+                <>
+                  {bannerField("heading", "Heading", DEFAULT_DEMO_BANNER.heading)}
+                  {bannerField("subtext", "Subtext", DEFAULT_DEMO_BANNER.subtext, "textarea")}
+                  {bannerField("buttonLabel", "Button Label", DEFAULT_DEMO_BANNER.buttonLabel)}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {websiteId && <Card>
           <CardHeader><CardTitle>Blueprint</CardTitle><CardDescription>Choose one blueprint or run every blueprint in sequence.</CardDescription></CardHeader>
