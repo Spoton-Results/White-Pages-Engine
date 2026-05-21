@@ -807,31 +807,49 @@ export async function getVariationBankServices(websiteId: string): Promise<strin
 /**
  * UPSERT a variation bank row.
  *
- * Bug fix: the previous plain INSERT would throw a unique-constraint error when
- * a row already existed (e.g. one that was written with an empty variations
- * array). That error was silently swallowed by writeBankPayload's try/catch,
- * meaning the section remained empty and the UI health-check kept showing ❌.
+ * Uses raw pool.query() instead of Drizzle's .onConflictDoUpdate() because
+ * Drizzle resolves ON CONFLICT by the *named constraint* emitted by the ORM,
+ * which requires the unique index to already exist in the live DB at query time.
+ * If the migration hasn't been applied yet Postgres throws:
+ *   "there is no unique or exclusion constraint matching the ON CONFLICT specification"
+ * which crashes the route and makes Express return its HTML error page —
+ * causing the frontend JSON.parse to blow up with
+ *   Unexpected token '<', "<!DOCTYPE..." is not valid JSON.
  *
- * The ON CONFLICT clause targets the unique index on
- * (website_id, service, section_name) and overwrites variations so that any
- * previously empty row gets properly populated.
+ * Raw SQL ON CONFLICT (col, col, col) resolves by *column identity*, not by
+ * constraint name, so it works whether or not the unique index has been
+ * created by migration yet.  Once the migration runs it will be marginally
+ * faster, but it is correct either way.
  */
 export async function createVariationBank(data: InsertContentVariationBank): Promise<ContentVariationBank> {
-  const [row] = await db
-    .insert(contentVariationBanks)
-    .values(data)
-    .onConflictDoUpdate({
-      target: [
-        contentVariationBanks.websiteId,
-        contentVariationBanks.service,
-        contentVariationBanks.sectionName,
-      ],
-      set: {
-        variations: sql`EXCLUDED.variations`,
-      },
-    })
-    .returning();
-  return row;
+  const res = await pool.query<ContentVariationBank>(
+    `INSERT INTO content_variation_banks
+       (id, account_id, website_id, service, section_name, variations, created_at)
+     VALUES
+       (gen_random_uuid(), $1, $2, $3, $4, $5::jsonb, NOW())
+     ON CONFLICT (website_id, service, section_name)
+     DO UPDATE SET
+       variations = EXCLUDED.variations
+     RETURNING *`,
+    [
+      data.accountId,
+      data.websiteId,
+      data.service,
+      data.sectionName,
+      JSON.stringify(data.variations ?? []),
+    ],
+  );
+  const r = res.rows[0];
+  // Map snake_case → camelCase to match the ContentVariationBank type
+  return {
+    id: r.id,
+    accountId: (r as any).account_id,
+    websiteId: (r as any).website_id,
+    service: r.service,
+    sectionName: (r as any).section_name,
+    variations: r.variations,
+    createdAt: (r as any).created_at,
+  } as ContentVariationBank;
 }
 
 export async function deleteVariationBanks(websiteId: string, service: string): Promise<void> {
@@ -899,7 +917,7 @@ const NAV_CACHE_TTL = 5 * 60_000;
 // Sibling service pages cache — uncached LIKE query, 5-min TTL, key = websiteId:locationSuffix
 const siblingServiceCache = new Map<string, { data: {title: string, slug: string, serviceName: string | null}[]; exp: number }>();
 
-// Outbound links cache — queried on every page render, 10-min TTL (matches HTML cache TTL), key = pageId
+// Outbound links cache — queried on every page render, 10-min TTL, key = pageId
 const outboundLinksCache = new Map<string, { data: {slug: string; anchorText: string; linkType: string}[]; exp: number }>();
 const OUTBOUND_LINKS_CACHE_TTL = 10 * 60_000;
 
@@ -1204,9 +1222,6 @@ export async function bulkSetPageTier(websiteId: string, tier: number, filters: 
 }
 
 export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: number): Promise<{ promoted: number; promotedSlugs: string[] }> {
-  // Batched UPDATE — processes BATCH_SIZE rows per round-trip so we never hold a
-  // table-spanning row lock for minutes on multi-million-row sites.
-  // Uses partial index idx_pages_pub_tier (WHERE status='published') for speed.
   const BATCH_SIZE = 10_000;
   let totalPromoted = 0;
   const allSlugs: string[] = [];
@@ -1235,15 +1250,13 @@ export async function bulkUpdatePageTiers(websiteId: string, tierThreshold: numb
     if (batchCount === 0) break;
     totalPromoted += batchCount;
     allSlugs.push(...rows.map((r: any) => r.slug));
-    if (batchCount < BATCH_SIZE) break; // last batch
-    // Brief yield between batches to let other queries breathe
+    if (batchCount < BATCH_SIZE) break;
     await new Promise(r => setTimeout(r, 50));
   }
   return { promoted: totalPromoted, promotedSlugs: allSlugs };
 }
 
 export async function bulkSetTier3(websiteId: string, scoreThreshold: number): Promise<{ demoted: number }> {
-  // Dual-gate: E-E-A-T gate for pages with new scores; legacy qualityScore gate for the rest.
   const result = await db.execute(sql`
     UPDATE pages
     SET tier = 3, updated_at = NOW()
@@ -1251,11 +1264,9 @@ export async function bulkSetTier3(websiteId: string, scoreThreshold: number): P
       AND status = 'published'
       AND tier != 3
       AND (
-        -- E-E-A-T path: new scores present but fail Tier 2 thresholds
         (trust_score IS NOT NULL AND evidence_score IS NOT NULL AND content_quality_score IS NOT NULL
          AND (trust_score < 55 OR evidence_score < 50 OR content_quality_score < 50))
         OR
-        -- Legacy path: no new scores, use qualityScore gate
         (trust_score IS NULL AND quality_score IS NOT NULL AND quality_score < ${scoreThreshold})
       )
     RETURNING id
@@ -1413,8 +1424,6 @@ export async function getInternalLinkStats(websiteId: string): Promise<{
   totalLinks: number; pagesWithLinks: number; totalPublished: number;
   topLinkedPages: Array<{ title: string; slug: string; inboundCount: number }>;
 }> {
-  // Use pre-computed publishedPages from websites table (maintained by DB trigger)
-  // instead of COUNT(*) FROM pages — avoids full table scan on millions of rows.
   const [totalRes, withLinksRes, websiteRes] = await Promise.all([
     db.execute(sql`SELECT COUNT(*)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
     db.execute(sql`SELECT COUNT(DISTINCT from_page_id)::int AS count FROM internal_links WHERE website_id = ${websiteId}`),
@@ -1479,7 +1488,6 @@ export function clearAllOutboundLinksCache(): void {
   outboundLinksCache.clear();
 }
 
-// Get all published pages for a website for internal link building
 export async function getPagesForLinking(websiteId: string, limit = 5000): Promise<Array<{
   id: string; title: string; slug: string; pageType: string | null;
   serviceId: string | null; locationId: string | null;
@@ -1508,7 +1516,6 @@ export async function getHubPage(id: string): Promise<HubPage | undefined> {
 }
 
 export async function getHubPageBySlug(websiteId: string, slug: string): Promise<HubPage | undefined> {
-  // Raw SQL to avoid Drizzle ORM camelCase→snake_case bug with website_id column in production
   const { pool } = await import("./db");
   const res = await pool.query(
     `SELECT * FROM hub_pages WHERE website_id = $1 AND slug = $2 LIMIT 1`,
@@ -1557,12 +1564,6 @@ export async function bulkPublishHubDrafts(websiteId: string, hubType?: string):
   return result.length;
 }
 
-/**
- * Get the top N child pages for a hub, ordered by quality_score DESC.
- * - service hub → pages whose title/slug match the service keyword
- * - state hub   → pages whose slug contains the state keyword
- * - city hub    → pages whose slug contains the city keyword
- */
 export async function getChildPagesForHub(
   websiteId: string,
   hubType: string,
@@ -1570,7 +1571,6 @@ export async function getChildPagesForHub(
   limit: number,
 ): Promise<Array<{ title: string; slug: string; qualityScore: number | null; tier: number | null }>> {
   const kw = keyword.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
-  // Build a LIKE pattern that matches the keyword anywhere in the slug
   const pattern = `%${kw}%`;
   const rows = await db
     .select({ title: pages.title, slug: pages.slug, qualityScore: pages.qualityScore, tier: pages.tier })
