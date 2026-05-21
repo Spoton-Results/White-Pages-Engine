@@ -122,6 +122,8 @@ function sectionKey(sectionName: unknown): string | null {
   return null;
 }
 
+// FIX: read SEO expansion columns from the DB row instead of hardcoding false.
+// The variation_bank_completeness table stores all 14 flags — we must read them.
 function baseMapBankRow(row: any) {
   return {
     id: row.id,
@@ -137,10 +139,11 @@ function baseMapBankRow(row: any) {
     hasProofTrust: row.has_proof_trust,
     hasPainPoint: row.has_pain_point,
     hasLocalStat: row.has_local_stat,
-    hasComparison: false,
-    hasPricingFactors: false,
-    hasBestFit: false,
-    hasSoftwareIntegration: false,
+    // SEO expansion — read from DB row (was incorrectly hardcoded to false)
+    hasComparison: row.has_comparison ?? false,
+    hasPricingFactors: row.has_pricing_factors ?? false,
+    hasBestFit: row.has_best_fit ?? false,
+    hasSoftwareIntegration: row.has_software_integration ?? false,
     totalVariations: row.total_variations,
     avgVariationsPerSection: row.avg_variations_per_section,
     completenessScore: row.completeness_score,
@@ -248,6 +251,9 @@ router.get("/api/websites/:websiteId/bank-completeness", async (req, res, next) 
   }
 });
 
+// FIX: recompute now writes all 14 section flags including SEO expansion (4).
+// Previously only 10 columns were written — comparison/pricing_factors/best_fit/
+// software_integration were omitted, so those 4 were always null/false after recompute.
 router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -285,15 +291,37 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
           website_id, service,
           has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
           has_local_context, has_use_case, has_proof_trust, has_pain_point, has_local_stat,
+          has_comparison, has_pricing_factors, has_best_fit, has_software_integration,
           total_variations, avg_variations_per_section, completeness_score,
           is_eligible_for_tier1, last_computed_at
         ) VALUES (
           $1, $2,
           $3, $4, $5, $6, $7,
           $8, $9, $10, $11, $12,
-          $13, $14, $15,
-          $16, NOW()
-        )`,
+          $13, $14, $15, $16,
+          $17, $18, $19,
+          $20, NOW()
+        )
+        ON CONFLICT (website_id, service) DO UPDATE SET
+          has_intro = EXCLUDED.has_intro,
+          has_how_it_works = EXCLUDED.has_how_it_works,
+          has_benefits = EXCLUDED.has_benefits,
+          has_faq = EXCLUDED.has_faq,
+          has_cta = EXCLUDED.has_cta,
+          has_local_context = EXCLUDED.has_local_context,
+          has_use_case = EXCLUDED.has_use_case,
+          has_proof_trust = EXCLUDED.has_proof_trust,
+          has_pain_point = EXCLUDED.has_pain_point,
+          has_local_stat = EXCLUDED.has_local_stat,
+          has_comparison = EXCLUDED.has_comparison,
+          has_pricing_factors = EXCLUDED.has_pricing_factors,
+          has_best_fit = EXCLUDED.has_best_fit,
+          has_software_integration = EXCLUDED.has_software_integration,
+          total_variations = EXCLUDED.total_variations,
+          avg_variations_per_section = EXCLUDED.avg_variations_per_section,
+          completeness_score = EXCLUDED.completeness_score,
+          is_eligible_for_tier1 = EXCLUDED.is_eligible_for_tier1,
+          last_computed_at = NOW()`,
         [
           websiteId,
           serviceName,
@@ -307,6 +335,10 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
           f.has_proof_trust,
           f.has_pain_point,
           f.has_local_stat,
+          f.has_comparison,
+          f.has_pricing_factors,
+          f.has_best_fit,
+          f.has_software_integration,
           live.totalVariations,
           live.avgVariationsPerSection,
           live.completenessScore,
