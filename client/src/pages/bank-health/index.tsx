@@ -83,18 +83,38 @@ function SectionChecklist({ title, sections, bank }: { title: string; sections: 
   );
 }
 
-function ServiceCard({ bank, websiteId, onAction }: { bank: BankHealth; websiteId: string; onAction: () => void }) {
+function ServiceCard({
+  bank,
+  websiteId,
+  activeFillJobId,
+  onFillStarted,
+  onAction,
+}: {
+  bank: BankHealth;
+  websiteId: string;
+  activeFillJobId: string | null;
+  onFillStarted: (jobId: string) => void;
+  onAction: () => void;
+}) {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  // The server now returns { started: true, jobId } immediately — generation runs in background.
+  // We propagate the jobId up to the page so the shared fillJobQ poll handles completion.
   const fillMissing = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: bank.service }).then(r => r.json()),
+    mutationFn: () =>
+      apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing`, { service: bank.service }).then(r => r.json()),
     onSuccess: (data: any) => {
-      const filled = data?.filled ?? [];
-      const errors = data?.errors ?? [];
-      if (errors.length > 0 && filled.length === 0) toast({ title: "Fill failed", description: errors[0], variant: "destructive" });
-      else toast({ title: filled.length > 0 ? `Filled ${filled.length} section(s)` : "Nothing to fill", description: filled.length > 0 ? filled.join(", ") : "All sections already present." });
-      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+      if (data?.started && data?.jobId) {
+        onFillStarted(data.jobId);
+        toast({
+          title: `Filling missing sections for "${bank.service}"…`,
+          description: "Running in background — the card will update when done.",
+        });
+      } else {
+        // Unexpected response shape — surface it
+        toast({ title: data?.error ?? "Unexpected response from server", variant: "destructive" });
+      }
       onAction();
     },
     onError: (e: any) => toast({ title: "Fill failed", description: e.message, variant: "destructive" }),
@@ -111,7 +131,9 @@ function ServiceCard({ bank, websiteId, onAction }: { bank: BankHealth; websiteI
   });
 
   const color = scoreColor(bank.completenessScore);
-  const isBusy = fillMissing.isPending || rewriteAll.isPending;
+  // Disable both buttons while THIS card's fill job is running OR a rewrite is pending
+  const isFilling = fillMissing.isPending || !!activeFillJobId;
+  const isBusy = isFilling || rewriteAll.isPending;
   const missingAll = [...missing(bank, CORE_SECTIONS), ...missing(bank, EXTENDED_SECTIONS), ...missing(bank, SEO_EXPANSION_SECTIONS)];
 
   return (
@@ -148,11 +170,31 @@ function ServiceCard({ bank, websiteId, onAction }: { bank: BankHealth; websiteI
         <SectionChecklist title="SEO Expansion (4)" sections={SEO_EXPANSION_SECTIONS} bank={bank} />
       </div>
 
-      {missingAll.length > 0 && <div style={{ background: "#fef9f0", border: "1px solid #fed7aa", borderRadius: 8, padding: "8px 12px", fontSize: ".78rem", color: "#92400e" }}>Missing: {missingAll.join(", ")}</div>}
+      {missingAll.length > 0 && (
+        <div style={{ background: "#fef9f0", border: "1px solid #fed7aa", borderRadius: 8, padding: "8px 12px", fontSize: ".78rem", color: "#92400e" }}>
+          {isFilling && activeFillJobId
+            ? "⏳ Generating missing sections in background…"
+            : `Missing: ${missingAll.join(", ")}`}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button data-testid={`btn-fill-missing-${bank.service}`} onClick={() => fillMissing.mutate()} disabled={isBusy || missingAll.length === 0} style={{ background: missingAll.length > 0 ? "#2563eb" : "#e5e7eb", color: missingAll.length > 0 ? "#fff" : "#9ca3af", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}>{fillMissing.isPending ? "Filling…" : "Fill Missing"}</button>
-        <button data-testid={`btn-rewrite-${bank.service}`} onClick={() => rewriteAll.mutate()} disabled={isBusy} style={{ background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}>{rewriteAll.isPending ? "Rewriting…" : "Rewrite All"}</button>
+        <button
+          data-testid={`btn-fill-missing-${bank.service}`}
+          onClick={() => fillMissing.mutate()}
+          disabled={isBusy || missingAll.length === 0}
+          style={{ background: (missingAll.length > 0 && !isBusy) ? "#2563eb" : "#e5e7eb", color: (missingAll.length > 0 && !isBusy) ? "#fff" : "#9ca3af", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}
+        >
+          {fillMissing.isPending ? "Starting…" : activeFillJobId ? "Filling…" : "Fill Missing"}
+        </button>
+        <button
+          data-testid={`btn-rewrite-${bank.service}`}
+          onClick={() => rewriteAll.mutate()}
+          disabled={isBusy}
+          style={{ background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 14px", fontSize: ".82rem", fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer" }}
+        >
+          {rewriteAll.isPending ? "Rewriting…" : "Rewrite All"}
+        </button>
       </div>
     </div>
   );
@@ -165,6 +207,8 @@ export default function BankHealthPage() {
   const [thinJobId, setThinJobId] = useState<string | null>(null);
   const [thinWriting, setThinWriting] = useState(false);
   const [fillJobId, setFillJobId] = useState<string | null>(null);
+  // Track which service card triggered the active fill job (for per-card busy state)
+  const [fillJobService, setFillJobService] = useState<string | null>(null);
 
   const websitesQ = useQuery<Website[]>({ queryKey: ["/api/websites"], queryFn: () => fetch("/api/websites", { credentials: "include" }).then(r => r.json()) });
   const healthQ = useQuery<BankHealth[]>({ queryKey: ["/api/websites", websiteId, "bank-completeness"], queryFn: () => fetch(`/api/websites/${websiteId}/bank-completeness`, { credentials: "include" }).then(r => r.json()), enabled: !!websiteId });
@@ -176,14 +220,46 @@ export default function BankHealthPage() {
   });
 
   const thinJobQ = useQuery<any>({ queryKey: ["/api/websites", websiteId, "bank-write-job"], queryFn: () => fetch(`/api/websites/${websiteId}/bank-write-job`, { credentials: "include" }).then(r => r.json()), enabled: !!thinJobId && !!websiteId, refetchInterval: (q: any) => { const status = q.state.data?.status; return status === "done" || status === "error" || !status ? false : 1500; } });
-  const fillJobQ = useQuery<any>({ queryKey: ["/api/jobs", fillJobId], queryFn: () => fetch(`/api/jobs/${fillJobId}`, { credentials: "include" }).then(r => r.json()), enabled: !!fillJobId, refetchInterval: (q: any) => { const status = q.state.data?.status; return status === "completed" || status === "failed" || !status ? false : 1500; } });
+
+  // fillJobQ polls both per-card and bulk fill-missing jobs via the same /api/jobs/:jobId endpoint
+  const fillJobQ = useQuery<any>({
+    queryKey: ["/api/jobs", fillJobId],
+    queryFn: () => fetch(`/api/jobs/${fillJobId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!fillJobId,
+    refetchInterval: (q: any) => {
+      const status = q.state.data?.status;
+      return status === "completed" || status === "failed" || !status ? false : 1500;
+    },
+  });
+
   const fillRestoreQ = useQuery<any>({ queryKey: ["/api/websites", websiteId, "fill-missing-job"], queryFn: () => fetch(`/api/websites/${websiteId}/fill-missing-job`, { credentials: "include" }).then(r => r.json()), enabled: !!websiteId && !fillJobId });
   const thinRestoreQ = useQuery<any>({ queryKey: ["/api/websites", websiteId, "bank-write-job"], queryFn: () => fetch(`/api/websites/${websiteId}/bank-write-job`, { credentials: "include" }).then(r => r.json()), enabled: !!websiteId && !thinJobId });
 
   useEffect(() => { if (fillRestoreQ.data?.jobId && !fillJobId) setFillJobId(fillRestoreQ.data.jobId); }, [fillRestoreQ.data?.jobId]);
   useEffect(() => { if (thinRestoreQ.data?.jobId && !thinJobId) setThinJobId(thinRestoreQ.data.jobId); }, [thinRestoreQ.data?.jobId]);
-  useEffect(() => { const status = thinJobQ.data?.status; if ((status === "done" || status === "error") && thinJobId) { setThinJobId(null); setThinWriting(false); qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] }); toast({ title: "Thin bank write complete" }); } }, [thinJobQ.data?.status, thinJobId]);
-  useEffect(() => { const status = fillJobQ.data?.status; if ((status === "completed" || status === "failed") && fillJobId) { setFillJobId(null); qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] }); toast({ title: status === "completed" ? "Fill Missing complete" : "Fill Missing finished with errors" }); } }, [fillJobQ.data?.status, fillJobId]);
+  useEffect(() => {
+    const status = thinJobQ.data?.status;
+    if ((status === "done" || status === "error") && thinJobId) {
+      setThinJobId(null);
+      setThinWriting(false);
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+      toast({ title: "Thin bank write complete" });
+    }
+  }, [thinJobQ.data?.status, thinJobId]);
+
+  // Unified fill job completion handler — covers both per-card and bulk fill jobs
+  useEffect(() => {
+    const status = fillJobQ.data?.status;
+    if ((status === "completed" || status === "failed") && fillJobId) {
+      setFillJobId(null);
+      setFillJobService(null);
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] });
+      toast({
+        title: status === "completed" ? "Fill Missing complete" : "Fill Missing finished with errors",
+        description: status === "completed" ? "Sections generated — cards updated." : "Some sections may not have filled. Check logs.",
+      });
+    }
+  }, [fillJobQ.data?.status, fillJobId]);
 
   const websites = websitesQ.data ?? [];
   const banks = healthQ.data ?? [];
@@ -204,8 +280,13 @@ export default function BankHealthPage() {
     if (banksWithMissing.length === 0) { toast({ title: "Nothing to fill", description: "All sections are already present." }); return; }
     try {
       const result = await apiRequest("POST", `/api/websites/${websiteId}/variation-banks/fill-missing-all-job`, { services: banksWithMissing.map(b => b.service) }).then(r => r.json());
-      if (result.started) { setFillJobId(result.jobId); toast({ title: `Filling missing sections for ${result.total} service(s)…`, description: "Running in background — you can navigate away." }); }
-      else toast({ title: result.message || "Nothing to fill" });
+      if (result.started) {
+        setFillJobId(result.jobId);
+        setFillJobService(null); // bulk — not tied to a single card
+        toast({ title: `Filling missing sections for ${result.total} service(s)…`, description: "Running in background — you can navigate away." });
+      } else {
+        toast({ title: result.message || "Nothing to fill" });
+      }
     } catch (e: any) { toast({ title: "Failed to start fill job", description: e.message, variant: "destructive" }); }
   };
 
@@ -224,7 +305,18 @@ export default function BankHealthPage() {
             </select>
             {websiteId && <>
               <button data-testid="btn-write-thin-banks" onClick={writeThinBanks} disabled={thinWriting || !!thinJobId} style={{ background: thinWriting || thinJobId ? "#e5e7eb" : "#2563eb", color: thinWriting || thinJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: thinWriting || thinJobId ? "not-allowed" : "pointer" }}>{thinWriting ? "Starting…" : thinJobId ? `Writing ${thinJobQ.data?.done ?? 0}/${thinJobQ.data?.total ?? "?"} banks…` : "Bulk Write Thin Banks"}</button>
-              <button data-testid="btn-fill-missing-all" onClick={fillAllMissing} disabled={!!fillJobId || thinWriting || !!thinJobId} style={{ background: fillJobId ? "#e5e7eb" : "#059669", color: fillJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: fillJobId ? "not-allowed" : "pointer" }}>{fillJobId ? `Filling ${fillJobQ.data?.processedPages ?? 0}/${fillJobQ.data?.totalPages ?? "…"}…` : "Fill Missing All"}</button>
+              <button
+                data-testid="btn-fill-missing-all"
+                onClick={fillAllMissing}
+                disabled={!!fillJobId || thinWriting || !!thinJobId}
+                style={{ background: fillJobId ? "#e5e7eb" : "#059669", color: fillJobId ? "#9ca3af" : "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: fillJobId ? "not-allowed" : "pointer" }}
+              >
+                {fillJobId && !fillJobService
+                  ? `Filling ${fillJobQ.data?.processedPages ?? 0}/${fillJobQ.data?.totalPages ?? "…"}…`
+                  : fillJobId && fillJobService
+                  ? "Filling…"
+                  : "Fill Missing All"}
+              </button>
               <button data-testid="btn-recompute-all" onClick={() => recompute.mutate()} disabled={recompute.isPending} style={{ background: "#111827", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: ".9rem", fontWeight: 600, cursor: "pointer" }}>{recompute.isPending ? "Recomputing…" : "Recompute All"}</button>
             </>}
           </div>
@@ -246,7 +338,19 @@ export default function BankHealthPage() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
-            {banks.map(bank => <ServiceCard key={bank.id} bank={bank} websiteId={websiteId} onAction={() => qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] })} />)}
+            {banks.map(bank => (
+              <ServiceCard
+                key={bank.id}
+                bank={bank}
+                websiteId={websiteId}
+                activeFillJobId={fillJobService === bank.service ? fillJobId : null}
+                onFillStarted={(jobId) => {
+                  setFillJobId(jobId);
+                  setFillJobService(bank.service);
+                }}
+                onAction={() => qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "bank-completeness"] })}
+              />
+            ))}
           </div>
         </>}
       </div>
