@@ -324,13 +324,8 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
 // Called by the per-service card "Fill Missing" button.
 // Body: { service: string }
 //
-// FIX: Previously awaited fillMissingSectionsForService inline — that makes up
-// to 70 sequential Claude AI calls (14 sections × 5 variations) which takes
-// 60-120 seconds and exceeds Railway's 60s HTTP timeout → 502.
-//
-// Now mirrors fill-missing-all-job: returns a jobId immediately and runs
-// generation in a setImmediate background task. The client polls
-// GET /api/jobs/:jobId for progress.
+// Runs fillMissingSectionsForService in a setImmediate background task so the
+// HTTP response returns immediately with a jobId. Client polls GET /api/jobs/:jobId.
 router.post(
   "/api/websites/:websiteId/variation-banks/fill-missing",
   requireAuth,
@@ -344,21 +339,21 @@ router.post(
 
       const jobId = `fill-missing-${websiteId}-${Date.now()}`;
 
-      // Persist job row (best-effort)
+      // Persist job row into generation_jobs (schema-safe columns only: no type, no updated_at)
       try {
         await pool.query(
           `INSERT INTO generation_jobs (
-             id, website_id, account_id, type, status,
-             total_pages, processed_pages, created_at, updated_at
-           ) VALUES ($1, $2, $3, 'fill_missing', 'running', 1, 0, NOW(), NOW())
+             id, website_id, account_id, name, status,
+             total_pages, processed_pages, created_at
+           ) VALUES ($1, $2, $3, $4, 'running', 1, 0, NOW())
            ON CONFLICT (id) DO NOTHING`,
-          [jobId, websiteId, accountId],
+          [jobId, websiteId, accountId, `fill_missing:${serviceName}`],
         );
       } catch (e: any) {
         console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
       }
 
-      // Track active job for restore-on-refresh
+      // Track active job for restore-on-refresh (best-effort; table may not exist)
       try {
         await pool.query(
           `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
@@ -374,13 +369,13 @@ router.post(
         try {
           await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
           await pool.query(
-            `UPDATE generation_jobs SET status = 'completed', processed_pages = 1, updated_at = NOW() WHERE id = $1`,
+            `UPDATE generation_jobs SET status = 'completed', processed_pages = 1 WHERE id = $1`,
             [jobId],
           ).catch(() => {});
         } catch (err: any) {
           console.error(`[bank-health] fill-missing failed for "${serviceName}":`, err?.message || err);
           await pool.query(
-            `UPDATE generation_jobs SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+            `UPDATE generation_jobs SET status = 'failed' WHERE id = $1`,
             [jobId],
           ).catch(() => {});
         }
@@ -421,21 +416,21 @@ router.post(
       const { ctx, accountId } = await getBrandCtx(websiteId);
       const jobId = `fill-missing-${websiteId}-${Date.now()}`;
 
-      // Persist job row (best-effort)
+      // Persist job row (schema-safe columns only: no type, no updated_at)
       try {
         await pool.query(
           `INSERT INTO generation_jobs (
-             id, website_id, account_id, type, status,
-             total_pages, processed_pages, created_at, updated_at
-           ) VALUES ($1, $2, $3, 'fill_missing', 'running', $4, 0, NOW(), NOW())
+             id, website_id, account_id, name, status,
+             total_pages, processed_pages, created_at
+           ) VALUES ($1, $2, $3, $4, 'running', $5, 0, NOW())
            ON CONFLICT (id) DO NOTHING`,
-          [jobId, websiteId, accountId, services.length],
+          [jobId, websiteId, accountId, `fill_missing_all:${services.length}_services`, services.length],
         );
       } catch (e: any) {
         console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
       }
 
-      // Track active job for restore-on-refresh
+      // Track active job for restore-on-refresh (best-effort; table may not exist)
       try {
         await pool.query(
           `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
@@ -458,7 +453,7 @@ router.post(
           processed++;
           try {
             await pool.query(
-              `UPDATE generation_jobs SET processed_pages = $1, updated_at = NOW() WHERE id = $2`,
+              `UPDATE generation_jobs SET processed_pages = $1 WHERE id = $2`,
               [processed, jobId],
             );
           } catch { /* non-fatal */ }
@@ -466,7 +461,7 @@ router.post(
         // Mark completed
         try {
           await pool.query(
-            `UPDATE generation_jobs SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+            `UPDATE generation_jobs SET status = 'completed' WHERE id = $1`,
             [jobId],
           );
         } catch { /* non-fatal */ }
