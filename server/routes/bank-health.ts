@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { pool } from "../db";
 import { requireAuth, requireSuperAdmin } from "../auth";
 import intentActionsRouter from "./intent-actions";
@@ -6,6 +7,8 @@ import onboardingLiveRouter from "./onboarding-live";
 import agencyRoiDashboardRouter from "./agency-roi-dashboard";
 import agencyMonthlyReportRouter from "./agency-monthly-report";
 import { scheduleIntentJobWorker } from "../services/intent-job-worker";
+import { fillMissingSectionsForService } from "../services/variation-writer";
+import type { BrandContext } from "../services/variation-writer";
 
 const router = Router();
 
@@ -171,6 +174,30 @@ function camelExpansion(flags: Record<string, boolean>) {
   };
 }
 
+// ── Helper: build brand context for a website ─────────────────────────────────
+async function getBrandCtx(websiteId: string): Promise<{ ctx: BrandContext; accountId: string }> {
+  const websiteResult = await pool.query(
+    `SELECT id, account_id, name, domain FROM websites WHERE id = $1 LIMIT 1`,
+    [websiteId],
+  );
+  const website = websiteResult.rows[0];
+  if (!website) throw Object.assign(new Error("Website not found"), { status: 404 });
+
+  const brandResult = await pool.query(
+    `SELECT name, description, voice_and_tone FROM brand_profiles WHERE website_id = $1 LIMIT 1`,
+    [websiteId],
+  );
+  const brand = brandResult.rows[0] ?? null;
+
+  const ctx: BrandContext = {
+    brandName:        brand?.name || website.name || website.domain,
+    brandDescription: brand?.description || undefined,
+    voiceAndTone:     brand?.voice_and_tone || undefined,
+  };
+
+  return { ctx, accountId: String(website.account_id) };
+}
+
 router.get("/api/websites/:websiteId/bank-completeness", async (req, res, next) => {
   try {
     const [completenessResult, banksResult] = await Promise.all([
@@ -292,5 +319,168 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
     client.release();
   }
 });
+
+// ── POST /api/websites/:websiteId/variation-banks/fill-missing ────────────────
+// Called by the per-service card "Fill Missing" button.
+// Body: { service: string }
+router.post(
+  "/api/websites/:websiteId/variation-banks/fill-missing",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { websiteId } = req.params;
+      const serviceName = String(req.body?.service ?? "").trim();
+      if (!serviceName) return res.status(400).json({ error: "service is required" });
+
+      const { ctx, accountId } = await getBrandCtx(websiteId);
+      const result = await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
+
+      return res.json(result);
+    } catch (err: any) {
+      if ((err as any).status === 404) return res.status(404).json({ error: (err as any).message });
+      console.error("[bank-health] fill-missing error:", err?.message || err);
+      next(err);
+    }
+  },
+);
+
+// ── POST /api/websites/:websiteId/variation-banks/fill-missing-all-job ────────
+// Called by the "Fill Missing All" bulk button.
+// Body: { services: string[] }
+// Returns a jobId immediately; fills all services in the background.
+router.post(
+  "/api/websites/:websiteId/variation-banks/fill-missing-all-job",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { websiteId } = req.params;
+      const services: string[] = Array.isArray(req.body?.services)
+        ? req.body.services.map((s: any) => String(s ?? "").trim()).filter(Boolean)
+        : [];
+
+      if (services.length === 0) {
+        return res.json({ started: false, message: "No services provided" });
+      }
+
+      const { ctx, accountId } = await getBrandCtx(websiteId);
+      const jobId = `fill-missing-${websiteId}-${Date.now()}`;
+
+      // Persist job row (best-effort)
+      try {
+        await pool.query(
+          `INSERT INTO generation_jobs (
+             id, website_id, account_id, type, status,
+             total_pages, processed_pages, created_at, updated_at
+           ) VALUES ($1, $2, $3, 'fill_missing', 'running', $4, 0, NOW(), NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [jobId, websiteId, accountId, services.length],
+        );
+      } catch (e: any) {
+        console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
+      }
+
+      // Track active job for restore-on-refresh
+      try {
+        await pool.query(
+          `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
+           VALUES ($1, 'fill_missing', $2, NOW())
+           ON CONFLICT (website_id, job_type)
+           DO UPDATE SET job_id = EXCLUDED.job_id, created_at = EXCLUDED.created_at`,
+          [websiteId, jobId],
+        );
+      } catch { /* non-fatal */ }
+
+      // Run fill in background — HTTP response returns immediately
+      setImmediate(async () => {
+        let processed = 0;
+        for (const serviceName of services) {
+          try {
+            await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
+          } catch (err: any) {
+            console.error(`[bank-health] fill-missing-all failed for "${serviceName}":`, err?.message || err);
+          }
+          processed++;
+          try {
+            await pool.query(
+              `UPDATE generation_jobs SET processed_pages = $1, updated_at = NOW() WHERE id = $2`,
+              [processed, jobId],
+            );
+          } catch { /* non-fatal */ }
+        }
+        // Mark completed
+        try {
+          await pool.query(
+            `UPDATE generation_jobs SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+            [jobId],
+          );
+        } catch { /* non-fatal */ }
+        // Clean up active job tracker
+        try {
+          await pool.query(
+            `DELETE FROM active_jobs WHERE website_id = $1 AND job_type = 'fill_missing'`,
+            [websiteId],
+          );
+        } catch { /* non-fatal */ }
+      });
+
+      return res.json({ started: true, jobId, total: services.length });
+    } catch (err: any) {
+      if ((err as any).status === 404) return res.status(404).json({ error: (err as any).message });
+      console.error("[bank-health] fill-missing-all-job error:", err?.message || err);
+      next(err);
+    }
+  },
+);
+
+// ── GET /api/jobs/:jobId ──────────────────────────────────────────────────────
+// Polls progress of a fill-missing-all background job.
+router.get(
+  "/api/jobs/:jobId",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(
+        `SELECT id, status, total_pages, processed_pages, updated_at
+         FROM generation_jobs
+         WHERE id = $1
+         LIMIT 1`,
+        [req.params.jobId],
+      );
+      if (!result.rows.length) return res.status(404).json({ error: "Job not found" });
+      const row = result.rows[0];
+      return res.json({
+        jobId: row.id,
+        status: row.status,
+        totalPages: row.total_pages,
+        processedPages: row.processed_pages,
+        updatedAt: row.updated_at,
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ── GET /api/websites/:websiteId/fill-missing-job ─────────────────────────────
+// Restores the active fill-missing job ID after a page refresh.
+router.get(
+  "/api/websites/:websiteId/fill-missing-job",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(
+        `SELECT job_id FROM active_jobs
+         WHERE website_id = $1 AND job_type = 'fill_missing'
+         LIMIT 1`,
+        [req.params.websiteId],
+      );
+      if (!result.rows.length) return res.json({ jobId: null });
+      return res.json({ jobId: result.rows[0].job_id });
+    } catch {
+      // active_jobs table may not exist in all envs — safe fallback
+      return res.json({ jobId: null });
+    }
+  },
+);
 
 export default router;
