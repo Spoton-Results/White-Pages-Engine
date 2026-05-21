@@ -485,13 +485,14 @@ router.post(
 
 // ── GET /api/jobs/:jobId ──────────────────────────────────────────────────────
 // Polls progress of a fill-missing background job.
+// NOTE: generation_jobs has no updated_at column — use created_at + completed_at instead.
 router.get(
   "/api/jobs/:jobId",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await pool.query(
-        `SELECT id, status, total_pages, processed_pages, updated_at
+        `SELECT id, status, total_pages, processed_pages, completed_at, created_at
          FROM generation_jobs
          WHERE id = $1
          LIMIT 1`,
@@ -504,7 +505,7 @@ router.get(
         status: row.status,
         totalPages: row.total_pages,
         processedPages: row.processed_pages,
-        updatedAt: row.updated_at,
+        updatedAt: row.completed_at ?? row.created_at,
       });
     } catch (err) {
       next(err);
