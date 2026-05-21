@@ -35,6 +35,15 @@ import actionReviewDecisionRouter from "./routes/action-review-decision";
 import deploymentQaRouter from "./routes/deployment-qa";
 import systemIntegrityRouter from "./routes/system-integrity";
 
+// ── Bulk generation + campaign router ───────────────────────────────
+// bulk-generate-job-fast.ts defines FULL /api/* paths internally:
+//   POST /api/websites/:websiteId/bulk-generate-job
+//   POST /api/websites/:websiteId/bulk-campaign
+// It was NEVER mounted, so every Generate click fell through to the
+// Vite SPA catch-all and returned <!DOCTYPE html> instead of JSON —
+// causing the "Unexpected token '<', \"<!DOCTYPE\"... is not valid JSON" error.
+import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
+
 export function mountSubRouters(app: Express) {
   // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
   // auth-live.ts was previously never imported or mounted anywhere.
@@ -56,6 +65,9 @@ export function mountSubRouters(app: Express) {
   app.use("/", actionReviewDecisionRouter);
   app.use("/", deploymentQaRouter);
   app.use("/", systemIntegrityRouter);
+
+  // ── Bulk generation + campaign ─────────────────────────────────────
+  app.use("/", bulkGenerateJobFastRouter);
 
   // ── Other unmounted routers ──────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
