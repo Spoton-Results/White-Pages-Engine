@@ -17,6 +17,12 @@ declare module "express-session" {
 const PgSession = connectPg(session);
 
 export function sessionMiddleware() {
+  // In production behind a reverse proxy (Railway, Render, Replit) the
+  // cookie MUST be sameSite:"none" + secure:true so the browser sends it
+  // on cross-origin API calls, AND the proxy must forward the real protocol
+  // via X-Forwarded-Proto.  We keep sameSite:"lax" for local dev.
+  const isProd = process.env.NODE_ENV === "production";
+
   return session({
     store: new PgSession({
       conString: process.env.DATABASE_URL,
@@ -27,9 +33,14 @@ export function sessionMiddleware() {
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      // secure:true is required when the browser sees https://
+      // trust proxy:1 in index.ts makes express honour X-Forwarded-Proto
+      secure: isProd,
       httpOnly: true,
-      sameSite: "lax",
+      // "lax" works for same-origin (admin.spotonnexus.com serving its own API).
+      // If the front-end and API are ever on different origins, change to "none"
+      // and make sure secure:true is also set (browsers reject none+!secure).
+      sameSite: isProd ? "lax" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   });
@@ -40,8 +51,6 @@ function hasSession(req: Request): boolean {
 }
 
 function isApiRequest(req: Request): boolean {
-  // Use originalUrl to ensure full path is checked — req.path can be
-  // stripped of prefixes by sub-routers which causes session MW to be skipped
   const url = String(req.originalUrl || req.url || "");
   return url.startsWith("/api") || url.startsWith("/api/");
 }
@@ -54,11 +63,6 @@ function passFrontendRoute(req: Request, next: NextFunction): boolean {
   return false;
 }
 
-/**
- * Re-fetch is_super_admin directly from the DB for a given userId.
- * Guards against session flag being lost due to field-name mismatch
- * (is_super_admin vs isSuperAdmin) in storage.getUserByEmail.
- */
 async function resolveIsSuperAdmin(userId: string): Promise<boolean> {
   try {
     const result = await pool.query(
@@ -102,17 +106,12 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  // If session flag is already true, pass immediately
   if (req.session.isSuperAdmin === true) {
     return next();
   }
 
-  // Session flag missing or false — re-verify from DB to handle
-  // cases where isSuperAdmin was not correctly set during login
-  // (e.g. field-name mismatch: is_super_admin vs isSuperAdmin)
   const isAdmin = await resolveIsSuperAdmin(req.session.userId);
   if (isAdmin) {
-    // Repair the session so future requests are fast
     req.session.isSuperAdmin = true;
     return next();
   }
@@ -209,14 +208,18 @@ export async function loginUser(req: Request, email: string, password: string) {
 
   if (!user || !valid) return null;
 
-  // Always re-fetch isSuperAdmin directly from DB to avoid any
-  // field-name mismatch (is_super_admin vs isSuperAdmin) in storage layer
   const isSuperAdmin = await resolveIsSuperAdmin(user.id);
 
   req.session.userId = user.id;
   req.session.isSuperAdmin = isSuperAdmin;
   req.session.accountId = user.accountId ?? null;
   req.session.role = user.role ?? "user";
+
+  // Force session save before responding so the Set-Cookie header is
+  // guaranteed to be written even if the response flushes very fast.
+  await new Promise<void>((resolve, reject) =>
+    req.session.save((err) => (err ? reject(err) : resolve()))
+  );
 
   console.log(`[auth] loginUser: userId=${user.id} isSuperAdmin=${isSuperAdmin} role=${user.role}`);
 
