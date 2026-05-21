@@ -411,7 +411,16 @@ export const contentVariationBanks = pgTable("content_variation_banks", {
   sectionName: text("section_name").notNull(),
   variations: jsonb("variations").notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  // Required by createVariationBank's onConflictDoUpdate — without this index
+  // Postgres throws "there is no unique or exclusion constraint matching the
+  // ON CONFLICT specification" and the route returns HTML instead of JSON.
+  uniqueIndex("cvb_website_service_section_unique").on(
+    t.websiteId,
+    t.service,
+    t.sectionName,
+  ),
+]);
 
 export const stateData = pgTable("state_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
