@@ -1,8 +1,9 @@
-// ── Router mount registration ──────────────────────────────────────────────
+// ── Router mount registration ────────────────────────────────────────────────
 // All sub-routers that exist in server/routes/ but are NOT wired up
 // inside routes.ts must be mounted here.
 // Called once inside index.ts via mountSubRouters(app) BEFORE registerRoutes().
 import type { Express } from "express";
+import authLiveRouter from "./routes/auth-live";
 import callTrackingRouter from "./routes/call-tracking";
 import formTrackingRouter from "./routes/form-tracking";
 import leadsRouter from "./routes/leads";
@@ -10,7 +11,7 @@ import dashboardAgencyRouter from "./routes/dashboard-agency";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import widgetRouter from "./routes/widget";
 
-// ── THE REAL FIX ───────────────────────────────────────────────────
+// ── THE REAL FIX ─────────────────────────────────────────────────────
 // agency-roi-dashboard.ts registers routes with FULL paths already inside the
 // router itself (e.g. router.get("/api/agency-dashboard/summary", ...)).
 // That means it must be mounted at "/" (root), NOT at a sub-prefix like
@@ -23,7 +24,7 @@ import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyDashboardRouter from "./routes/agency-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 
-// ── Restored post-rollback routers ────────────────────────────────
+// ── Restored post-rollback routers ──────────────────────────────────
 // These routers all define their own full /api/* paths internally,
 // so they must be mounted at root "/" to avoid double-prefixing.
 import pageIntelligenceRouter from "./routes/page-intelligence";
@@ -35,13 +36,19 @@ import deploymentQaRouter from "./routes/deployment-qa";
 import systemIntegrityRouter from "./routes/system-integrity";
 
 export function mountSubRouters(app: Express) {
+  // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
+  // auth-live.ts was previously never imported or mounted anywhere.
+  // All /api/auth/login, /api/auth/me, /api/auth/logout, /api/auth/debug
+  // routes were falling through to other handlers, returning Unauthorized.
+  app.use("/", authLiveRouter);
+
   // Agency ROI Dashboard routes include the full /api/agency-dashboard/* prefix
   // internally, so mount at root to avoid double-prefixing.
   app.use("/", agencyRoiDashboardRouter);
   app.use("/", agencyDashboardRouter);
   app.use("/", agencyMonthlyReportRouter);
 
-  // ── Restored post-rollback routers ──────────────────────────────
+  // ── Restored post-rollback routers ────────────────────────────────
   app.use("/", pageIntelligenceRouter);
   app.use("/", clientDomainsRouter);
   app.use("/", searchConsoleAdminRouter);
@@ -50,7 +57,7 @@ export function mountSubRouters(app: Express) {
   app.use("/", deploymentQaRouter);
   app.use("/", systemIntegrityRouter);
 
-  // ── Other unmounted routers ────────────────────────────────────────
+  // ── Other unmounted routers ──────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
   app.use("/api/form-tracking", formTrackingRouter);
   app.use("/api/leads", leadsRouter);
