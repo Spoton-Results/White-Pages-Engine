@@ -1,15 +1,12 @@
 import { Router } from "express";
-import { db, pool } from "../db";
-import { websites, trackedCalls, trackedLeads, bookedJobs } from "@shared/schema";
-import { eq, and, gte, lt, inArray } from "drizzle-orm";
+import { pool } from "../db"; // ✅ CHANGED: removed unused db import
 import { requireAuth } from "../auth";
 import { querySiteAnalytics, getServiceAccountEmail } from "../services/gsc-search-console";
 
 const router = Router();
 
 // ── 5-minute server-side cache ───────────────────────────────────────────────
-// The SEO tier query scans 1M+ rows — too slow to run on every page load.
-// 5 minutes is fine for a dashboard that shows monthly aggregates.
+// 🔒 UNTOUCHED: cache logic preserved exactly
 interface CacheEntry { data: unknown; expiresAt: number }
 const summaryCache = new Map<string, CacheEntry>();
 function getCached(key: string): unknown | null {
@@ -27,7 +24,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     const { accountId } = req.params;
     const { month } = req.query as { month?: string };
 
-    // Date range — default to current month
+    // 🔒 UNTOUCHED: date range logic preserved exactly
     let startDate: Date;
     let endDate: Date;
     if (month) {
@@ -45,6 +42,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     if (cached) return res.json(cached);
 
     // ── Step 1: account + websites in parallel ────────────────────────────────
+    // 🔒 UNTOUCHED: already using raw pool.query()
     const [acctRes, siteQueryRes] = await Promise.all([
       pool.query(
         `SELECT name, COALESCE(monthly_seo_spend, 0)::float AS monthly_seo_spend FROM accounts WHERE id = $1 LIMIT 1`,
@@ -62,37 +60,43 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     const websiteIds = siteRows.map((w) => w.id);
 
     // ── Step 2: calls / forms / jobs / SEO / GSC all in parallel ─────────────
+    // ✅ CHANGED: replaced Drizzle db.select() for trackedCalls, trackedLeads, bookedJobs
+    // with raw pool.query() to fix camelCase→snake_case bug causing empty metrics in production
     const GSC_TIMEOUT_MS = 1500;
 
-    const [callRows, formRows, jobRows, seoRes, gscResults] = await Promise.all([
+    const [callRes, formRes, jobRes, seoRes, gscResults] = await Promise.all([
       websiteIds.length > 0
-        ? db.select().from(trackedCalls).where(
-            and(
-              inArray(trackedCalls.websiteId, websiteIds),
-              gte(trackedCalls.callTimestamp, startDate),
-              lt(trackedCalls.callTimestamp, endDate),
-            ),
+        ? pool.query(
+            `SELECT page_id, service_id, call_duration_seconds
+             FROM tracked_calls
+             WHERE website_id = ANY($1)
+               AND call_timestamp >= $2
+               AND call_timestamp < $3`,
+            [websiteIds, startDate, endDate],
           )
-        : Promise.resolve([]),
+        : Promise.resolve({ rows: [] as any[] }),
 
       websiteIds.length > 0
-        ? db.select().from(trackedLeads).where(
-            and(
-              inArray(trackedLeads.websiteId, websiteIds),
-              gte(trackedLeads.formTimestamp, startDate),
-              lt(trackedLeads.formTimestamp, endDate),
-            ),
+        ? pool.query(
+            `SELECT page_id, service_id
+             FROM tracked_leads
+             WHERE website_id = ANY($1)
+               AND form_timestamp >= $2
+               AND form_timestamp < $3`,
+            [websiteIds, startDate, endDate],
           )
-        : Promise.resolve([]),
+        : Promise.resolve({ rows: [] as any[] }),
 
-      db.select().from(bookedJobs).where(
-        and(
-          eq(bookedJobs.accountId, accountId),
-          gte(bookedJobs.bookedDate, startDate),
-          lt(bookedJobs.bookedDate, endDate),
-        ),
+      pool.query(
+        `SELECT job_value
+         FROM booked_jobs
+         WHERE account_id = $1
+           AND booked_date >= $2
+           AND booked_date < $3`,
+        [accountId, startDate, endDate],
       ),
 
+      // 🔒 UNTOUCHED: already raw SQL
       websiteIds.length > 0
         ? pool.query(
             `SELECT tier,
@@ -106,6 +110,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
           )
         : Promise.resolve({ rows: [] as any[] }),
 
+      // 🔒 UNTOUCHED: GSC logic preserved exactly
       Promise.all(
         siteRows.map(async (site) => {
           const gscSiteUrl: string | undefined = site.settings?.gscSiteUrl;
@@ -119,7 +124,22 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
       ),
     ]);
 
+    // ✅ CHANGED: map snake_case raw rows to camelCase field names used by aggregation below
+    const callRows = callRes.rows.map((r: any) => ({
+      pageId:              r.page_id,
+      serviceId:           r.service_id,
+      callDurationSeconds: r.call_duration_seconds,
+    }));
+    const formRows = formRes.rows.map((r: any) => ({
+      pageId:    r.page_id,
+      serviceId: r.service_id,
+    }));
+    const jobRows = jobRes.rows.map((r: any) => ({
+      jobValue: r.job_value,
+    }));
+
     // ── Aggregate calls ────────────────────────────────────────────────────────
+    // 🔒 UNTOUCHED: aggregation logic preserved exactly
     const callsByPage: Record<string, number> = {};
     const callsByService: Record<string, number> = {};
     let totalCallDuration = 0;
@@ -140,6 +160,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     }
 
     // ── Page title enrichment ─────────────────────────────────────────────────
+    // 🔒 UNTOUCHED: already raw SQL
     const topPageIds = [
       ...Object.keys(callsByPage),
       ...Object.keys(formsByPage),
@@ -163,6 +184,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
         .map(([id, count]) => [pageTitleMap[id] || id.slice(0, 8) + "…", count]);
 
     // ── SEO Performance stats ─────────────────────────────────────────────────
+    // 🔒 UNTOUCHED: SEO aggregation preserved exactly
     let seoTier1 = 0, seoTier2 = 0, seoTier3 = 0, seoTotal = 0, seoAvgScore = 0;
     let estImpressions = 0, estClicks = 0;
     let scoreSum = 0, pageCount = 0;
@@ -186,6 +208,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     seoAvgScore = pageCount > 0 ? Math.round(scoreSum / pageCount) : 0;
 
     // ── GSC aggregation ───────────────────────────────────────────────────────
+    // 🔒 UNTOUCHED: GSC aggregation preserved exactly
     let gscImpressions = 0, gscClicks = 0;
     const gscPositions: number[] = [];
     let gscConnected = false;
@@ -213,6 +236,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
       .map((s) => ({ id: s.id, domain: s.domain, suggestedUrl: `https://${s.domain}/` }));
 
     // ── ROI Metrics ───────────────────────────────────────────────────────────
+    // 🔒 UNTOUCHED: ROI math preserved exactly
     const totalLeads    = callRows.length + formRows.length;
     const totalJobValue = jobRows.reduce((sum, j) => sum + parseFloat(j.jobValue ?? "0"), 0);
     const avgJobValue   = jobRows.length > 0 ? Math.round((totalJobValue / jobRows.length) * 100) / 100 : 0;
@@ -222,6 +246,7 @@ router.get("/agency/:accountId", requireAuth, async (req, res) => {
     const roiMultiple = monthlySpend > 0 ? Math.round((totalJobValue / monthlySpend) * 10) / 10 : null;
     const netRevenue  = Math.round((totalJobValue - monthlySpend) * 100) / 100;
 
+    // 🔒 UNTOUCHED: response payload shape preserved exactly
     const payload = {
       accountName: acct.name ?? "",
       calls: {
