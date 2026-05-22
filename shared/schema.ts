@@ -82,6 +82,16 @@ export const brandProfiles = pgTable("brand_profiles", {
   socialLinks: jsonb("social_links").default({}),
   voiceAndTone: text("voice_and_tone"),
   customFields: jsonb("custom_fields").default({}),
+  // ✅ ADDED: Page generation override fields
+  websiteUrl: text("website_url"),
+  phoneOverride: text("phone_override"),
+  ctaHeading: text("cta_heading"),
+  ctaBody: text("cta_body"),
+  ctaButtonLabel: text("cta_button_label"),
+  demoBannerUrl: text("demo_banner_url"),
+  demoBannerHeading: text("demo_banner_heading"),
+  demoBannerSubtext: text("demo_banner_subtext"),
+  demoBannerButton: text("demo_banner_button"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -412,9 +422,6 @@ export const contentVariationBanks = pgTable("content_variation_banks", {
   variations: jsonb("variations").notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
-  // Required by createVariationBank's onConflictDoUpdate — without this index
-  // Postgres throws "there is no unique or exclusion constraint matching the
-  // ON CONFLICT specification" and the route returns HTML instead of JSON.
   uniqueIndex("cvb_website_service_section_unique").on(
     t.websiteId,
     t.service,
@@ -471,19 +478,16 @@ export const variationBankCompleteness = pgTable("variation_bank_completeness", 
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
   service: text("service").notNull(),
-  // Core sections (original 5)
   hasIntro: boolean("has_intro").notNull().default(false),
   hasHowItWorks: boolean("has_how_it_works").notNull().default(false),
   hasBenefits: boolean("has_benefits").notNull().default(false),
   hasFaq: boolean("has_faq").notNull().default(false),
   hasCta: boolean("has_cta").notNull().default(false),
-  // Extended sections (Phase 3 additions)
   hasLocalContext: boolean("has_local_context").notNull().default(false),
   hasUseCase: boolean("has_use_case").notNull().default(false),
   hasProofTrust: boolean("has_proof_trust").notNull().default(false),
   hasPainPoint: boolean("has_pain_point").notNull().default(false),
   hasLocalStat: boolean("has_local_stat").notNull().default(false),
-  // Aggregate metrics
   totalVariations: integer("total_variations").notNull().default(0),
   avgVariationsPerSection: integer("avg_variations_per_section").notNull().default(0),
   completenessScore: integer("completeness_score").notNull().default(0),
@@ -497,7 +501,7 @@ export const hubPages = pgTable("hub_pages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
   accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
-  hubType: text("hub_type").notNull(), // 'service' | 'state' | 'city'
+  hubType: text("hub_type").notNull(),
   name: text("name").notNull(),
   slug: text("slug").notNull(),
   tier: integer("tier").notNull().default(1),
@@ -584,12 +588,11 @@ export type InsertHubPage = z.infer<typeof insertHubPageSchema>;
 export type HubPage = typeof hubPages.$inferSelect;
 
 // ─── Admin Notifications ──────────────────────────────────────────────────────
-// Used by Auto 5 (fallback promotion alerts) and Auto 7 (thin bank flags)
 
 export const adminNotifications = pgTable("admin_notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   websiteId: varchar("website_id").notNull().references(() => websites.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // "fallback_promotion" | "thin_bank" | "auto_demote"
+  type: text("type").notNull(),
   title: text("title").notNull(),
   message: text("message").notNull(),
   metadata: jsonb("metadata"),
@@ -604,7 +607,6 @@ export type InsertAdminNotification = z.infer<typeof insertAdminNotificationSche
 export type AdminNotification = typeof adminNotifications.$inferSelect;
 
 // ─── Demotion Logs ────────────────────────────────────────────────────────────
-// Audit trail for Auto 6 (auto-demote weak Tier 1 pages)
 
 export const demotionLogs = pgTable("demotion_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -622,7 +624,7 @@ export const insertDemotionLogSchema = createInsertSchema(demotionLogs).omit({ i
 export type InsertDemotionLog = z.infer<typeof insertDemotionLogSchema>;
 export type DemotionLog = typeof demotionLogs.$inferSelect;
 
-// ─── Phase 9: Launch Health Scores (historical) ──────────────────────────────
+// ─── Phase 9: Launch Health Scores ───────────────────────────────────────────
 
 export const launchHealthScores = pgTable("launch_health_scores", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
