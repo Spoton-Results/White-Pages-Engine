@@ -10,6 +10,19 @@ export interface VariationPageResult {
   wordCount: number;
 }
 
+// ✅ CHANGED: new interface for brand/CTA/demo overrides passed from bulk job settings
+export interface BrandContext {
+  websiteUrl?: string;
+  phoneOverride?: string;
+  ctaHeading?: string;
+  ctaBody?: string;
+  ctaButtonLabel?: string;
+  demoBannerUrl?: string;
+  demoBannerHeading?: string;
+  demoBannerSubtext?: string;
+  demoBannerButton?: string;
+}
+
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -82,6 +95,7 @@ export function buildVariationPage(
   websiteDomain?: string,
   blueprintSlugTemplate?: string,
   proxyPath?: string,
+  brandContext?: BrandContext, // ✅ CHANGED: optional brand/CTA/demo override context
 ): VariationPageResult {
   const linkPrefix = proxyPath || "";
   const landmark = state ? pick(state.landmarks as string[]) : stateName;
@@ -133,6 +147,14 @@ export function buildVariationPage(
   const h2Style = `style="font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20"`;
   const section = (heading: string, body: string) => body ? `<h2 ${h2Style}>${sanitizeGeoText(heading, geoTarget)}</h2>\n${body}` : "";
 
+  // ✅ CHANGED: demo banner rendered at top of every page when demoBannerUrl is provided; empty string = hidden
+  const demoBanner = brandContext?.demoBannerUrl
+    ? `<div style="background:#1e40af;color:#fff;padding:.75rem 1.5rem;border-radius:.5rem;margin-bottom:1.5rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">` +
+      `<span><strong>${brandContext.demoBannerHeading || ""}</strong>${brandContext.demoBannerSubtext ? ` — ${brandContext.demoBannerSubtext}` : ""}</span>` +
+      `<a href="${brandContext.demoBannerUrl}" style="background:#fff;color:#1e40af;font-weight:700;padding:.4rem 1.25rem;border-radius:.4rem;text-decoration:none;white-space:nowrap">${brandContext.demoBannerButton || "Learn More"}</a>` +
+      `</div>`
+    : "";
+
   let citiesSection = "";
   if (locationType === "state" && citiesInState && citiesInState.length > 0) {
     const items = citiesInState.map(c => {
@@ -161,7 +183,22 @@ export function buildVariationPage(
   const breadcrumbJsonLd = buildBreadcrumbJsonLd(websiteDomain ?? "", serviceName, serviceSlug, locationName, locationType, stateName, stateAbbr);
   const localBusinessJsonLd = buildLocalBusinessJsonLd(brandName, serviceName, locationName, stateName, stateAbbr, locationType);
 
+  // ✅ CHANGED: CTA block now uses brandContext overrides (ctaHeading, ctaBody, ctaButtonLabel, websiteUrl)
+  // with full fallback to existing hardcoded defaults so pages without brandContext are unaffected
+  const ctaHeading = brandContext?.ctaHeading || "Ready to Get Started?";
+  const ctaBody = brandContext?.ctaBody || cta || "";
+  const ctaButtonLabel = brandContext?.ctaButtonLabel || "";
+  const ctaUrl = brandContext?.websiteUrl || "#";
+  const ctaBlock = ctaBody || ctaHeading !== "Ready to Get Started?"
+    ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n` +
+      `<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">${ctaHeading}</h2>\n` +
+      (ctaBody ? `<div style="color:#fff;margin:.5rem 0">${ctaBody}</div>\n` : "") +
+      (ctaButtonLabel ? `<a href="${ctaUrl}" style="display:inline-block;margin-top:1rem;background:#fff;color:#2563eb;font-weight:700;padding:.65rem 1.75rem;border-radius:.5rem;text-decoration:none">${ctaButtonLabel}</a>\n` : "") +
+      `</div>`
+    : "";
+
   const contentHtml = [
+    demoBanner, // ✅ CHANGED: demo banner at top; empty string when not configured
     intro,
     section(`${serviceName} Market Context in ${displayLocation}`, localContext),
     section(`Common ${serviceName} Problems in ${displayLocation}`, painPoint),
@@ -175,7 +212,7 @@ export function buildVariationPage(
     section(`Who Is the Best Fit for ${serviceName}?`, bestFit),
     section(`Software and Integration Considerations`, softwareIntegration),
     section("Frequently Asked Questions", faq),
-    cta ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n<h2 style="color:#fff;font-size:1.35rem;font-weight:700;border:none;margin:.5rem 0">Ready to Get Started?</h2>\n${cta}\n</div>` : "",
+    ctaBlock, // ✅ CHANGED: replaced hardcoded CTA with brandContext-aware ctaBlock
     citiesSection,
     relatedServicesSection,
     faqJsonLd,
