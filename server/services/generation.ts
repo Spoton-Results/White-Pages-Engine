@@ -146,6 +146,30 @@ function buildDeterministicPage(ctx: AssemblyContext): DeterministicPage {
   const slugSource = replaceTemplateVars(ctx.blueprint.slugTemplate, ctx) || `${serviceName}-${ctx.location?.slug || ctx.location?.name || ctx.location?.stateCode || "service-area"}`;
   const slug = sanitizePageSlug(slugSource);
 
+  // ✅ CHANGED: read brand/CTA/demoBanner overrides from website.settings and brand profile
+  const settings = (ctx.website as any).settings || {};
+  const websiteUrl = settings.websiteUrl || ctx.brand?.website || `https://${ctx.website.domain}`;
+  const phoneNumber = settings.phoneOverride || ctx.brand?.phone || "";
+  const ctaHeading = settings.ctaHeading || "Ready to Get Started?";
+  const ctaBody = settings.ctaBody || `Businesses comparing ${escapeHtml(serviceName)} in ${escapeHtml(loc)} can use this page as a starting point, then request a more specific review based on their current setup, goals, software stack, and customer flow.`;
+  const ctaButtonLabel = settings.ctaButtonLabel || "Get a Free Quote";
+  const demoBannerUrl = settings.demoBannerUrl || "";
+  const demoBannerHeading = settings.demoBannerHeading || "";
+  const demoBannerSubtext = settings.demoBannerSubtext || "";
+  const demoBannerButton = settings.demoBannerButton || "Learn More";
+
+  // ✅ CHANGED: demo banner block — renders only when demoBannerUrl is set (empty string = hidden)
+  const demoBannerHtml = demoBannerUrl
+    ? `<div class="nexus-demo-banner" role="banner">
+    <div class="nexus-demo-banner__inner">
+      ${demoBannerHeading ? `<p class="nexus-demo-banner__heading">${escapeHtml(demoBannerHeading)}</p>` : ""}
+      ${demoBannerSubtext ? `<span class="nexus-demo-banner__subtext">${escapeHtml(demoBannerSubtext)}</span>` : ""}
+      <a class="nexus-demo-banner__btn" href="${escapeHtml(demoBannerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(demoBannerButton)}</a>
+    </div>
+  </div>`
+    : "";
+  // 🔒 UNTOUCHED: all snippet, processHtml, scoring logic below is unchanged
+
   const renderedSnippets = (ctx.bankSnippets || [])
     .map(snippet => ({ ...snippet, html: renderSnippet(snippet, ctx) }))
     .filter(snippet => stripHtml(snippet.html).length > 40);
@@ -174,10 +198,12 @@ function buildDeterministicPage(ctx: AssemblyContext): DeterministicPage {
       </ul>`;
 
   const contentHtml = `
+${demoBannerHtml}
 <article class="nexus-page nexus-page--deterministic" data-generation-mode="deterministic_bank_assembly">
   <header class="nexus-hero">
     <h1>${escapeHtml(h1)}</h1>
     <p>${escapeHtml(serviceDescription)}</p>
+    ${phoneNumber ? `<p class="nexus-hero__phone"><a href="tel:${escapeHtml(phoneNumber)}">${escapeHtml(phoneNumber)}</a></p>` : ""}
   </header>
 
   <section class="nexus-section nexus-section--overview">
@@ -211,8 +237,9 @@ function buildDeterministicPage(ctx: AssemblyContext): DeterministicPage {
   </section>
 
   <section class="nexus-section nexus-section--cta">
-    <h2>Next step</h2>
-    <p>Businesses comparing ${escapeHtml(serviceName)} in ${escapeHtml(loc)} can use this page as a starting point, then request a more specific review based on their current setup, goals, software stack, and customer flow.</p>
+    <h2>${escapeHtml(ctaHeading)}</h2>
+    <p>${ctaBody}</p>
+    <a class="nexus-cta__btn" href="${escapeHtml(websiteUrl)}">${escapeHtml(ctaButtonLabel)}</a>
   </section>
 </article>`;
 
