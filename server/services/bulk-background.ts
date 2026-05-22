@@ -9,7 +9,7 @@
  *   - DB job progress updated every PAGE_BATCH_SIZE pages, not every page
  */
 import * as storage from "../storage";
-import { buildVariationPage, ClusterContext } from "./variation-engine";
+import { buildVariationPage, ClusterContext, BrandContext } from "./variation-engine"; // ✅ CHANGED: import BrandContext
 import { submitUrlsToGoogle } from "./gsc-indexing";
 import { scorePageContent, computeBankCompleteness } from "./scoring";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -177,6 +177,16 @@ export interface BulkJobSettings {
   campaignBlueprintTotal?: number;
   multiBlueprintCampaign?: boolean;
   namespaceBlueprintSlug?: boolean;
+  // ✅ CHANGED: brand/CTA/demo override fields stored in job settings
+  websiteUrl?: string;
+  phoneOverride?: string;
+  ctaHeading?: string;
+  ctaBody?: string;
+  ctaButtonLabel?: string;
+  demoBannerUrl?: string;
+  demoBannerHeading?: string;
+  demoBannerSubtext?: string;
+  demoBannerButton?: string;
   progress: Array<{
     service: string;
     status: "pending" | "running" | "done" | "error" | "no-bank";
@@ -271,6 +281,20 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   const brand = await bulkGetBrandProfile(website.brandProfileId as string);
   const brandName = brand?.name || website.name || website.domain;
+
+  // ✅ CHANGED: build brandContext from job settings overrides with fallbacks
+  const brandContext: BrandContext = {
+    websiteUrl:        settings.websiteUrl        || `https://${website.domain}`,
+    phoneOverride:     settings.phoneOverride     || (brand as any)?.phone || "",
+    ctaHeading:        settings.ctaHeading        || "",
+    ctaBody:           settings.ctaBody           || "",
+    ctaButtonLabel:    settings.ctaButtonLabel    || "",
+    demoBannerUrl:     settings.demoBannerUrl     || "",
+    demoBannerHeading: settings.demoBannerHeading || "",
+    demoBannerSubtext: settings.demoBannerSubtext || "",
+    demoBannerButton:  settings.demoBannerButton  || "",
+  };
+
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await bulkGetBlueprint(effectiveBlueprintId) : null;
   const [accountServices, accountClusters] = await Promise.all([bulkGetServices(website.accountId!), bulkGetQueryClusters(website.accountId!)]);
@@ -420,7 +444,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         try {
           const sd = stateDataMap.get(t.stateAbbr.toUpperCase());
           const citiesInState = t.locationType === "state" ? (citiesByState.get(t.stateAbbr.toUpperCase()) ?? []).map(name => ({ name })) : undefined;
-          const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster, citiesInState, allRelatedServices, website.domain, blueprintTemplate?.slugTemplate, (() => { const rp = ((website.settings as any)?.proxyPath || "") as string; return rp.startsWith("/sites/") ? "" : rp; })());
+          // ✅ CHANGED: pass brandContext as last arg so CTA/demo banner overrides are applied per-page
+          const result = buildVariationPage(svc, serviceSlug, t.locationName, t.locationType, t.stateName, t.stateAbbr, brandName, banks, sd, svcCluster, citiesInState, allRelatedServices, website.domain, blueprintTemplate?.slugTemplate, (() => { const rp = ((website.settings as any)?.proxyPath || "") as string; return rp.startsWith("/sites/") ? "" : rp; })(), brandContext);
           const bpOverride = applyBlueprintTemplates(blueprintTemplate, { service: svc, location: t.locationName, state: t.stateName, stateAbbr: t.stateAbbr, brand: brandName, cluster: svcCluster?.primaryKeyword ?? "" });
           let finalSlug = bpOverride?.slug || result.slug;
           finalSlug = namespaceSlugWithBlueprint(finalSlug, blueprint, settings as any);
