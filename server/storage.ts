@@ -35,7 +35,14 @@ import {
 // ─── Agencies ─────────────────────────────────────────────────────────────────
 
 export async function getAgencies(): Promise<Agency[]> {
-  return db.select().from(agencies).orderBy(asc(agencies.name));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  // (same pattern used by getAgencyAccounts, getWebsites, getDashboardStats)
+  const res = await pool.query(`SELECT * FROM agencies ORDER BY name ASC`);
+  return res.rows.map((r: any) => ({
+    ...r,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Agency[];
 }
 
 export async function getAgency(id: string): Promise<Agency | undefined> {
@@ -77,7 +84,17 @@ export async function getAgencyAccounts(agencyId: string): Promise<Account[]> {
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
 export async function getAccounts(): Promise<Account[]> {
-  return db.select().from(accounts).orderBy(desc(accounts.createdAt));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  // (same pattern used by getAgencyAccounts, getWebsites, getDashboardStats)
+  const res = await pool.query(`SELECT * FROM accounts ORDER BY created_at DESC`);
+  return res.rows.map((r: any) => ({
+    ...r,
+    agencyId: r.agency_id,
+    clientStatus: r.client_status,
+    reportToken: r.report_token,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Account[];
 }
 
 export async function getAccount(id: string): Promise<Account | undefined> {
