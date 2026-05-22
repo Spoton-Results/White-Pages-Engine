@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../auth";
 import { pool } from "../db";
 import { invalidateWebsiteDomainCache } from "../storage";
+import { invalidatePageCache } from "../routes"; // ✅ CHANGED: added import
 
 const router = Router();
 
@@ -145,6 +146,7 @@ router.patch("/api/websites/:id", requireAuth, async (req, res, next) => {
     invalidateWebsiteDomainCache(current.domain);
     invalidateWebsiteDomainCache(nextDomain);
     if (nextDomain === SPOTON_PAGES_DOMAIN) invalidateWebsiteDomainCache(SPOTON_ROOT_DOMAIN);
+    invalidatePageCache(websiteId); // ✅ CHANGED: bust all cached page HTML for this website so new settings render immediately
 
     return res.json(toWebsite(updated.rows[0]));
   } catch (err: any) {
