@@ -433,6 +433,18 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
     }
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ error: "Website not found." });
+    const body = req.body || {};
+    if (body.brandOverrides || body.demoBanner) {
+      const currentSettings = ((website as any).settings || {}) as Record<string, any>;
+      const mergedSettings = {
+        ...currentSettings,
+        ...(body.brandOverrides ?? {}),
+        ...(body.demoBanner ?? {}),
+      };
+
+      await storage.updateWebsiteSettings(websiteId, mergedSettings);
+      (website as any).settings = mergedSettings;
+    }
     const targetCount = getTargetCount(settings);
     const { requestedClusterIds, effectiveQueryClusterIds, clusterCount } = getEffectiveClusters(settings);
     const estimatedTotal = settings.services.length * targetCount * clusterCount;
