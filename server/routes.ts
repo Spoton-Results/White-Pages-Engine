@@ -915,3 +915,12 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 </body>
 </html>`;
 }
+
+// ── registerRoutes ────────────────────────────────────────────────────────────
+// All route registration has been moved to server/routes/ sub-routers, which
+// are mounted by mountSubRouters() in index.ts. This stub satisfies the import
+// contract in index.ts without registering any duplicate routes.
+// ✅ CHANGED: added missing export that index.ts requires
+export async function registerRoutes(server: Server, app: Express): Promise<Server> {
+  return server;
+}
