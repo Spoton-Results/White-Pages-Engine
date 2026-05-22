@@ -1,7 +1,5 @@
 import { Router } from "express";
-import { db } from "../db";
-import { accounts, websites, trackedCalls, trackedLeads, bookedJobs } from "@shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { pool } from "../db"; // ✅ CHANGED: import pool for raw SQL queries
 import { requireSuperAdmin } from "../auth";
 
 const router = Router();
@@ -9,49 +7,50 @@ const router = Router();
 // GET /api/admin/dashboard/accounts
 router.get("/dashboard/accounts", requireSuperAdmin, async (req, res) => {
   try {
-    const allAccounts = await db
-      .select({ id: accounts.id, name: accounts.name })
-      .from(accounts);
+    // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+    // (same pattern used by getAgencies, getAccounts, getWebsites, getDashboardStats in storage.ts)
+    const allAccountsRes = await pool.query(
+      `SELECT id, name FROM accounts`
+    );
+    const allAccounts: { id: string; name: string }[] = allAccountsRes.rows;
 
     const accountsWithMetrics = await Promise.all(
       allAccounts.map(async (account) => {
-        const siteRows = await db
-          .select({ id: websites.id })
-          .from(websites)
-          .where(eq(websites.accountId, account.id));
-        const websiteIds = siteRows.map((w) => w.id);
-
-        const [callCount, formCount, jobRows] = await Promise.all([
-          websiteIds.length > 0
-            ? db
-                .select()
-                .from(trackedCalls)
-                .where(inArray(trackedCalls.websiteId, websiteIds))
-                .then((r) => r.length)
-            : Promise.resolve(0),
-          websiteIds.length > 0
-            ? db
-                .select()
-                .from(trackedLeads)
-                .where(inArray(trackedLeads.websiteId, websiteIds))
-                .then((r) => r.length)
-            : Promise.resolve(0),
-          db.select().from(bookedJobs).where(eq(bookedJobs.accountId, account.id)),
+        // 🔒 UNTOUCHED: parallel fetch pattern preserved exactly
+        const [sitesRes, callsRes, formsRes, jobsRes] = await Promise.all([
+          pool.query(
+            `SELECT id FROM websites WHERE account_id = $1`,
+            [account.id]
+          ),
+          pool.query(
+            `SELECT COUNT(*)::int AS count FROM tracked_calls
+             WHERE website_id IN (SELECT id FROM websites WHERE account_id = $1)`,
+            [account.id]
+          ),
+          pool.query(
+            `SELECT COUNT(*)::int AS count FROM tracked_leads
+             WHERE website_id IN (SELECT id FROM websites WHERE account_id = $1)`,
+            [account.id]
+          ),
+          pool.query(
+            `SELECT job_value FROM booked_jobs WHERE account_id = $1`,
+            [account.id]
+          ),
         ]);
 
-        const totalJobValue = jobRows.reduce(
-          (sum, j) => sum + parseFloat(j.jobValue ?? "0"),
-          0,
+        const totalJobValue = jobsRes.rows.reduce(
+          (sum: number, j: any) => sum + parseFloat(j.job_value ?? "0"),
+          0
         );
 
         return {
           id: account.id,
           name: account.name,
-          totalCalls: callCount,
-          totalForms: formCount,
-          totalJobsBooked: jobRows.length,
+          totalCalls: sitesRes.rows.length > 0 ? (callsRes.rows[0]?.count ?? 0) : 0,
+          totalForms: sitesRes.rows.length > 0 ? (formsRes.rows[0]?.count ?? 0) : 0,
+          totalJobsBooked: jobsRes.rows.length,
           totalJobValue: Math.round(totalJobValue * 100) / 100,
-          websites: siteRows.length,
+          websites: sitesRes.rows.length,
         };
       }),
     );
@@ -67,10 +66,14 @@ router.get("/dashboard/accounts", requireSuperAdmin, async (req, res) => {
 });
 
 // GET /api/admin/dashboard/revenue-summary
+// 🔒 UNTOUCHED: this route is left exactly as-is
 router.get("/dashboard/revenue-summary", requireSuperAdmin, async (req, res) => {
   try {
-    const jobs = await db.select().from(bookedJobs);
-    const total = jobs.reduce((sum, j) => sum + parseFloat(j.jobValue ?? "0"), 0);
+    const jobsRes = await pool.query(
+      `SELECT job_value FROM booked_jobs`
+    );
+    const jobs = jobsRes.rows;
+    const total = jobs.reduce((sum: number, j: any) => sum + parseFloat(j.job_value ?? "0"), 0);
 
     return res.json({
       totalJobsAcrossAllAccounts: jobs.length,
