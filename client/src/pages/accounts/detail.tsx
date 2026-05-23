@@ -38,39 +38,50 @@ export default function AccountDetailPage() {
     enabled: !!id,
   });
 
-  // ── Services ─────────────────────────────────────────────────────────────
-  const { data: services = [], isLoading: loadingServices } = useQuery({
-    queryKey: ["/api/services", { accountId: id }],
-    queryFn: () => api.get<any[]>(`/api/services?accountId=${id}`),
-    enabled: !!id && tab === "services",
-  });
-
-  // ── Blueprints ────────────────────────────────────────────────────────────
-  const { data: blueprints = [], isLoading: loadingBlueprints } = useQuery({
-    queryKey: ["/api/blueprints", { accountId: id }],
-    queryFn: () => api.get<any[]>(`/api/blueprints?accountId=${id}`),
-    enabled: !!id && tab === "blueprints",
-  });
-
-  // ── Query Clusters ────────────────────────────────────────────────────────
-  const { data: clusters = [], isLoading: loadingClusters } = useQuery({
-    queryKey: ["/api/query-clusters", { accountId: id }],
-    queryFn: () => api.get<any[]>(`/api/query-clusters?accountId=${id}`),
-    enabled: !!id && tab === "clusters",
-  });
-
-  // ── Locations ─────────────────────────────────────────────────────────────
-  const { data: locations = [], isLoading: loadingLocations } = useQuery({
-    queryKey: ["/api/locations", { accountId: id }],
-    queryFn: () => api.get<any[]>(`/api/locations?accountId=${id}`),
-    enabled: !!id && tab === "locations",
-  });
-
-  // ── Websites (for overview counts) ───────────────────────────────────────
+  // ── Websites (resolve accountId → websiteId for child queries) ───────────
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites", { accountId: id }],
     queryFn: () => api.get<any[]>(`/api/websites?accountId=${id}`),
     enabled: !!id,
+  });
+
+  // The primary website for this account — all child resources are scoped to it
+  const websiteId: string | undefined = (websites as any[])[0]?.id;
+
+  // ── Services ─────────────────────────────────────────────────────────────
+  // ✅ CHANGED: was /api/services?accountId=... (route doesn't exist)
+  //            now /api/websites/:websiteId/services (correct server route)
+  const { data: services = [], isLoading: loadingServices } = useQuery({
+    queryKey: ["/api/websites", websiteId, "services"],
+    queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/services`),
+    enabled: !!websiteId && tab === "services",
+  });
+
+  // ── Blueprints ────────────────────────────────────────────────────────────
+  // ✅ CHANGED: was /api/blueprints?accountId=... 
+  //            now /api/websites/:websiteId/blueprints (correct server route)
+  const { data: blueprints = [], isLoading: loadingBlueprints } = useQuery({
+    queryKey: ["/api/websites", websiteId, "blueprints"],
+    queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/blueprints`),
+    enabled: !!websiteId && tab === "blueprints",
+  });
+
+  // ── Query Clusters ────────────────────────────────────────────────────────
+  // ✅ CHANGED: was /api/query-clusters?accountId=... (route doesn't exist)
+  //            now /api/websites/:websiteId/query-clusters (correct server route)
+  const { data: clusters = [], isLoading: loadingClusters } = useQuery({
+    queryKey: ["/api/websites", websiteId, "query-clusters"],
+    queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/query-clusters`),
+    enabled: !!websiteId && tab === "clusters",
+  });
+
+  // ── Locations ─────────────────────────────────────────────────────────────
+  // ✅ CHANGED: was /api/locations?accountId=... (route doesn't exist)
+  //            now /api/websites/:websiteId/locations (correct server route)
+  const { data: locations = [], isLoading: loadingLocations } = useQuery({
+    queryKey: ["/api/websites", websiteId, "locations"],
+    queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/locations`),
+    enabled: !!websiteId && tab === "locations",
   });
 
   // ── Service CRUD ─────────────────────────────────────────────────────────
@@ -80,9 +91,10 @@ export default function AccountDetailPage() {
   const { register: regSvcEdit, handleSubmit: handleSvcEdit, reset: resetSvcEdit, setValue: setSvcEditVal } = useForm<any>();
 
   const createService = useMutation({
-    mutationFn: (data: any) => api.post("/api/services", { ...data, accountId: id }),
+    // ✅ CHANGED: POST to nested website route, not flat /api/services
+    mutationFn: (data: any) => api.post(`/api/websites/${websiteId}/services`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/services", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "services"] });
       setShowServiceCreate(false); resetSvc();
       toast({ title: "Service created" });
     },
@@ -92,7 +104,7 @@ export default function AccountDetailPage() {
   const updateService = useMutation({
     mutationFn: ({ sid, data }: { sid: string; data: any }) => api.put(`/api/services/${sid}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/services", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "services"] });
       setEditService(null); resetSvcEdit();
       toast({ title: "Service updated" });
     },
@@ -102,7 +114,7 @@ export default function AccountDetailPage() {
   const deleteService = useMutation({
     mutationFn: (sid: string) => api.delete(`/api/services/${sid}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/services", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "services"] });
       toast({ title: "Service deleted" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -115,9 +127,10 @@ export default function AccountDetailPage() {
   const { register: regLocEdit, handleSubmit: handleLocEdit, reset: resetLocEdit, setValue: setLocEditVal } = useForm<any>();
 
   const createLocation = useMutation({
-    mutationFn: (data: any) => api.post("/api/locations", { ...data, accountId: id }),
+    // ✅ CHANGED: POST to nested website route, not flat /api/locations
+    mutationFn: (data: any) => api.post(`/api/websites/${websiteId}/locations`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/locations", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "locations"] });
       setShowLocCreate(false); resetLoc();
       toast({ title: "Location created" });
     },
@@ -127,7 +140,7 @@ export default function AccountDetailPage() {
   const updateLocation = useMutation({
     mutationFn: ({ lid, data }: { lid: string; data: any }) => api.put(`/api/locations/${lid}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/locations", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "locations"] });
       setEditLoc(null); resetLocEdit();
       toast({ title: "Location updated" });
     },
@@ -137,7 +150,7 @@ export default function AccountDetailPage() {
   const deleteLocation = useMutation({
     mutationFn: (lid: string) => api.delete(`/api/locations/${lid}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/locations", { accountId: id }] });
+      qc.invalidateQueries({ queryKey: ["/api/websites", websiteId, "locations"] });
       toast({ title: "Location deleted" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
