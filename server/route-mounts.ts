@@ -44,12 +44,28 @@ import systemIntegrityRouter from "./routes/system-integrity";
 // causing the "Unexpected token '<', \"<!DOCTYPE\"... is not valid JSON" error.
 import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 
+// ✅ CORE API — was NEVER imported or mounted.
+// core-api.ts handles ALL of these routes:
+//   /api/accounts, /api/agencies, /api/websites, /api/locations,
+//   /api/services, /api/brand-profiles, /api/industries, /api/blueprints,
+//   /api/query-clusters, /api/pages, /api/generation-jobs, /api/variation-banks,
+//   /api/sitemaps, /api/public/contact, /health, /_health
+//
+// Without this mount, every one of those routes fell through to the Vite
+// SPA catch-all and returned <!DOCTYPE html> — causing every tab in the
+// app to appear empty (frontend parsed HTML as empty JSON data).
+import coreApiRouter from "./routes/core-api";
+
 export function mountSubRouters(app: Express) {
   // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
   // auth-live.ts was previously never imported or mounted anywhere.
   // All /api/auth/login, /api/auth/me, /api/auth/logout, /api/auth/debug
   // routes were falling through to other handlers, returning Unauthorized.
   app.use("/", authLiveRouter);
+
+  // ✅ CHANGED: core-api mounted at root — defines full /api/* paths internally.
+  // This fixes every tab in the app returning empty data.
+  app.use("/", coreApiRouter);
 
   // Agency ROI Dashboard routes include the full /api/agency-dashboard/* prefix
   // internally, so mount at root to avoid double-prefixing.
