@@ -323,14 +323,55 @@ router.put("/api/websites/:websiteId/brand-profile", requireAuth, async (req: Re
   return res.json(brand);
 });
 
-// ✅ ADDED: Account-scoped brand-profiles route used by ServicesPage / BlueprintsPage.
-//   Collects brand profiles across all websites belonging to the account.
+// ✅ ADDED: Account-scoped brand-profiles routes used by BrandProfilesPage.
+//   NOTE: ai-suggest must be registered BEFORE /:id so Express doesn't treat
+//   "ai-suggest" as an :id param.
+router.post("/api/accounts/:accountId/brand-profiles/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+  const { name, websiteUrl, industryName } = req.body as { name?: string; websiteUrl?: string; industryName?: string };
+  if (!name?.trim()) {
+    return res.status(400).json({ message: "name is required" });
+  }
+  try {
+    const prompt = `You are a brand copywriter. For a business named "${name.trim()}"${industryName ? ` in the ${industryName} industry` : ""}${websiteUrl ? ` (website: ${websiteUrl})` : ""}, provide:\n1. A short punchy tagline (under 10 words).\n2. A 2-3 sentence brand description suitable for a business directory.\n3. A voice and tone guide (1-2 sentences describing communication style).\n\nRespond with ONLY valid JSON in this exact shape:\n{"tagline":"...","description":"...","voiceAndTone":"..."}`;
+    const aiResponse = await callAI({ prompt, maxTokens: 512, temperature: 0.6 });
+    const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const parsed = JSON.parse(raw) as { tagline: string; description: string; voiceAndTone: string };
+    return res.json({
+      tagline: parsed.tagline ?? "",
+      description: parsed.description ?? "",
+      voiceAndTone: parsed.voiceAndTone ?? "",
+    });
+  } catch (err: any) {
+    console.error("[brand-profiles/ai-suggest]", err);
+    return res.status(500).json({ message: err.message ?? "AI suggestion failed" });
+  }
+});
+
 router.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+  // Collects brand profiles across all websites belonging to the account.
   const websiteList = await storage.getWebsites(req.params.accountId);
   const profiles = await Promise.all(
     websiteList.map((w: any) => storage.getBrandProfile(w.id).catch(() => null))
   );
   return res.json(profiles.filter(Boolean));
+});
+
+router.post("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+  // Creates a brand profile. Attaches to the first website of this account if no websiteId is provided.
+  const websiteList = await storage.getWebsites(req.params.accountId);
+  const websiteId = req.body.websiteId || websiteList[0]?.id;
+  if (!websiteId) {
+    return res.status(400).json({ message: "No website found for this account. Create a website first." });
+  }
+  const parsed = insertBrandProfileSchema.safeParse({ ...req.body, websiteId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const brand = await storage.createBrandProfile(parsed.data);
+  return res.status(201).json(brand);
+});
+
+router.delete("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
+  await storage.deleteBrandProfile(req.params.id);
+  return res.json({ message: "Brand profile deleted" });
 });
 
 // ── Industries ────────────────────────────────────────────────────────────────
@@ -498,6 +539,112 @@ router.delete("/api/query-clusters/:id", requireAuth, async (req: Request, res: 
   // 🔒 UNTOUCHED
   await storage.deleteQueryCluster(req.params.id);
   return res.json({ message: "Query cluster deleted" });
+});
+
+// ✅ ADDED: Account-scoped query-clusters routes used by QueryClustersPage.
+//   NOTE: specific action routes (ai-generate, bulk-suggest, bulk-save) must be
+//   registered BEFORE the plain GET /api/accounts/:accountId/query-clusters route
+//   so Express doesn't treat action path segments as :id params.
+router.post("/api/accounts/:accountId/query-clusters/ai-generate", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { accountId } = req.params;
+    // Gather services and brand context for this account
+    const serviceList = await storage.getServices(accountId);
+    const websiteList = await storage.getWebsites(accountId);
+    const brand = websiteList[0] ? await storage.getBrandProfile(websiteList[0].id).catch(() => null) : null;
+    const industryId = brand?.industryId;
+    const industry = industryId ? await storage.getIndustry(industryId).catch(() => null) : null;
+    const brandName = brand?.name || "the business";
+    const industryName = industry?.name || "general services";
+    const serviceNames = serviceList.slice(0, 10).map((s: any) => s.name).join(", ") || "general services";
+
+    const prompt = `You are an SEO strategist. For a business named "${brandName}" in the "${industryName}" industry offering: ${serviceNames}.\n\nGenerate 10 high-value query clusters. Each cluster should target a specific search intent.\n\nRespond with ONLY valid JSON array:\n[{"name":"...","primaryKeyword":"...","intentType":"transactional|local|informational|navigational","searchVolume":1000,"difficulty":45,"secondaryKeywords":["kw1","kw2"]}]`;
+
+    const aiResponse = await callAI({ prompt, maxTokens: 1500, temperature: 0.6 });
+    const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const suggestions = JSON.parse(raw) as any[];
+
+    const inserted: any[] = [];
+    for (const s of suggestions) {
+      try {
+        const parsed = insertQueryClusterSchema.safeParse({ ...s, accountId });
+        if (!parsed.success) continue;
+        const cluster = await storage.createQueryCluster(parsed.data);
+        inserted.push(cluster);
+      } catch {}
+    }
+    return res.json({ inserted: inserted.length, clusters: inserted });
+  } catch (err: any) {
+    console.error("[query-clusters/ai-generate]", err);
+    return res.status(500).json({ message: err.message ?? "AI generation failed" });
+  }
+});
+
+router.post("/api/accounts/:accountId/query-clusters/bulk-suggest", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { accountId } = req.params;
+    const { services: serviceNames } = req.body as { services?: string[] };
+    if (!Array.isArray(serviceNames) || serviceNames.length === 0) {
+      return res.status(400).json({ message: "services array is required" });
+    }
+    const websiteList = await storage.getWebsites(accountId);
+    const brand = websiteList[0] ? await storage.getBrandProfile(websiteList[0].id).catch(() => null) : null;
+    const brandName = brand?.name || "the business";
+
+    const suggestions: Array<{ service: string; clusters: any[] }> = [];
+
+    for (const serviceName of serviceNames.slice(0, 8)) {
+      try {
+        const prompt = `You are an SEO strategist. For a business named "${brandName}" offering "${serviceName}", generate 10-15 query clusters targeting different search intents (transactional, local, informational).\n\nRespond with ONLY valid JSON array:\n[{"name":"...","primaryKeyword":"...","intentType":"transactional|local|informational|navigational","searchVolume":1000,"difficulty":45,"secondaryKeywords":["kw1","kw2"]}]`;
+        const aiResponse = await callAI({ prompt, maxTokens: 1200, temperature: 0.6 });
+        const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+        const clusters = JSON.parse(raw) as any[];
+        suggestions.push({ service: serviceName, clusters: Array.isArray(clusters) ? clusters : [] });
+      } catch {
+        suggestions.push({ service: serviceName, clusters: [] });
+      }
+    }
+
+    return res.json({ suggestions });
+  } catch (err: any) {
+    console.error("[query-clusters/bulk-suggest]", err);
+    return res.status(500).json({ message: err.message ?? "Bulk suggest failed" });
+  }
+});
+
+router.post("/api/accounts/:accountId/query-clusters/bulk-save", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { accountId } = req.params;
+    const { clusters } = req.body as { clusters?: any[] };
+    if (!Array.isArray(clusters) || clusters.length === 0) {
+      return res.status(400).json({ message: "clusters array is required" });
+    }
+    let saved = 0;
+    for (const c of clusters) {
+      try {
+        const parsed = insertQueryClusterSchema.safeParse({ ...c, accountId });
+        if (!parsed.success) continue;
+        await storage.createQueryCluster(parsed.data);
+        saved++;
+      } catch {}
+    }
+    return res.json({ saved });
+  } catch (err: any) {
+    console.error("[query-clusters/bulk-save]", err);
+    return res.status(500).json({ message: err.message ?? "Bulk save failed" });
+  }
+});
+
+router.get("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
+  const clusters = await storage.getQueryClusters(req.params.accountId);
+  return res.json(clusters);
+});
+
+router.post("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertQueryClusterSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const cluster = await storage.createQueryCluster(parsed.data);
+  return res.status(201).json(cluster);
 });
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
