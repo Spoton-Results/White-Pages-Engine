@@ -189,7 +189,20 @@ export async function updateUser(id: string, data: Partial<InsertUser>): Promise
 export async function getBrandProfiles(accountId: string): Promise<BrandProfile[]> {
   const cached = brandProfilesCache.get(accountId);
   if (cached && Date.now() < cached.exp) return cached.data;
-  const data = await db.select().from(brandProfiles).where(eq(brandProfiles.accountId, accountId));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  const res = await pool.query(
+    `SELECT * FROM brand_profiles WHERE account_id = $1 ORDER BY created_at DESC`,
+    [accountId]
+  );
+  const data = res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    websiteUrl: r.website_url,
+    primaryColor: r.primary_color,
+    secondaryColor: r.secondary_color,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as BrandProfile[];
   brandProfilesCache.set(accountId, { data, exp: Date.now() + NAV_CACHE_TTL });
   return data;
 }
@@ -319,20 +332,31 @@ export async function deleteWebsite(id: string): Promise<void> {
 // ─── Locations ────────────────────────────────────────────────────────────────
 
 export async function getLocations(accountId: string, type?: string, orderBy?: string, limit?: number, offset?: number, search?: string, cityTier?: number): Promise<Location[]> {
-  const conditions = [eq(locations.accountId, accountId)];
-  if (type) conditions.push(eq(locations.type, type as any));
-  if (search) conditions.push(ilike(locations.name, `%${search}%`));
-  if (cityTier) conditions.push(eq(locations.cityTier, cityTier));
-  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
-  const order = orderBy === "population"
-    ? [desc(locations.population)]
-    : type
-      ? [asc(locations.name)]
-      : [asc(locations.type), asc(locations.name)];
-  let q: any = db.select().from(locations).where(where).orderBy(...order);
-  if (limit) q = q.limit(limit);
-  if (offset) q = q.offset(offset);
-  return q;
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  // account_id, city_tier, state_code all fail to map correctly in compiled production builds
+  const params: any[] = [accountId];
+  let query = `SELECT * FROM locations WHERE account_id = $1`;
+  if (type) { params.push(type); query += ` AND type = $${params.length}`; }
+  if (search) { params.push(`%${search}%`); query += ` AND name ILIKE $${params.length}`; }
+  if (cityTier) { params.push(cityTier); query += ` AND city_tier = $${params.length}`; }
+  if (orderBy === "population") {
+    query += ` ORDER BY population DESC`;
+  } else if (type) {
+    query += ` ORDER BY name ASC`;
+  } else {
+    query += ` ORDER BY type ASC, name ASC`;
+  }
+  if (limit) { params.push(limit); query += ` LIMIT $${params.length}`; }
+  if (offset) { params.push(offset); query += ` OFFSET $${params.length}`; }
+  const res = await pool.query(query, params);
+  return res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    stateCode: r.state_code,
+    cityTier: r.city_tier,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Location[];
 }
 
 export async function countLocations(accountId: string, type?: string, search?: string, cityTier?: number): Promise<number> {
@@ -390,7 +414,17 @@ export async function bulkCreateLocations(accountId: string, items: InsertLocati
 // ─── Services ─────────────────────────────────────────────────────────────────
 
 export async function getServices(accountId: string): Promise<Service[]> {
-  return db.select().from(services).where(eq(services.accountId, accountId)).orderBy(asc(services.name));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  const res = await pool.query(
+    `SELECT * FROM services WHERE account_id = $1 ORDER BY name ASC`,
+    [accountId]
+  );
+  return res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Service[];
 }
 
 export async function getService(id: string): Promise<Service | undefined> {
@@ -418,7 +452,17 @@ export async function deleteService(id: string): Promise<void> {
 // ─── Industries ───────────────────────────────────────────────────────────────
 
 export async function getIndustries(accountId: string): Promise<Industry[]> {
-  return db.select().from(industries).where(eq(industries.accountId, accountId)).orderBy(asc(industries.name));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  const res = await pool.query(
+    `SELECT * FROM industries WHERE account_id = $1 ORDER BY name ASC`,
+    [accountId]
+  );
+  return res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Industry[];
 }
 
 export async function getIndustry(id: string): Promise<Industry | undefined> {
@@ -445,7 +489,18 @@ export async function deleteIndustry(id: string): Promise<void> {
 // ─── Query Clusters ───────────────────────────────────────────────────────────
 
 export async function getQueryClusters(accountId: string): Promise<QueryCluster[]> {
-  return db.select().from(queryClusters).where(eq(queryClusters.accountId, accountId)).orderBy(asc(queryClusters.name));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  const res = await pool.query(
+    `SELECT * FROM query_clusters WHERE account_id = $1 ORDER BY name ASC`,
+    [accountId]
+  );
+  return res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    serviceId: r.service_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as QueryCluster[];
 }
 
 export async function getQueryCluster(id: string): Promise<QueryCluster | undefined> {
@@ -472,7 +527,20 @@ export async function deleteQueryCluster(id: string): Promise<void> {
 // ─── Blueprints ───────────────────────────────────────────────────────────────
 
 export async function getBlueprints(accountId: string): Promise<Blueprint[]> {
-  return db.select().from(blueprints).where(eq(blueprints.accountId, accountId)).orderBy(desc(blueprints.createdAt));
+  // ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+  const res = await pool.query(
+    `SELECT * FROM blueprints WHERE account_id = $1 ORDER BY created_at DESC`,
+    [accountId]
+  );
+  return res.rows.map((r: any) => ({
+    ...r,
+    accountId: r.account_id,
+    websiteId: r.website_id,
+    pageType: r.page_type,
+    sectionOrder: r.section_order,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Blueprint[];
 }
 
 export async function getBlueprint(id: string): Promise<Blueprint | undefined> {
