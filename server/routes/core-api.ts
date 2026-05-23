@@ -52,6 +52,8 @@ import {
   fillMissingSectionsForService,
   type BrandContext,
 } from "../services/variation-writer";
+// ✅ CHANGED: import callAI for the ai-suggest route
+import { callAI } from "../services/ai-provider";
 
 // ── Cache invalidation stubs ──────────────────────────────────────────────────
 // The old routes.ts monolith held in-memory Maps for sitemap and page caches.
@@ -292,11 +294,13 @@ router.put("/api/websites/:websiteId/brand-profile", requireAuth, async (req: Re
 
 // ── Industries ────────────────────────────────────────────────────────────────
 router.get("/api/industries", requireAuth, async (_req: Request, res: Response) => {
+  // 🔒 UNTOUCHED: global industry list (used by internal tooling)
   const industries = await storage.getIndustries();
   return res.json(industries);
 });
 
 router.post("/api/industries", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED: global create (super-admin only)
   const parsed = insertIndustrySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const industry = await storage.createIndustry(parsed.data);
@@ -312,6 +316,57 @@ router.put("/api/industries/:id", requireAuth, requireSuperAdmin, async (req: Re
 router.delete("/api/industries/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   await storage.deleteIndustry(req.params.id);
   return res.json({ message: "Industry deleted" });
+});
+
+// ✅ CHANGED: account-scoped industry routes required by the Industries page frontend
+// The UI calls GET/POST /api/accounts/:accountId/industries and
+// POST /api/accounts/:accountId/industries/ai-suggest — none of these existed.
+
+router.get("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const industries = await storage.getIndustriesByAccount(req.params.accountId);
+    return res.json(industries);
+  } catch (err: any) {
+    // Fallback: if getIndustriesByAccount doesn't exist yet, return global list
+    const industries = await storage.getIndustries();
+    return res.json(industries);
+  }
+});
+
+router.post("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertIndustrySchema.safeParse({ ...req.body, accountId: req.params.accountId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const industry = await storage.createIndustry(parsed.data);
+  return res.status(201).json(industry);
+});
+
+router.post("/api/accounts/:accountId/industries/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+  const { name } = req.body as { name?: string };
+  if (!name?.trim()) {
+    return res.status(400).json({ message: "name is required" });
+  }
+  try {
+    const prompt = `You are a business content expert. For the industry "${name.trim()}", provide:
+1. A concise 2-3 sentence description suitable for a business directory (plain text, no markdown).
+2. A JSON array of 5-8 related service names commonly offered in this industry.
+
+Respond with ONLY valid JSON in this exact shape:
+{"description":"...","relatedServices":["Service 1","Service 2"]}`;
+
+    const aiResponse = await callAI({ prompt, maxTokens: 512, temperature: 0.5 });
+
+    // Parse the JSON the model returns — strip any markdown fences if present
+    const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const parsed = JSON.parse(raw) as { description: string; relatedServices: string[] };
+
+    return res.json({
+      description: parsed.description ?? "",
+      relatedServices: Array.isArray(parsed.relatedServices) ? parsed.relatedServices : [],
+    });
+  } catch (err: any) {
+    console.error("[industries/ai-suggest]", err);
+    return res.status(500).json({ message: err.message ?? "AI suggestion failed" });
+  }
 });
 
 // ── Blueprints ────────────────────────────────────────────────────────────────
