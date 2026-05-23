@@ -284,6 +284,20 @@ router.delete("/api/services/:id", requireAuth, async (req: Request, res: Respon
   return res.json({ message: "Service deleted" });
 });
 
+// ✅ ADDED: Account-scoped services routes used by the ServicesPage tab.
+//   The frontend calls GET/POST /api/accounts/:accountId/services directly.
+router.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
+  const services = await storage.getServices(req.params.accountId);
+  return res.json(services);
+});
+
+router.post("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertServiceSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const service = await storage.createService(parsed.data);
+  return res.status(201).json(service);
+});
+
 // ── Brand Profiles ────────────────────────────────────────────────────────────
 router.get("/api/websites/:websiteId/brand-profile", requireAuth, async (req: Request, res: Response) => {
   const brand = await storage.getBrandProfile(req.params.websiteId);
@@ -307,6 +321,16 @@ router.put("/api/websites/:websiteId/brand-profile", requireAuth, async (req: Re
   }
   const brand = await storage.updateBrandProfile(existing.id, req.body);
   return res.json(brand);
+});
+
+// ✅ ADDED: Account-scoped brand-profiles route used by ServicesPage / BlueprintsPage.
+//   Collects brand profiles across all websites belonging to the account.
+router.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+  const websiteList = await storage.getWebsites(req.params.accountId);
+  const profiles = await Promise.all(
+    websiteList.map((w: any) => storage.getBrandProfile(w.id).catch(() => null))
+  );
+  return res.json(profiles.filter(Boolean));
 });
 
 // ── Industries ────────────────────────────────────────────────────────────────
@@ -410,6 +434,40 @@ router.put("/api/blueprints/:id", requireAuth, async (req: Request, res: Respons
 router.delete("/api/blueprints/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   await storage.deleteBlueprint(req.params.id);
   return res.json({ message: "Blueprint deleted" });
+});
+
+// ✅ ADDED: Account-scoped blueprint routes used by the Blueprints tab.
+//   NOTE: bulk-generate routes must be registered BEFORE /api/accounts/:accountId/blueprints/:id
+//   so Express doesn't treat "bulk-generate" as an :id param.
+router.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+  // Stub: returns a completed job immediately until a real bulk queue is wired in.
+  const jobId = `bulk-bp-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  return res.json({ jobId, total: 0, done: 0, status: "completed", created: 0 });
+});
+
+router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+  return res.json({ jobId: req.params.jobId, total: 0, done: 0, status: "completed", created: 0 });
+});
+
+router.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  const blueprints = await storage.getBlueprints(req.params.accountId);
+  return res.json(blueprints);
+});
+
+router.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertBlueprintSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const blueprint = await storage.createBlueprint(parsed.data);
+  return res.status(201).json(blueprint);
+});
+
+router.delete("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  // Deletes ALL blueprints for this account (used by "Delete All" button on BlueprintsPage).
+  const blueprints = await storage.getBlueprints(req.params.accountId);
+  for (const bp of blueprints) {
+    await storage.deleteBlueprint(bp.id).catch(() => {});
+  }
+  return res.json({ count: blueprints.length });
 });
 
 // ── Query Clusters ────────────────────────────────────────────────────────────
