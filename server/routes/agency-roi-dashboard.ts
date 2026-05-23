@@ -176,7 +176,8 @@ router.get("/api/agency-dashboard/activity", requireAuth, async (req, res, next)
       pool.query(`SELECT COUNT(*)::int AS count FROM generation_jobs gj JOIN accounts a ON a.id = gj.account_id WHERE gj.created_at >= NOW() - INTERVAL '30 days' AND gj.settings->>'type' = 'intent_page_improvement' ${andScope.clause}`, andScope.params),
       pool.query(`SELECT COUNT(*)::int AS count FROM internal_links il JOIN websites w ON w.id = il.website_id JOIN accounts a ON a.id = w.account_id WHERE il.created_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
       pool.query(`SELECT COUNT(*)::int AS count FROM sitemaps sm JOIN websites w ON w.id = sm.website_id JOIN accounts a ON a.id = w.account_id WHERE sm.updated_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
-      pool.query(`SELECT COUNT(*)::int AS count FROM operational_logs ol LEFT JOIN accounts a ON a.id = ol.account_id WHERE ol.created_at >= NOW() - INTERVAL '30 days' AND ol.level IN ('warning','error') ${andScope.clause}`, andScope.params),
+      // ✅ CHANGED: added ::uuid cast on ol.account_id — column is varchar, accounts.id is uuid; without cast PG throws error 42883
+      pool.query(`SELECT COUNT(*)::int AS count FROM operational_logs ol LEFT JOIN accounts a ON a.id = ol.account_id::uuid WHERE ol.created_at >= NOW() - INTERVAL '30 days' AND ol.level IN ('warning','error') ${andScope.clause}`, andScope.params),
     ]);
     res.json({ pagesGenerated: pagesGenerated.rows[0]?.count ?? 0, pagesImproved: pagesImproved.rows[0]?.count ?? 0, linksAdded: linksAdded.rows[0]?.count ?? 0, faqExpansions: pagesImproved.rows[0]?.count ?? 0, intentClustersBuilt: 0, sitemapUpdates: sitemapUpdates.rows[0]?.count ?? 0, contentRepairs: qualityFixes.rows[0]?.count ?? 0, qualityFixes: qualityFixes.rows[0]?.count ?? 0 });
   } catch (err) { next(err); }
