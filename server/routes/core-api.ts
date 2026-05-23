@@ -92,11 +92,11 @@ const writeThinJobs = new Map<string, WriteThinJob>();
 
 const router = Router();
 
-// ── Health (safety net) ───────────────────────────────────────────────────────
+// ── Health (safety net) ──────────────────────────────────────────────────────
 router.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 router.get("/_health", (_req, res) => res.status(200).json({ ok: true }));
 
-// ── Accounts ──────────────────────────────────────────────────────────────────
+// ── Accounts ─────────────────────────────────────────────────────────────────
 router.get("/api/accounts", requireAuth, async (req: Request, res: Response) => {
   const accounts = await storage.getAccounts();
   return res.json(accounts);
@@ -143,9 +143,6 @@ router.post("/api/accounts/:accountId/users", requireAuth, async (req: Request, 
 });
 
 // ── Agencies (alias for Accounts — same entity, different UI label) ───────────
-// The frontend "Create Agency" form POSTs to /api/agencies. Without these
-// routes the server returns an HTML 404 page, causing the
-// "Unexpected token '<', <!DOCTYPE..." JSON parse error in the browser.
 router.get("/api/agencies", requireAuth, async (_req: Request, res: Response) => {
   const accounts = await storage.getAccounts();
   return res.json(accounts);
@@ -158,9 +155,7 @@ router.get("/api/agencies/:id", requireAuth, async (req: Request, res: Response)
 });
 
 router.post("/api/agencies", requireAuth, async (req: Request, res: Response) => {
-  // Map agency-specific field names to account schema if needed
   const body = { ...req.body };
-  // The Create Agency form sends "name" — insertAccountSchema expects "name" too, so no transform needed.
   const parsed = insertAccountSchema.safeParse(body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const account = await storage.createAccount(parsed.data);
@@ -181,9 +176,6 @@ router.delete("/api/agencies/:id", requireAuth, requireSuperAdmin, async (req: R
 // ── Websites ──────────────────────────────────────────────────────────────────
 router.get("/api/websites", requireAuth, async (req: Request, res: Response) => {
   const accountId = req.query.accountId as string | undefined;
-  // getWebsites(accountId?) handles both filtered and unfiltered cases:
-  // - with accountId → returns websites for that account only
-  // - without accountId → returns all websites across all accounts
   const websiteList = await storage.getWebsites(accountId);
   return res.json(websiteList);
 });
@@ -212,7 +204,6 @@ router.delete("/api/websites/:id", requireAuth, requireSuperAdmin, async (req: R
   return res.json({ message: "Website deleted" });
 });
 
-// Website settings
 router.put("/api/websites/:id/settings", requireAuth, async (req: Request, res: Response) => {
   const website = await storage.updateWebsiteSettings(req.params.id, req.body);
   if (!website) return res.status(404).json({ message: "Website not found" });
@@ -220,49 +211,75 @@ router.put("/api/websites/:id/settings", requireAuth, async (req: Request, res: 
 });
 
 // ── Locations ─────────────────────────────────────────────────────────────────
+// ✅ CHANGED: storage.getLocations() takes accountId (not websiteId).
+//   Resolve websiteId → accountId first so the DB query hits account_id correctly.
 router.get("/api/websites/:websiteId/locations", requireAuth, async (req: Request, res: Response) => {
-  const locations = await storage.getLocations(req.params.websiteId);
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.json([]);
+  const locations = await storage.getLocations(accountId);
   return res.json(locations);
 });
 
+// ✅ CHANGED: POST also needs accountId resolved from websiteId for the insert.
 router.post("/api/websites/:websiteId/locations", requireAuth, async (req: Request, res: Response) => {
-  const parsed = insertLocationSchema.safeParse({ ...req.body, websiteId: req.params.websiteId });
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.status(400).json({ message: "Website has no associated account" });
+  const parsed = insertLocationSchema.safeParse({ ...req.body, accountId });
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const location = await storage.createLocation(parsed.data);
   return res.status(201).json(location);
 });
 
 router.put("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED: flat update by location id
   const location = await storage.updateLocation(req.params.id, req.body);
   if (!location) return res.status(404).json({ message: "Location not found" });
   return res.json(location);
 });
 
 router.delete("/api/locations/:id", requireAuth, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED
   await storage.deleteLocation(req.params.id);
   return res.json({ message: "Location deleted" });
 });
 
 // ── Services ──────────────────────────────────────────────────────────────────
+// ✅ CHANGED: storage.getServices() takes accountId (not websiteId).
+//   Resolve websiteId → accountId first so the DB query hits account_id correctly.
 router.get("/api/websites/:websiteId/services", requireAuth, async (req: Request, res: Response) => {
-  const services = await storage.getServices(req.params.websiteId);
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.json([]);
+  const services = await storage.getServices(accountId);
   return res.json(services);
 });
 
+// ✅ CHANGED: POST also needs accountId resolved from websiteId for the insert.
 router.post("/api/websites/:websiteId/services", requireAuth, async (req: Request, res: Response) => {
-  const parsed = insertServiceSchema.safeParse({ ...req.body, websiteId: req.params.websiteId });
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.status(400).json({ message: "Website has no associated account" });
+  const parsed = insertServiceSchema.safeParse({ ...req.body, accountId });
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const service = await storage.createService(parsed.data);
   return res.status(201).json(service);
 });
 
 router.put("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED
   const service = await storage.updateService(req.params.id, req.body);
   if (!service) return res.status(404).json({ message: "Service not found" });
   return res.json(service);
 });
 
 router.delete("/api/services/:id", requireAuth, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED
   await storage.deleteService(req.params.id);
   return res.json({ message: "Service deleted" });
 });
@@ -294,13 +311,11 @@ router.put("/api/websites/:websiteId/brand-profile", requireAuth, async (req: Re
 
 // ── Industries ────────────────────────────────────────────────────────────────
 router.get("/api/industries", requireAuth, async (_req: Request, res: Response) => {
-  // 🔒 UNTOUCHED: global industry list (used by internal tooling)
   const industries = await storage.getIndustries();
   return res.json(industries);
 });
 
 router.post("/api/industries", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
-  // 🔒 UNTOUCHED: global create (super-admin only)
   const parsed = insertIndustrySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const industry = await storage.createIndustry(parsed.data);
@@ -318,16 +333,11 @@ router.delete("/api/industries/:id", requireAuth, requireSuperAdmin, async (req:
   return res.json({ message: "Industry deleted" });
 });
 
-// ✅ CHANGED: account-scoped industry routes required by the Industries page frontend
-// The UI calls GET/POST /api/accounts/:accountId/industries and
-// POST /api/accounts/:accountId/industries/ai-suggest — none of these existed.
-
 router.get("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
   try {
     const industries = await storage.getIndustriesByAccount(req.params.accountId);
     return res.json(industries);
   } catch (err: any) {
-    // Fallback: if getIndustriesByAccount doesn't exist yet, return global list
     const industries = await storage.getIndustries();
     return res.json(industries);
   }
@@ -346,19 +356,10 @@ router.post("/api/accounts/:accountId/industries/ai-suggest", requireAuth, async
     return res.status(400).json({ message: "name is required" });
   }
   try {
-    const prompt = `You are a business content expert. For the industry "${name.trim()}", provide:
-1. A concise 2-3 sentence description suitable for a business directory (plain text, no markdown).
-2. A JSON array of 5-8 related service names commonly offered in this industry.
-
-Respond with ONLY valid JSON in this exact shape:
-{"description":"...","relatedServices":["Service 1","Service 2"]}`;
-
+    const prompt = `You are a business content expert. For the industry "${name.trim()}", provide:\n1. A concise 2-3 sentence description suitable for a business directory (plain text, no markdown).\n2. A JSON array of 5-8 related service names commonly offered in this industry.\n\nRespond with ONLY valid JSON in this exact shape:\n{"description":"...","relatedServices":["Service 1","Service 2"]}`;
     const aiResponse = await callAI({ prompt, maxTokens: 512, temperature: 0.5 });
-
-    // Parse the JSON the model returns — strip any markdown fences if present
     const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
     const parsed = JSON.parse(raw) as { description: string; relatedServices: string[] };
-
     return res.json({
       description: parsed.description ?? "",
       relatedServices: Array.isArray(parsed.relatedServices) ? parsed.relatedServices : [],
@@ -381,6 +382,18 @@ router.get("/api/blueprints/:id", requireAuth, async (req: Request, res: Respons
   return res.json(blueprint);
 });
 
+// ✅ CHANGED: Added missing nested route for the Blueprints tab in Account detail page.
+//   The frontend calls GET /api/websites/:websiteId/blueprints but this route never existed.
+//   storage.getBlueprints() takes accountId — resolve websiteId → accountId first.
+router.get("/api/websites/:websiteId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.json([]);
+  const blueprints = await storage.getBlueprints(accountId);
+  return res.json(blueprints);
+});
+
 router.post("/api/blueprints", requireAuth, async (req: Request, res: Response) => {
   const parsed = insertBlueprintSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -400,19 +413,31 @@ router.delete("/api/blueprints/:id", requireAuth, requireSuperAdmin, async (req:
 });
 
 // ── Query Clusters ────────────────────────────────────────────────────────────
+// ✅ CHANGED: storage.getQueryClusters() takes accountId (not websiteId).
+//   Resolve websiteId → accountId first so the DB query hits account_id correctly.
 router.get("/api/websites/:websiteId/query-clusters", requireAuth, async (req: Request, res: Response) => {
-  const clusters = await storage.getQueryClusters(req.params.websiteId);
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.json([]);
+  const clusters = await storage.getQueryClusters(accountId);
   return res.json(clusters);
 });
 
+// ✅ CHANGED: POST also needs accountId resolved from websiteId for the insert.
 router.post("/api/websites/:websiteId/query-clusters", requireAuth, async (req: Request, res: Response) => {
-  const parsed = insertQueryClusterSchema.safeParse({ ...req.body, websiteId: req.params.websiteId });
+  const website = await storage.getWebsite(req.params.websiteId);
+  if (!website) return res.status(404).json({ message: "Website not found" });
+  const accountId = website.accountId;
+  if (!accountId) return res.status(400).json({ message: "Website has no associated account" });
+  const parsed = insertQueryClusterSchema.safeParse({ ...req.body, accountId });
   if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
   const cluster = await storage.createQueryCluster(parsed.data);
   return res.status(201).json(cluster);
 });
 
 router.delete("/api/query-clusters/:id", requireAuth, async (req: Request, res: Response) => {
+  // 🔒 UNTOUCHED
   await storage.deleteQueryCluster(req.params.id);
   return res.json({ message: "Query cluster deleted" });
 });
@@ -482,16 +507,12 @@ router.get("/api/generation-jobs/:id", requireAuth, async (req: Request, res: Re
   return res.json(job);
 });
 
-// Generic job polling endpoint used by the Bank Health fill-missing-all job
 router.get("/api/jobs/:jobId", requireAuth, async (req: Request, res: Response) => {
   const { jobId } = req.params;
-  // Check fill-missing jobs first
   const fillJob = fillMissingJobs.get(jobId);
   if (fillJob) return res.json(fillJob);
-  // Check write-thin jobs
   const thinJob = writeThinJobs.get(jobId);
   if (thinJob) return res.json(thinJob);
-  // Fall back to generation jobs table
   const job = await storage.getGenerationJob(jobId).catch(() => null);
   if (job) return res.json(job);
   return res.status(404).json({ message: "Job not found" });
@@ -513,10 +534,6 @@ router.get("/api/websites/:websiteId/variation-banks/completeness", requireAuth,
   return res.json(completeness);
 });
 
-// ── Bank Completeness (Bank Health page) ──────────────────────────────────────
-
-// GET  /api/websites/:websiteId/bank-completeness
-// Returns cached completeness rows for the Bank Health dashboard
 router.get("/api/websites/:websiteId/bank-completeness", requireAuth, async (req: Request, res: Response) => {
   try {
     const rows = await storage.getBankCompleteness(req.params.websiteId);
@@ -526,8 +543,6 @@ router.get("/api/websites/:websiteId/bank-completeness", requireAuth, async (req
   }
 });
 
-// POST /api/websites/:websiteId/bank-completeness/recompute
-// Recomputes completeness scores for every service in the website's bank
 router.post("/api/websites/:websiteId/bank-completeness/recompute", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
@@ -543,23 +558,16 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", requireAuth,
   }
 });
 
-// ── Variation Bank Write (single service, full 14-section rewrite) ────────────
-
-// POST /api/websites/:websiteId/variation-banks/write
-// Rewrites ALL 14 sections (Core + Extended + SEO Expansion) for a single service.
 router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
     const { service } = req.body as { service: string };
     if (!service?.trim()) return res.status(400).json({ message: "service is required" });
-
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ message: "Website not found" });
-
     const account = website.accountId ? await storage.getAccount(website.accountId).catch(() => null) : null;
     const brand = await storage.getBrandProfile(websiteId).catch(() => null);
     const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
-
     const ctx: BrandContext = {
       brandName: brand?.name || website.name || website.domain,
       brandDescription: brand?.description ?? undefined,
@@ -567,7 +575,6 @@ router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async
       industryName: industry?.name ?? undefined,
       industryDescription: industry?.description ?? undefined,
     };
-
     const result = await writeVariationsForService(service.trim(), website.accountId ?? websiteId, websiteId, ctx);
     await storage.recomputeBankCompleteness(websiteId, service.trim()).catch(() => {});
     return res.json({ written: result.written, errors: result.errors });
@@ -577,23 +584,15 @@ router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async
   }
 });
 
-// ── Fill Missing (single service) ─────────────────────────────────────────────
-
-// POST /api/websites/:websiteId/variation-banks/fill-missing
-// Fills ONLY the sections that don't yet exist for the given service.
-// Includes SEO Expansion sections: comparison, pricing_factors, best_fit, software_integration.
 router.post("/api/websites/:websiteId/variation-banks/fill-missing", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
     const { service } = req.body as { service: string };
     if (!service?.trim()) return res.status(400).json({ message: "service is required" });
-
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ message: "Website not found" });
-
     const brand = await storage.getBrandProfile(websiteId).catch(() => null);
     const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
-
     const ctx: BrandContext = {
       brandName: brand?.name || website.name || website.domain,
       brandDescription: brand?.description ?? undefined,
@@ -601,14 +600,10 @@ router.post("/api/websites/:websiteId/variation-banks/fill-missing", requireAuth
       industryName: industry?.name ?? undefined,
       industryDescription: industry?.description ?? undefined,
     };
-
     const result = await fillMissingSectionsForService(service.trim(), website.accountId ?? websiteId, websiteId, ctx);
-
-    // Recompute completeness score after filling
     if (result.filled.length > 0) {
       await storage.recomputeBankCompleteness(websiteId, service.trim()).catch(() => {});
     }
-
     return res.json({ filled: result.filled, skipped: result.skipped, errors: result.errors });
   } catch (err: any) {
     console.error("[variation-banks/fill-missing]", err);
@@ -616,43 +611,25 @@ router.post("/api/websites/:websiteId/variation-banks/fill-missing", requireAuth
   }
 });
 
-// ── Fill Missing All (background job — all services for a website) ─────────────
-
-// POST /api/websites/:websiteId/variation-banks/fill-missing-all-job
-// Starts a background job that fills missing sections for multiple services.
-// Returns { started: true, jobId, total } immediately.
 router.post("/api/websites/:websiteId/variation-banks/fill-missing-all-job", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
     const { services } = req.body as { services?: string[] };
-
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ message: "Website not found" });
-
     const targetServices: string[] = Array.isArray(services) && services.length > 0
       ? services
       : await storage.getVariationBankServices(websiteId);
-
     if (targetServices.length === 0) {
       return res.json({ started: false, message: "No services found to fill" });
     }
-
     const jobId = `fill-all-${Date.now()}-${randomBytes(4).toString("hex")}`;
     const job: FillMissingJob = {
-      jobId,
-      websiteId,
-      status: "running",
-      totalPages: targetServices.length,
-      processedPages: 0,
-      errors: [],
-      startedAt: Date.now(),
+      jobId, websiteId, status: "running",
+      totalPages: targetServices.length, processedPages: 0, errors: [], startedAt: Date.now(),
     };
     fillMissingJobs.set(jobId, job);
-
-    // Store jobId on website for restore-on-reload
     storage.updateWebsiteSettings(websiteId, { fillMissingJobId: jobId }).catch(() => {});
-
-    // Run in background
     setImmediate(async () => {
       const brand = await storage.getBrandProfile(websiteId).catch(() => null);
       const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
@@ -663,7 +640,6 @@ router.post("/api/websites/:websiteId/variation-banks/fill-missing-all-job", req
         industryName: industry?.name ?? undefined,
         industryDescription: industry?.description ?? undefined,
       };
-
       for (const service of targetServices) {
         try {
           const result = await fillMissingSectionsForService(service, website.accountId ?? websiteId, websiteId, ctx);
@@ -678,12 +654,9 @@ router.post("/api/websites/:websiteId/variation-banks/fill-missing-all-job", req
         }
         job.processedPages++;
       }
-
       job.status = job.errors.length > 0 && job.processedPages === 0 ? "failed" : "completed";
-      // Clean up stored jobId
       storage.updateWebsiteSettings(websiteId, { fillMissingJobId: null }).catch(() => {});
     });
-
     return res.json({ started: true, jobId, total: targetServices.length });
   } catch (err: any) {
     console.error("[fill-missing-all-job]", err);
@@ -691,11 +664,8 @@ router.post("/api/websites/:websiteId/variation-banks/fill-missing-all-job", req
   }
 });
 
-// GET /api/websites/:websiteId/fill-missing-job
-// Returns the active fill-missing-all job for this website (for restore-on-reload)
 router.get("/api/websites/:websiteId/fill-missing-job", requireAuth, async (req: Request, res: Response) => {
   const { websiteId } = req.params;
-  // Find the most recent running job for this website
   let latestJob: FillMissingJob | null = null;
   for (const job of fillMissingJobs.values()) {
     if (job.websiteId === websiteId && job.status === "running") {
@@ -706,43 +676,26 @@ router.get("/api/websites/:websiteId/fill-missing-job", requireAuth, async (req:
   return res.json({ jobId: null });
 });
 
-// ── Write Thin Banks (bulk background job) ────────────────────────────────────
-
-// POST /api/websites/:websiteId/variation-banks/write-thin
-// Starts a background job that rewrites all services whose completeness
-// score is below the given threshold (default 70). Rewrites ALL 14 sections.
 router.post("/api/websites/:websiteId/variation-banks/write-thin", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
     const threshold: number = typeof req.body.threshold === "number" ? req.body.threshold : 70;
-
     const website = await storage.getWebsite(websiteId);
     if (!website) return res.status(404).json({ message: "Website not found" });
-
     const allRows = await storage.getBankCompleteness(websiteId);
     const thinServices: string[] = allRows
       .filter((r: any) => (r.completenessScore ?? 0) < threshold)
       .map((r: any) => r.service as string);
-
     if (thinServices.length === 0) {
       return res.json({ started: false, message: `No services below ${threshold}% completeness` });
     }
-
     const jobId = `write-thin-${Date.now()}-${randomBytes(4).toString("hex")}`;
     const job: WriteThinJob = {
-      jobId,
-      websiteId,
-      status: "running",
-      total: thinServices.length,
-      done: 0,
-      errors: [],
-      startedAt: Date.now(),
+      jobId, websiteId, status: "running",
+      total: thinServices.length, done: 0, errors: [], startedAt: Date.now(),
     };
     writeThinJobs.set(jobId, job);
-
-    // Store jobId on website for restore-on-reload
     storage.updateWebsiteSettings(websiteId, { writeThinJobId: jobId }).catch(() => {});
-
     setImmediate(async () => {
       const brand = await storage.getBrandProfile(websiteId).catch(() => null);
       const industry = brand?.industryId ? await storage.getIndustry(brand.industryId).catch(() => null) : null;
@@ -753,7 +706,6 @@ router.post("/api/websites/:websiteId/variation-banks/write-thin", requireAuth, 
         industryName: industry?.name ?? undefined,
         industryDescription: industry?.description ?? undefined,
       };
-
       for (const service of thinServices) {
         try {
           await writeVariationsForService(service, website.accountId ?? websiteId, websiteId, ctx);
@@ -763,11 +715,9 @@ router.post("/api/websites/:websiteId/variation-banks/write-thin", requireAuth, 
         }
         job.done++;
       }
-
       job.status = "done";
       storage.updateWebsiteSettings(websiteId, { writeThinJobId: null }).catch(() => {});
     });
-
     return res.json({ started: true, jobId, total: thinServices.length });
   } catch (err: any) {
     console.error("[write-thin]", err);
@@ -775,8 +725,6 @@ router.post("/api/websites/:websiteId/variation-banks/write-thin", requireAuth, 
   }
 });
 
-// GET /api/websites/:websiteId/bank-write-job
-// Returns the active write-thin job status for this website (for restore-on-reload)
 router.get("/api/websites/:websiteId/bank-write-job", requireAuth, async (req: Request, res: Response) => {
   const { websiteId } = req.params;
   let latestJob: WriteThinJob | null = null;
