@@ -55,15 +55,17 @@ export default function AccountDetailPage() {
     queryKey: ["/api/websites", websiteId, "services"],
     queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/services`),
     enabled: !!websiteId && tab === "services",
+    staleTime: 0, // ✅ CHANGED: force refetch when websiteId resolves after async website lookup
   });
 
   // ── Blueprints ────────────────────────────────────────────────────────────
-  // ✅ CHANGED: was /api/blueprints?accountId=... 
+  // ✅ CHANGED: was /api/blueprints?accountId=...
   //            now /api/websites/:websiteId/blueprints (correct server route)
   const { data: blueprints = [], isLoading: loadingBlueprints } = useQuery({
     queryKey: ["/api/websites", websiteId, "blueprints"],
     queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/blueprints`),
     enabled: !!websiteId && tab === "blueprints",
+    staleTime: 0, // ✅ CHANGED: force refetch when websiteId resolves after async website lookup
   });
 
   // ── Query Clusters ────────────────────────────────────────────────────────
@@ -73,6 +75,7 @@ export default function AccountDetailPage() {
     queryKey: ["/api/websites", websiteId, "query-clusters"],
     queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/query-clusters`),
     enabled: !!websiteId && tab === "clusters",
+    staleTime: 0, // ✅ CHANGED: force refetch when websiteId resolves after async website lookup
   });
 
   // ── Locations ─────────────────────────────────────────────────────────────
@@ -82,6 +85,7 @@ export default function AccountDetailPage() {
     queryKey: ["/api/websites", websiteId, "locations"],
     queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/locations`),
     enabled: !!websiteId && tab === "locations",
+    staleTime: 0, // ✅ CHANGED: force refetch when websiteId resolves after async website lookup
   });
 
   // ── Service CRUD ─────────────────────────────────────────────────────────
