@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { db } from "../db";
+import { db, pool } from "../db"; // ✅ CHANGED: added pool for raw SQL queries
 import { trackedLeads, bookedJobs } from "@shared/schema";
-import { eq, and, gte, lt, inArray, desc } from "drizzle-orm";
+import { eq, and, gte, lt, desc } from "drizzle-orm"; // 🔒 UNTOUCHED: still used for insert/update ops
 import { requireAuth } from "../auth";
 
 const router = Router();
@@ -21,21 +21,60 @@ function setCachedMetrics(key: string, data: unknown) {
   metricsCache.set(key, { data, exp: Date.now() + 30_000 });
 }
 
+// Helper: map snake_case booked_jobs row to camelCase
+function mapJobRow(r: any) {
+  return {
+    ...r,
+    leadId:     r.lead_id,
+    websiteId:  r.website_id,
+    pageId:     r.page_id,
+    accountId:  r.account_id,
+    jobValue:   r.job_value,
+    bookedDate: r.booked_date,
+    createdAt:  r.created_at,
+    updatedAt:  r.updated_at,
+  };
+}
+
+// Helper: map snake_case tracked_leads row to camelCase
+function mapLeadRow(r: any) {
+  return {
+    ...r,
+    websiteId:       r.website_id,
+    pageId:          r.page_id,
+    serviceId:       r.service_id,
+    locationId:      r.location_id,
+    formName:        r.form_name,
+    submitterName:   r.submitter_name,
+    submitterEmail:  r.submitter_email,
+    submitterPhone:  r.submitter_phone,
+    sourcePageUrl:   r.source_page_url,
+    sourcePageTitle: r.source_page_title,
+    formTimestamp:   r.form_timestamp,
+    createdAt:       r.created_at,
+  };
+}
+
 // GET /api/leads  ← ALL leads across all websites (no websiteId filter)
 router.get("/", requireAuth, async (_req, res) => {
   try {
-    const leads = await db
-      .select()
-      .from(trackedLeads)
-      .orderBy(desc(trackedLeads.formTimestamp));
+    // ✅ CHANGED: raw SQL to fix Drizzle ORM camelCase→snake_case bug in production
+    const leadsRes = await pool.query(
+      `SELECT * FROM tracked_leads ORDER BY form_timestamp DESC`
+    );
+    const leads = leadsRes.rows.map(mapLeadRow);
 
     const leadIds = leads.map((l) => l.id);
-    const jobs =
-      leadIds.length > 0
-        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
-        : [];
+    let jobs: any[] = [];
+    if (leadIds.length > 0) {
+      const jobsRes = await pool.query(
+        `SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`,
+        [leadIds]
+      );
+      jobs = jobsRes.rows.map(mapJobRow);
+    }
 
-    const jobsByLeadId: Record<string, typeof jobs[number]> = {};
+    const jobsByLeadId: Record<string, any> = {};
     for (const job of jobs) {
       if (job.leadId) jobsByLeadId[job.leadId] = job;
     }
@@ -53,6 +92,7 @@ router.get("/", requireAuth, async (_req, res) => {
 });
 
 // POST /api/leads/update-status  ← registered FIRST (static path)
+// 🔒 UNTOUCHED: insert path uses Drizzle which works fine for writes
 router.post("/update-status", requireAuth, async (req, res) => {
   try {
     const { leadId, status, jobValue, accountId } = req.body;
@@ -112,14 +152,18 @@ router.get("/metrics/:accountId", requireAuth, async (req, res) => {
     const cached = getCachedMetrics(cacheKey);
     if (cached) return res.json(cached);
 
-    const conditions = [eq(bookedJobs.accountId, accountId)];
+    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug
+    let query = `SELECT * FROM booked_jobs WHERE account_id = $1`;
+    const params: any[] = [accountId];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
-      conditions.push(gte(bookedJobs.bookedDate, new Date(year, monthNum - 1, 1)));
-      conditions.push(lt(bookedJobs.bookedDate, new Date(year, monthNum, 1)));
+      params.push(new Date(year, monthNum - 1, 1));
+      params.push(new Date(year, monthNum, 1));
+      query += ` AND booked_date >= $2 AND booked_date < $3`;
     }
 
-    const jobs = await db.select().from(bookedJobs).where(and(...conditions));
+    const jobsRes = await pool.query(query, params);
+    const jobs = jobsRes.rows.map(mapJobRow);
     const totalJobValue = jobs.reduce((sum, job) => sum + parseFloat(job.jobValue ?? "0"), 0);
 
     const payload = {
@@ -141,19 +185,24 @@ router.get("/:websiteId", requireAuth, async (req, res) => {
   try {
     const { websiteId } = req.params;
 
-    const leads = await db
-      .select()
-      .from(trackedLeads)
-      .where(eq(trackedLeads.websiteId, websiteId))
-      .orderBy(desc(trackedLeads.formTimestamp));
+    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug
+    const leadsRes = await pool.query(
+      `SELECT * FROM tracked_leads WHERE website_id = $1 ORDER BY form_timestamp DESC`,
+      [websiteId]
+    );
+    const leads = leadsRes.rows.map(mapLeadRow);
 
     const leadIds = leads.map((l) => l.id);
-    const jobs =
-      leadIds.length > 0
-        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
-        : [];
+    let jobs: any[] = [];
+    if (leadIds.length > 0) {
+      const jobsRes = await pool.query(
+        `SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`,
+        [leadIds]
+      );
+      jobs = jobsRes.rows.map(mapJobRow);
+    }
 
-    const jobsByLeadId: Record<string, typeof jobs[number]> = {};
+    const jobsByLeadId: Record<string, any> = {};
     for (const job of jobs) {
       if (job.leadId) jobsByLeadId[job.leadId] = job;
     }

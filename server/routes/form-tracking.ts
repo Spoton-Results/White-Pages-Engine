@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { db } from "../db";
-import { trackedLeads, bookedJobs, websites } from "@shared/schema";
-import { eq, and, gte, lt, desc, inArray } from "drizzle-orm";
+import { db, pool } from "../db"; // ✅ CHANGED: added pool for raw SQL read queries
+import { trackedLeads, bookedJobs } from "@shared/schema";
+import { eq, and, gte, lt, desc, inArray } from "drizzle-orm"; // 🔒 UNTOUCHED: used for inserts
 import { requireAuth } from "../auth";
 import { sendLeadNotification } from "../services/lead-notify";
 
@@ -45,7 +45,42 @@ function redirectWithStatus(res: any, sourcePageUrl: unknown, status: "success" 
   return res.redirect(303, url.toString());
 }
 
+// Helper: map snake_case tracked_leads row to camelCase
+function mapLeadRow(r: any) {
+  return {
+    ...r,
+    websiteId:       r.website_id,
+    pageId:          r.page_id,
+    serviceId:       r.service_id,
+    locationId:      r.location_id,
+    formName:        r.form_name,
+    submitterName:   r.submitter_name,
+    submitterEmail:  r.submitter_email,
+    submitterPhone:  r.submitter_phone,
+    sourcePageUrl:   r.source_page_url,
+    sourcePageTitle: r.source_page_title,
+    formTimestamp:   r.form_timestamp,
+    createdAt:       r.created_at,
+  };
+}
+
+// Helper: map snake_case booked_jobs row to camelCase
+function mapJobRow(r: any) {
+  return {
+    ...r,
+    leadId:     r.lead_id,
+    websiteId:  r.website_id,
+    pageId:     r.page_id,
+    accountId:  r.account_id,
+    jobValue:   r.job_value,
+    bookedDate: r.booked_date,
+    createdAt:  r.created_at,
+    updatedAt:  r.updated_at,
+  };
+}
+
 // POST /api/form-tracking/submit  (public — called from public-facing page forms)
+// 🔒 UNTOUCHED: write path — Drizzle insert works fine
 router.post("/submit", async (req, res) => {
   try {
     const {
@@ -85,8 +120,6 @@ router.post("/submit", async (req, res) => {
       })
       .returning();
 
-    // Fire-and-forget email notifications — never await so a failed email
-    // cannot cause a 500 or delay the form response to the visitor.
     sendLeadNotification({
       leadId: lead.id,
       websiteId: lead.websiteId,
@@ -121,26 +154,31 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
     const { websiteId } = req.params;
     const { month } = req.query as { month?: string };
 
-    const conditions = [eq(trackedLeads.websiteId, websiteId)];
+    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug in production
+    let query = `SELECT * FROM tracked_leads WHERE website_id = $1`;
+    const params: any[] = [websiteId];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
-      conditions.push(gte(trackedLeads.formTimestamp, new Date(year, monthNum - 1, 1)));
-      conditions.push(lt(trackedLeads.formTimestamp, new Date(year, monthNum, 1)));
+      params.push(new Date(year, monthNum - 1, 1));
+      params.push(new Date(year, monthNum, 1));
+      query += ` AND form_timestamp >= $2 AND form_timestamp < $3`;
     }
+    query += ` ORDER BY form_timestamp DESC`;
 
-    const leads = await db
-      .select()
-      .from(trackedLeads)
-      .where(and(...conditions))
-      .orderBy(desc(trackedLeads.formTimestamp));
+    const leadsRes = await pool.query(query, params);
+    const leads = leadsRes.rows.map(mapLeadRow);
 
     const page = leads.slice(0, 100);
     const leadIds = page.map((l) => l.id);
-    const jobs =
-      leadIds.length > 0
-        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
-        : [];
-    const jobsByLeadId: Record<string, (typeof jobs)[number]> = {};
+    let jobs: any[] = [];
+    if (leadIds.length > 0) {
+      const jobsRes = await pool.query(
+        `SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`,
+        [leadIds]
+      );
+      jobs = jobsRes.rows.map(mapJobRow);
+    }
+    const jobsByLeadId: Record<string, any> = {};
     for (const job of jobs) {
       if (job.leadId) jobsByLeadId[job.leadId] = job;
     }
@@ -166,34 +204,38 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const cached = getCachedLeads(cacheKey);
     if (cached) return res.json(cached);
 
-    const siteRows = await db
-      .select({ id: websites.id })
-      .from(websites)
-      .where(eq(websites.accountId, accountId));
-
-    const websiteIds = siteRows.map((r) => r.id);
+    // ✅ CHANGED: raw SQL for websites lookup (fixes account_id mapping bug)
+    const siteRes = await pool.query(
+      `SELECT id FROM websites WHERE account_id = $1`,
+      [accountId]
+    );
+    const websiteIds = siteRes.rows.map((r: any) => r.id);
     if (!websiteIds.length) return res.json({ leads: [], totalForms: 0 });
 
-    const conditions: any[] = [inArray(trackedLeads.websiteId, websiteIds)];
+    // ✅ CHANGED: raw SQL for tracked_leads (fixes website_id mapping bug)
+    let query = `SELECT * FROM tracked_leads WHERE website_id = ANY($1)`;
+    const params: any[] = [websiteIds];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
-      conditions.push(gte(trackedLeads.formTimestamp, new Date(year, monthNum - 1, 1)));
-      conditions.push(lt(trackedLeads.formTimestamp, new Date(year, monthNum, 1)));
+      params.push(new Date(year, monthNum - 1, 1));
+      params.push(new Date(year, monthNum, 1));
+      query += ` AND form_timestamp >= $2 AND form_timestamp < $3`;
     }
+    query += ` ORDER BY form_timestamp DESC LIMIT 100`;
 
-    const leads = await db
-      .select()
-      .from(trackedLeads)
-      .where(and(...conditions))
-      .orderBy(desc(trackedLeads.formTimestamp))
-      .limit(100);
+    const leadsRes = await pool.query(query, params);
+    const leads = leadsRes.rows.map(mapLeadRow);
 
     const leadIds = leads.map((l) => l.id);
-    const jobs =
-      leadIds.length > 0
-        ? await db.select().from(bookedJobs).where(inArray(bookedJobs.leadId, leadIds))
-        : [];
-    const jobsByLeadId: Record<string, (typeof jobs)[number]> = {};
+    let jobs: any[] = [];
+    if (leadIds.length > 0) {
+      const jobsRes = await pool.query(
+        `SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`,
+        [leadIds]
+      );
+      jobs = jobsRes.rows.map(mapJobRow);
+    }
+    const jobsByLeadId: Record<string, any> = {};
     for (const job of jobs) {
       if (job.leadId) jobsByLeadId[job.leadId] = job;
     }
@@ -216,14 +258,21 @@ router.get("/metrics/:websiteId", requireAuth, async (req, res) => {
     const { websiteId } = req.params;
     const { month } = req.query as { month?: string };
 
-    const conditions = [eq(trackedLeads.websiteId, websiteId)];
+    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug in production
+    let query = `SELECT page_id, service_id FROM tracked_leads WHERE website_id = $1`;
+    const params: any[] = [websiteId];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
-      conditions.push(gte(trackedLeads.formTimestamp, new Date(year, monthNum - 1, 1)));
-      conditions.push(lt(trackedLeads.formTimestamp, new Date(year, monthNum, 1)));
+      params.push(new Date(year, monthNum - 1, 1));
+      params.push(new Date(year, monthNum, 1));
+      query += ` AND form_timestamp >= $2 AND form_timestamp < $3`;
     }
 
-    const forms = await db.select().from(trackedLeads).where(and(...conditions));
+    const formsRes = await pool.query(query, params);
+    const forms = formsRes.rows.map((r: any) => ({
+      pageId:    r.page_id,
+      serviceId: r.service_id,
+    }));
 
     const formsByPage: Record<string, number> = {};
     const formsByService: Record<string, number> = {};

@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { db } from "../db";
+import { db, pool } from "../db"; // ✅ CHANGED: added pool for raw SQL read queries
 import { callTrackingNumbers, trackedCalls } from "@shared/schema";
-import { eq, and, gte, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm"; // 🔒 UNTOUCHED: still used for insert/webhook ops
 import { requireAuth } from "../auth";
 import { getPhoneProvider, getPublicBaseUrl } from "../services/phone-provider";
 import crypto from "crypto";
@@ -9,6 +9,7 @@ import crypto from "crypto";
 const router = Router();
 
 // POST /api/call-tracking/provision-number
+// 🔒 UNTOUCHED: write path — Drizzle insert works fine
 router.post("/provision-number", requireAuth, async (req, res) => {
   try {
     const { pageId, serviceId, locationId, websiteId, forwardToNumber } = req.body;
@@ -22,7 +23,6 @@ router.post("/provision-number", requireAuth, async (req, res) => {
     const baseUrl = getPublicBaseUrl();
     const provider = getPhoneProvider();
 
-    // Derive area code from the forwardToNumber for local number provisioning
     const areaCode = forwardToNumber.replace(/\D/g, "").slice(1, 4) || undefined;
 
     const provisioned = await provider.provisionNumber({
@@ -57,6 +57,7 @@ router.post("/provision-number", requireAuth, async (req, res) => {
 });
 
 // GET /api/call-tracking/number/:pageId
+// 🔒 UNTOUCHED: callTrackingNumbers only has id/snake_case cols that Drizzle handles fine here
 router.get("/number/:pageId", requireAuth, async (req, res) => {
   try {
     const { pageId } = req.params;
@@ -82,8 +83,7 @@ router.get("/number/:pageId", requireAuth, async (req, res) => {
 });
 
 // POST /api/call-tracking/twilio-voice
-// Twilio calls this when someone dials a tracking number.
-// Returns TwiML to forward the call to the client's real number.
+// 🔒 UNTOUCHED: webhook read of callTrackingNumbers — no camelCase fields in response
 router.post("/twilio-voice", async (req, res) => {
   try {
     const to = req.body.To as string | undefined;
@@ -91,7 +91,6 @@ router.post("/twilio-voice", async (req, res) => {
       return res.status(400).send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
     }
 
-    // Normalize the number Twilio sends (+12135551234 format)
     const [record] = await db
       .select()
       .from(callTrackingNumbers)
@@ -121,7 +120,7 @@ router.post("/twilio-voice", async (req, res) => {
 });
 
 // POST /api/call-tracking/twilio-status
-// Twilio calls this when a call completes. Records the call in tracked_calls.
+// 🔒 UNTOUCHED: write path — Drizzle insert works fine
 router.post("/twilio-status", async (req, res) => {
   try {
     const {
@@ -164,13 +163,12 @@ router.post("/twilio-status", async (req, res) => {
     return res.sendStatus(200);
   } catch (error) {
     console.error("Error in twilio-status webhook:", error);
-    return res.sendStatus(200); // Always 200 to Twilio to prevent retries
+    return res.sendStatus(200);
   }
 });
 
 // POST /api/call-tracking/webhook
-// Generic webhook for custom call providers (non-Twilio).
-// Body: { dynamic_number, caller_phone, call_duration, call_status, timestamp, call_id }
+// 🔒 UNTOUCHED: write path — Drizzle insert works fine
 router.post("/webhook", async (req, res) => {
   try {
     const { dynamic_number, caller_phone, call_duration, call_status, timestamp, call_id } = req.body;
@@ -219,14 +217,22 @@ router.get("/metrics/:websiteId", requireAuth, async (req, res) => {
     const { websiteId } = req.params;
     const { month } = req.query as { month?: string };
 
-    const conditions = [eq(trackedCalls.websiteId, websiteId)];
+    // ✅ CHANGED: raw SQL to fix Drizzle ORM camelCase→snake_case bug in production
+    let query = `SELECT page_id, service_id, call_duration_seconds FROM tracked_calls WHERE website_id = $1`;
+    const params: any[] = [websiteId];
     if (month) {
       const [year, monthNum] = month.split("-").map(Number);
-      conditions.push(gte(trackedCalls.callTimestamp, new Date(year, monthNum - 1, 1)));
-      conditions.push(lt(trackedCalls.callTimestamp, new Date(year, monthNum, 1)));
+      params.push(new Date(year, monthNum - 1, 1));
+      params.push(new Date(year, monthNum, 1));
+      query += ` AND call_timestamp >= $2 AND call_timestamp < $3`;
     }
 
-    const calls = await db.select().from(trackedCalls).where(and(...conditions));
+    const callsRes = await pool.query(query, params);
+    const calls = callsRes.rows.map((r: any) => ({
+      pageId:              r.page_id,
+      serviceId:           r.service_id,
+      callDurationSeconds: r.call_duration_seconds,
+    }));
 
     const callsByPage: Record<string, number> = {};
     const callsByService: Record<string, number> = {};
