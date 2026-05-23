@@ -494,17 +494,20 @@ function extractFaqSchema(contentHtml: string, pageUrl: string): string | null {
 function renderPageHtml(page: any, version: any, website: any, brand: any, navData: NavData = { statePages: [], cityPages: [], siblingServices: [] }, linkBaseOverride?: string): string {
   const brandName = brand?.name || website.name || website.domain;
   const primaryColor = brand?.primaryColor || "#2563eb";
-  const phone = brand?.phone || (website.settings as any)?.phone || "";
+
+  // ✅ CHANGED: read brand profile override fields first, fall back to website.settings, then system defaults.
+  // 🔒 UNTOUCHED: all other variable resolution, HTML structure, nav logic, schema.org, caching unchanged.
+  const phone = brand?.phoneOverride || brand?.phone || (website.settings as any)?.phone || "";
   const tagline = brand?.tagline || (website.settings as any)?.tagline || "";
-  const rawMainUrl = (website.settings as any)?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
+  const rawMainUrl = brand?.websiteUrl || (website.settings as any)?.mainWebsiteUrl || brand?.customFields?.websiteUrl || "";
   const mainWebsiteUrl = rawMainUrl && !/^https?:\/\//i.test(rawMainUrl) ? `https://${rawMainUrl}` : rawMainUrl;
-  const ctaHeading = (website.settings as any)?.ctaHeading || `Visit ${brandName}`;
-  const ctaText = (website.settings as any)?.ctaText || "See how we can help your business grow.";
-  const ctaButtonLabel = (website.settings as any)?.ctaButtonLabel || "Learn More";
-  const demoBannerUrl = (website.settings as any)?.demoBannerUrl || "";
-  const demoBannerHeading = (website.settings as any)?.demoBannerHeading || "See This Platform in Action";
-  const demoBannerSubtext = (website.settings as any)?.demoBannerSubtext || "This page was generated automatically. Want 100,000+ pages like it for your business?";
-  const demoBannerButtonLabel = (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
+  const ctaHeading = brand?.ctaHeading || (website.settings as any)?.ctaHeading || `Visit ${brandName}`;
+  const ctaText = brand?.ctaBody || (website.settings as any)?.ctaText || "See how we can help your business grow.";
+  const ctaButtonLabel = brand?.ctaButtonLabel || (website.settings as any)?.ctaButtonLabel || "Learn More";
+  const demoBannerUrl = brand?.demoBannerUrl || (website.settings as any)?.demoBannerUrl || "";
+  const demoBannerHeading = brand?.demoBannerHeading || (website.settings as any)?.demoBannerHeading || "See This Platform in Action";
+  const demoBannerSubtext = brand?.demoBannerSubtext || (website.settings as any)?.demoBannerSubtext || "This page was generated automatically. Want 100,000+ pages like it for your business?";
+  const demoBannerButtonLabel = brand?.demoBannerButton || (website.settings as any)?.demoBannerButtonLabel || "Try the Live Demo →";
 
   const parentDomain = (website.settings as any)?.parentDomain;
   const rawSettingsProxy = ((website.settings as any)?.proxyPath ?? "") as string;
