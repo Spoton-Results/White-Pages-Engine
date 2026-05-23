@@ -24,7 +24,9 @@ export default function PublishedPagesPage() {
   const search = useSearch();
   const params = new URLSearchParams(search);
   const { selectedAccountId } = useAccountContext();
-  const [overrideWebsite, setOverrideWebsite] = useState(params.get("websiteId") || "");
+  // ✅ CHANGED: capture the URL param once so we can use it to seed the override and fetch the website
+  const urlWebsiteId = params.get("websiteId") || "";
+  const [overrideWebsite, setOverrideWebsite] = useState(urlWebsiteId);
   const [searchText, setSearchText] = useState("");
   const [showDns, setShowDns] = useState(false);
   const [editSlugPage, setEditSlugPage] = useState<any>(null);
@@ -57,8 +59,26 @@ export default function PublishedPagesPage() {
     queryFn: () => api.get<any[]>(websitesUrl),
   });
 
+  // ✅ CHANGED: when the page was opened with ?websiteId=<id>, fetch that specific
+  // website directly so the Select always has a matching option — even when no
+  // account is selected in the global top bar and the websites list is empty or
+  // doesn't include this website.
+  const { data: urlWebsite } = useQuery({
+    queryKey: ["/api/websites", urlWebsiteId],
+    queryFn: () => api.get<any>(`/api/websites/${urlWebsiteId}`),
+    enabled: !!urlWebsiteId,
+  });
+
+  // ✅ CHANGED: merge the URL-param website into the list so the Select always
+  // has a matching option for the current value of overrideWebsite.
+  const websitesList = urlWebsite
+    ? (websites as any[]).some((w: any) => w.id === urlWebsite.id)
+      ? (websites as any[])
+      : [urlWebsite, ...(websites as any[])]
+    : (websites as any[]);
+
   // Reset website override when account context changes so we don't hold a stale id
-  const selectedWebsite = overrideWebsite || (websites as any[])[0]?.id || "";
+  const selectedWebsite = overrideWebsite || websitesList[0]?.id || "";
 
   const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
     queryKey: ["/api/pages/published", selectedWebsite, showDrafts],
@@ -127,7 +147,8 @@ export default function PublishedPagesPage() {
     slugMut.mutate({ id: editSlugPage.id, slug: trimmed });
   };
 
-  const currentWebsite = (websites as any[]).find((w: any) => w.id === selectedWebsite);
+  // ✅ CHANGED: use websitesList (merged list) instead of websites for currentWebsite lookup
+  const currentWebsite = websitesList.find((w: any) => w.id === selectedWebsite);
   const currentAccountId = currentWebsite?.accountId || "";
 
   const { data: tierServices = [] } = useQuery({
@@ -380,12 +401,13 @@ export default function PublishedPagesPage() {
 
         <div className="flex flex-col gap-2 bg-card rounded-lg border overflow-hidden">
           <div className="flex items-center gap-3 p-3 flex-wrap">
+            {/* 🔒 UNTOUCHED: Select UI is identical — only the data source (websitesList) changed */}
             <Select onValueChange={setOverrideWebsite} value={selectedWebsite}>
               <SelectTrigger className="w-52" data-testid="select-website">
                 <SelectValue placeholder="Select website" />
               </SelectTrigger>
               <SelectContent>
-                {(websites as any[]).map((w: any) => (
+                {websitesList.map((w: any) => (
                   <SelectItem key={w.id} value={w.id}>{w.settings?.parentDomain ? `${w.settings.parentDomain}${w.settings.proxyPath || ''}` : w.domain}</SelectItem>
                 ))}
               </SelectContent>
@@ -462,7 +484,7 @@ export default function PublishedPagesPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
             <Globe className="size-12 text-muted-foreground/30" />
             <p className="text-muted-foreground">
-              {(websites as any[]).length === 0
+              {websitesList.length === 0
                 ? "Select a client from the top bar to load websites"
                 : "Select a website to view published pages"}
             </p>
