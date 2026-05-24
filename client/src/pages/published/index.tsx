@@ -91,9 +91,10 @@ export default function PublishedPagesPage() {
     queryKey: ["/api/pages/published", selectedWebsite, showDrafts],
     queryFn: () => {
       if (!selectedWebsite) return Promise.resolve({ pages: [], total: 0 });
+      // ✅ CHANGED: use /pages/search (raw SQL route) instead of /pages (broken Drizzle route)
       const url = showDrafts
-        ? `/api/websites/${selectedWebsite}/pages?includeDrafts=true&limit=200`
-        : `/api/websites/${selectedWebsite}/pages?status=published&limit=200`;
+        ? `/api/websites/${selectedWebsite}/pages/search?includeDrafts=true&limit=200`
+        : `/api/websites/${selectedWebsite}/pages/search?status=published&limit=200`;
       return api.get<any>(url);
     },
     enabled: !!selectedWebsite,
@@ -101,7 +102,8 @@ export default function PublishedPagesPage() {
 
   const { data: reviewData } = useQuery({
     queryKey: ["/api/pages/review", selectedWebsite],
-    queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages?status=review&limit=1`) : Promise.resolve({ pages: [], total: 0 }),
+    // ✅ CHANGED: use /pages/search (raw SQL route) instead of /pages (broken Drizzle route)
+    queryFn: () => selectedWebsite ? api.get<any>(`/api/websites/${selectedWebsite}/pages/search?status=review&limit=1`) : Promise.resolve({ pages: [], total: 0 }),
     enabled: !!selectedWebsite,
   });
 
