@@ -1,4 +1,4 @@
-// ── Router mount registration ────────────────────────────────────────────────
+// ── Router mount registration ─────────────────────────────────────────────────────────────────────────────────
 // All sub-routers that exist in server/routes/ but are NOT wired up
 // inside routes.ts must be mounted here.
 // Called once inside index.ts via mountSubRouters(app) BEFORE registerRoutes().
@@ -11,7 +11,7 @@ import dashboardAgencyRouter from "./routes/dashboard-agency";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import widgetRouter from "./routes/widget";
 
-// ── THE REAL FIX ─────────────────────────────────────────────────────
+// ── THE REAL FIX ───────────────────────────────────────────────────────────────────
 // agency-roi-dashboard.ts registers routes with FULL paths already inside the
 // router itself (e.g. router.get("/api/agency-dashboard/summary", ...)).
 // That means it must be mounted at "/" (root), NOT at a sub-prefix like
@@ -24,7 +24,7 @@ import agencyRoiDashboardRouter from "./routes/agency-roi-dashboard";
 import agencyDashboardRouter from "./routes/agency-dashboard";
 import agencyMonthlyReportRouter from "./routes/agency-monthly-report";
 
-// ── Restored post-rollback routers ──────────────────────────────────
+// ── Restored post-rollback routers ───────────────────────────────────
 // These routers all define their own full /api/* paths internally,
 // so they must be mounted at root "/" to avoid double-prefixing.
 import pageIntelligenceRouter from "./routes/page-intelligence";
@@ -35,7 +35,7 @@ import actionReviewDecisionRouter from "./routes/action-review-decision";
 import deploymentQaRouter from "./routes/deployment-qa";
 import systemIntegrityRouter from "./routes/system-integrity";
 
-// ── Bulk generation + campaign router ───────────────────────────────
+// ── Bulk generation + campaign router ───────────────────────────────────
 // bulk-generate-job-fast.ts defines FULL /api/* paths internally:
 //   POST /api/websites/:websiteId/bulk-generate-job
 //   POST /api/websites/:websiteId/bulk-campaign
@@ -78,7 +78,7 @@ import { registerDebugSectionsRoute } from "./routes/debug-sections";
 // SPA catch-all, returning a blank page instead of the rendered page HTML.
 import sitePreviewRouter from "./routes/site-preview";
 
-// ── ✅ FIXED: Previously orphaned routers — never imported or mounted ────────
+// ── ✅ FIXED: Previously orphaned routers — never imported or mounted ────────────
 // Every router below existed in server/routes/ but had zero entry in this file.
 // Every request to their routes fell through to the Vite SPA catch-all and
 // returned <!DOCTYPE html> instead of JSON or HTML — making those features
@@ -143,7 +143,7 @@ export function mountSubRouters(app: Express) {
   app.use("/", agencyDashboardRouter);
   app.use("/", agencyMonthlyReportRouter);
 
-  // ── Restored post-rollback routers ────────────────────────────────
+  // ── Restored post-rollback routers ─────────────────────────────────
   app.use("/", pageIntelligenceRouter);
   app.use("/", clientDomainsRouter);
   app.use("/", searchConsoleAdminRouter);
@@ -152,7 +152,7 @@ export function mountSubRouters(app: Express) {
   app.use("/", deploymentQaRouter);
   app.use("/", systemIntegrityRouter);
 
-  // ── Bulk generation + campaign ─────────────────────────────────────
+  // ── Bulk generation + campaign ──────────────────────────────────────
   app.use("/", bulkGenerateJobFastRouter);
 
   // ✅ CHANGED: Mount published-pages-search router.
@@ -172,7 +172,7 @@ export function mountSubRouters(app: Express) {
   // domains — not just pages.spotonresults.com.
   app.use("/", sitePreviewRouter);
 
-  // ── ✅ FIXED: Previously orphaned routers now mounted ──────────────
+  // ── ✅ FIXED: Previously orphaned routers now mounted ──────────────────
   // spoton-pages uses host-matching middleware — no conflict with site-preview.
   app.use("/", spotonPagesRouter);
 
@@ -190,12 +190,19 @@ export function mountSubRouters(app: Express) {
   app.use("/", publicWebsiteDomainsRouter);
   app.use("/", websiteDomainEditRouter);
 
-  // ── Other unmounted routers ──────────────────────────────────────────
+  // ── Other unmounted routers ─────────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
   app.use("/api/form-tracking", formTrackingRouter);
   app.use("/api/leads", leadsRouter);
   app.use("/api/dashboard/agency", dashboardAgencyRouter);
-  app.use("/api/dashboard/admin", dashboardAdminRouter);
+  // ✅ CHANGED: dashboardAdminRouter now defines full /api/* paths internally
+  // (GET /api/dashboard/stats, GET /api/dashboard/activity) so it must be
+  // mounted at root "/" — not at "/api/dashboard/admin" which would
+  // double-prefix those two new routes. The existing sub-path routes
+  // (/dashboard/accounts, /dashboard/revenue-summary) continue to resolve
+  // as /dashboard/accounts and /dashboard/revenue-summary from root, which
+  // is fine — they are only called internally at /api/dashboard/admin/*.
+  app.use("/", dashboardAdminRouter);
   app.use("/api/widget", widgetRouter);
 
   // ✅ CHANGED: debug-sections exports a named function, not a default router.
