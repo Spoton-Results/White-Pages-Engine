@@ -19,16 +19,12 @@ COPY server ./server
 COPY shared ./shared
 # ✅ UNCHANGED: added in previous commit
 COPY script ./script
-# ✅ CHANGED: scripts/ (plural) was never copied — caused ERR_MODULE_NOT_FOUND
-# for /app/scripts/migrate.ts when `npm run db:migrate` ran
+# ✅ UNCHANGED: scripts/ (plural) copied for migrate.ts
 COPY scripts ./scripts
 COPY drizzle.config.ts ./
 
-# ✅ CHANGED: pre-create migrations dir in the builder stage.
-# db:migrate exits immediately when DATABASE_URL is absent at build time,
-# so /app/migrations is never created — causing the production stage's
-# COPY --from=builder /app/migrations/. to fail with "not found".
-# mkdir -p guarantees the directory exists in this layer regardless.
+# ✅ UNCHANGED: pre-create migrations dir so COPY never fails when DATABASE_URL
+# is absent at build time and db:migrate exits without creating the directory.
 RUN mkdir -p /app/migrations
 
 # Build TypeScript → JavaScript
@@ -62,6 +58,17 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:5000/_health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
-# Run migrations on startup, then start app
+# ✅ CHANGED: removed "npx drizzle-kit migrate &&" from CMD.
+# drizzle-kit is a devDependency — it is NOT installed in the production stage
+# (npm ci --only=production). Running it here caused "Cannot find module
+# 'drizzle-kit'" crash-loops on every container start.
+#
+# Migrations must be run as a Railway Deploy Command BEFORE the container
+# starts receiving traffic. Set this in Railway:
+#   Service → Settings → Deploy → Deploy Command:
+#   npx drizzle-kit migrate
+#
+# Railway injects DATABASE_URL into that command's environment, so it works
+# correctly there. The container itself just starts the app.
 ENTRYPOINT ["/sbin/dumb-init", "--"]
-CMD sh -c "npx drizzle-kit migrate && node dist/server/index.js"
+CMD ["node", "dist/index.cjs"]
