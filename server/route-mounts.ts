@@ -62,6 +62,16 @@ import coreApiRouter from "./routes/core-api";
 // causing the Published Pages tab to always show "No published pages yet."
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 
+// ✅ CHANGED: legacy-public-url-redirect intercepts GET /sites/:domain/:slug
+// on public (non-admin, non-localhost) hosts and 301-redirects to the
+// canonical https://host/slug URL.  Admin and localhost requests fall through
+// via next() so sitePreviewRouter below still handles admin previews.
+// Must be mounted BEFORE sitePreviewRouter so the redirect fires first.
+// ✅ CHANGED: debug-sections exports a named function, not a default router.
+//   registerDebugSectionsRoute(app) is called directly inside mountSubRouters.
+import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
+import { registerDebugSectionsRoute } from "./routes/debug-sections";
+
 // ✅ FIXED: site-preview handles GET /sites/:domain/:slug for ALL client domains.
 // Previously only pages.spotonresults.com was served by spoton-pages.ts.
 // Any other domain (e.g. pages.elitepages.io) fell through to the Vite
@@ -152,6 +162,11 @@ export function mountSubRouters(app: Express) {
   // filtering, search, and facets.
   app.use("/", publishedPagesSearchRouter);
 
+  // ✅ CHANGED: legacy-public-url-redirect mounted BEFORE sitePreviewRouter.
+  // Public /sites/:domain/:slug requests get 301-redirected to canonical URL.
+  // Admin/localhost requests fall through via next() to sitePreviewRouter.
+  app.use("/", legacyPublicUrlRedirectRouter);
+
   // ✅ CHANGED: Mount site-preview router.
   // GET /sites/:domain/:slug now serves rendered page HTML for ALL client
   // domains — not just pages.spotonresults.com.
@@ -182,4 +197,9 @@ export function mountSubRouters(app: Express) {
   app.use("/api/dashboard/agency", dashboardAgencyRouter);
   app.use("/api/dashboard/admin", dashboardAdminRouter);
   app.use("/api/widget", widgetRouter);
+
+  // ✅ CHANGED: debug-sections exports a named function, not a default router.
+  // registerDebugSectionsRoute(app) registers GET /api/debug/page-sections/:websiteId/:slug
+  // directly on the Express app — mounting it via app.use() would crash.
+  registerDebugSectionsRoute(app);
 }
