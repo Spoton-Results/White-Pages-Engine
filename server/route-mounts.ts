@@ -62,6 +62,12 @@ import coreApiRouter from "./routes/core-api";
 // causing the Published Pages tab to always show "No published pages yet."
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 
+// ✅ FIXED: site-preview handles GET /sites/:domain/:slug for ALL client domains.
+// Previously only pages.spotonresults.com was served by spoton-pages.ts.
+// Any other domain (e.g. pages.elitepages.io) fell through to the Vite
+// SPA catch-all, returning a blank page instead of the rendered page HTML.
+import sitePreviewRouter from "./routes/site-preview";
+
 export function mountSubRouters(app: Express) {
   // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
   // auth-live.ts was previously never imported or mounted anywhere.
@@ -97,6 +103,11 @@ export function mountSubRouters(app: Express) {
   // This is the route the Published Pages tab calls for all page listing,
   // filtering, search, and facets.
   app.use("/", publishedPagesSearchRouter);
+
+  // ✅ CHANGED: Mount site-preview router.
+  // GET /sites/:domain/:slug now serves rendered page HTML for ALL client
+  // domains — not just pages.spotonresults.com.
+  app.use("/", sitePreviewRouter);
 
   // ── Other unmounted routers ──────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
