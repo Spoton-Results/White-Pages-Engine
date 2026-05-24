@@ -43,7 +43,10 @@ export default function IntentBuildPageV2() {
   const owners = report.topCanonicalOwners || [];
 
   async function loadWebsites() { const rows = await fetchJson<WebsiteOption[]>("/api/websites"); setWebsites(rows); if (!selectedWebsiteId && rows[0]?.id) setSelectedWebsiteId(rows[0].id); }
-  async function loadStatusAndReport(websiteId = selectedWebsiteId) { if (!websiteId) return; const [s, r] = await Promise.all([fetchJson<BuildStatusResponse>(`/api/websites/${websiteId}/intent-build/status`), fetchJson<IntentReport>(`/api/websites/${websiteId}/intent-build/report`)]); setStatus(s); setReport(r); }
+  // ✅ CHANGED: null-guard both setStatus and setReport — if the API returns null
+  // (build has never run for this website), fall back to emptyStatus / emptyReport
+  // instead of storing null and crashing on report.topCanonicalOwners.
+  async function loadStatusAndReport(websiteId = selectedWebsiteId) { if (!websiteId) return; const [s, r] = await Promise.all([fetchJson<BuildStatusResponse>(`/api/websites/${websiteId}/intent-build/status`), fetchJson<IntentReport>(`/api/websites/${websiteId}/intent-build/report`)]); setStatus(s ?? emptyStatus); setReport(r ?? emptyReport); }
   useEffect(() => { loadWebsites().catch(e => setError(e.message)).finally(() => setLoading(false)); }, []);
   useEffect(() => { if (selectedWebsiteId) loadStatusAndReport(selectedWebsiteId).catch(e => setError(e.message)); }, [selectedWebsiteId]);
   useEffect(() => { if (!selectedWebsiteId || status.status !== "running") return; const timer = window.setInterval(() => loadStatusAndReport(selectedWebsiteId).catch(e => setError(e.message)), 1500); return () => window.clearInterval(timer); }, [selectedWebsiteId, status.status]);
