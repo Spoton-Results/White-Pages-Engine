@@ -6,6 +6,14 @@ buildCommand = "npm run build"
 NIXPACKS_NODE_VERSION = "20"
 
 [deploy]
-startCommand = "npx drizzle-kit migrate && npm run start"
+# ✅ CHANGED: removed "npx drizzle-kit migrate &&" from startCommand.
+# drizzle-kit is a devDependency — nixpacks production installs do not
+# include it, so the migrate call crashed on every container start,
+# preventing the app from ever booting.
+#
+# If you need to run migrations before deploy, set a Railway Pre-deploy
+# Command in the dashboard: npx drizzle-kit migrate
+# (Railway injects DATABASE_URL there so it works correctly.)
+startCommand = "npm run start"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
