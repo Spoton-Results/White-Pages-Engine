@@ -17,6 +17,9 @@ RUN npm ci
 COPY client ./client
 COPY server ./server
 COPY shared ./shared
+# ✅ CHANGED: script/ was never copied — caused ERR_MODULE_NOT_FOUND for
+# /app/script/build.ts when `npm run build` ran `tsx script/build.ts`
+COPY script ./script
 COPY drizzle.config.ts ./
 
 # Build TypeScript → JavaScript
