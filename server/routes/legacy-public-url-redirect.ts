@@ -31,6 +31,14 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   const path = req.path || "/";
   if (!path.startsWith("/sites/")) return next();
 
+  // ✅ CHANGED: Admin preview requests (eyeball icon) originate from admin.* or localhost.
+  // These must reach the page-serving Express route — NOT be redirected to the live domain.
+  // 🔒 UNTOUCHED: all redirect logic below is identical for non-admin hosts.
+  const requestHost = normalizePublicHost(req.headers.host || "");
+  if (requestHost.startsWith("admin.") || requestHost.includes("localhost") || requestHost.includes("127.0.0.1")) {
+    return next();
+  }
+
   const remainder = path.replace(/^\/sites\//, "");
   const parts = remainder.split("/");
   const host = normalizePublicHost(decodeURIComponent(parts.shift() || ""));
