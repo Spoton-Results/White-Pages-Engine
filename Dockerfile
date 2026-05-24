@@ -17,15 +17,18 @@ RUN npm ci
 COPY client ./client
 COPY server ./server
 COPY shared ./shared
-# ✅ CHANGED: script/ was never copied — caused ERR_MODULE_NOT_FOUND for
-# /app/script/build.ts when `npm run build` ran `tsx script/build.ts`
+# ✅ UNCHANGED: added in previous commit
 COPY script ./script
+# ✅ CHANGED: scripts/ (plural) was never copied — caused ERR_MODULE_NOT_FOUND
+# for /app/scripts/migrate.ts when `npm run db:migrate` ran
+COPY scripts ./scripts
 COPY drizzle.config.ts ./
 
 # Build TypeScript → JavaScript
 RUN npm run build
 
 # Run database migrations to generate migration files
+# (|| true so a missing DB env at build time doesn't fail the image)
 RUN npm run db:migrate || true
 
 # Production runner stage
@@ -40,7 +43,10 @@ RUN npm ci --only=production
 # Copy runtime files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle.config.ts ./
-COPY --from=builder /app/migrations ./migrations
+# ✅ CHANGED: pre-create migrations dir so COPY never fails even if
+# db:migrate produced no files (e.g. no DB_URL at build time)
+RUN mkdir -p ./migrations
+COPY --from=builder /app/migrations/. ./migrations/
 
 # Expose port
 EXPOSE 5000
