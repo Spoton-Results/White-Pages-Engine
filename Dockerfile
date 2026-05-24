@@ -24,6 +24,13 @@ COPY script ./script
 COPY scripts ./scripts
 COPY drizzle.config.ts ./
 
+# ✅ CHANGED: pre-create migrations dir in the builder stage.
+# db:migrate exits immediately when DATABASE_URL is absent at build time,
+# so /app/migrations is never created — causing the production stage's
+# COPY --from=builder /app/migrations/. to fail with "not found".
+# mkdir -p guarantees the directory exists in this layer regardless.
+RUN mkdir -p /app/migrations
+
 # Build TypeScript → JavaScript
 RUN npm run build
 
@@ -43,7 +50,7 @@ RUN npm ci --only=production
 # Copy runtime files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle.config.ts ./
-# ✅ CHANGED: pre-create migrations dir so COPY never fails even if
+# ✅ UNCHANGED: pre-create migrations dir so COPY never fails even if
 # db:migrate produced no files (e.g. no DB_URL at build time)
 RUN mkdir -p ./migrations
 COPY --from=builder /app/migrations/. ./migrations/
