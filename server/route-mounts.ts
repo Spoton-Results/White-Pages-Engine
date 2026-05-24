@@ -56,6 +56,12 @@ import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 // app to appear empty (frontend parsed HTML as empty JSON data).
 import coreApiRouter from "./routes/core-api";
 
+// ✅ FIXED: published-pages-search was NEVER imported or mounted.
+// GET /api/websites/:websiteId/pages/search was falling through to the
+// Vite SPA catch-all and returning <!DOCTYPE html> instead of JSON —
+// causing the Published Pages tab to always show "No published pages yet."
+import publishedPagesSearchRouter from "./routes/published-pages-search";
+
 export function mountSubRouters(app: Express) {
   // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
   // auth-live.ts was previously never imported or mounted anywhere.
@@ -84,6 +90,13 @@ export function mountSubRouters(app: Express) {
 
   // ── Bulk generation + campaign ─────────────────────────────────────
   app.use("/", bulkGenerateJobFastRouter);
+
+  // ✅ CHANGED: Mount published-pages-search router.
+  // GET /api/websites/:websiteId/pages/search was never mounted —
+  // falling through to Vite catch-all, returning HTML instead of JSON.
+  // This is the route the Published Pages tab calls for all page listing,
+  // filtering, search, and facets.
+  app.use("/", publishedPagesSearchRouter);
 
   // ── Other unmounted routers ──────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
