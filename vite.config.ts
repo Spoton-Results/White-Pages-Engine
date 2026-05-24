@@ -3,14 +3,16 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-import { metaImagesPlugin } from "./vite-plugin-meta-images";
+// ✅ CHANGED: removed import of metaImagesPlugin — Replit-only plugin,
+// reads REPLIT_INTERNAL_APP_DOMAIN / REPLIT_DEV_DOMAIN which don't exist
+// on Railway, so it was a no-op that also broke the Docker build.
 
 export default defineConfig({
   plugins: [
     react(),
     runtimeErrorOverlay(),
     tailwindcss(),
-    metaImagesPlugin(),
+    // ✅ CHANGED: removed metaImagesPlugin() — see above
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
