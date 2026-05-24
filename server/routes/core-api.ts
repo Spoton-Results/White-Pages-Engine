@@ -247,6 +247,107 @@ router.delete("/api/locations/:id", requireAuth, async (req: Request, res: Respo
   return res.json({ message: "Location deleted" });
 });
 
+// ✅ ADDED: Account-scoped location routes used by the LocationsPage tab.
+//   NOTE: specific action routes (bulk, count, ai-suggest, load-standard) MUST be
+//   registered BEFORE GET /api/accounts/:accountId/locations so Express does not
+//   treat action path segments as :id params.
+
+// GET  /api/accounts/:accountId/locations/count
+router.get("/api/accounts/:accountId/locations/count", requireAuth, async (req: Request, res: Response) => {
+  const { type, search, cityTier } = req.query as Record<string, string>;
+  const count = await storage.countLocations(
+    req.params.accountId,
+    type || undefined,
+    search || undefined,
+    cityTier ? parseInt(cityTier) : undefined,
+  );
+  return res.json({ count });
+});
+
+// POST /api/accounts/:accountId/locations/bulk  ← THE BROKEN IMPORT ROUTE
+router.post("/api/accounts/:accountId/locations/bulk", requireAuth, async (req: Request, res: Response) => {
+  const { locations: items } = req.body as { locations?: any[] };
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "locations array is required and must not be empty" });
+  }
+  // Attach accountId to every item before passing to storage
+  const withAccount = items.map((loc: any) => ({ ...loc, accountId: req.params.accountId }));
+  // Validate each item — skip malformed rows, collect how many are skipped
+  const validItems: any[] = [];
+  let skipped = 0;
+  for (const loc of withAccount) {
+    const parsed = insertLocationSchema.safeParse(loc);
+    if (parsed.success) {
+      validItems.push(parsed.data);
+    } else {
+      skipped++;
+    }
+  }
+  if (validItems.length === 0) {
+    return res.status(400).json({ message: "No valid location rows found in payload", skipped });
+  }
+  // bulkCreateLocations deduplicates by slug and returns { inserted }
+  const result = await storage.bulkCreateLocations(req.params.accountId, validItems);
+  // Rows deduplicated by bulkCreateLocations count toward skipped too
+  const dedupSkipped = validItems.length - result.inserted;
+  return res.status(201).json({
+    inserted: result.inserted,
+    skipped: skipped + dedupSkipped,
+  });
+});
+
+// POST /api/accounts/:accountId/locations/ai-suggest
+router.post("/api/accounts/:accountId/locations/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+  const { stateCode, count: requestedCount } = req.body as { stateCode?: string; count?: number };
+  if (!stateCode?.trim()) {
+    return res.status(400).json({ message: "stateCode is required" });
+  }
+  try {
+    const n = Math.min(requestedCount ?? 10, 50);
+    const prompt = `You are a local SEO expert. List the top ${n} cities by population in the US state with abbreviation "${stateCode.toUpperCase()}". For each city provide its name, state code, approximate population, and a cityTier (1 = top 5 largest, 2 = mid-size, 3 = small).
+
+Respond with ONLY valid JSON array:
+[{"name":"City Name","stateCode":"XX","population":123456,"cityTier":1}]`;
+    const aiResponse = await callAI({ prompt, maxTokens: 1200, temperature: 0.3 });
+    const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const suggestions = JSON.parse(raw) as any[];
+    return res.json({ suggestions: Array.isArray(suggestions) ? suggestions : [] });
+  } catch (err: any) {
+    console.error("[locations/ai-suggest]", err);
+    return res.status(500).json({ message: err.message ?? "AI suggestion failed" });
+  }
+});
+
+// POST /api/accounts/:accountId/locations/load-standard
+router.post("/api/accounts/:accountId/locations/load-standard", requireAuth, async (req: Request, res: Response) => {
+  // Stub: a real implementation would seed from a bundled US cities dataset.
+  // Returns the same shape as /bulk so the frontend can consume it uniformly.
+  return res.json({ inserted: 0, skipped: 0, message: "Standard locations load not yet implemented — use CSV bulk import instead." });
+});
+
+// GET  /api/accounts/:accountId/locations  (paginated list)
+router.get("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
+  const { type, orderBy, search, cityTier, limit, offset } = req.query as Record<string, string>;
+  const locationList = await storage.getLocations(
+    req.params.accountId,
+    type || undefined,
+    orderBy || undefined,
+    limit ? parseInt(limit) : undefined,
+    offset ? parseInt(offset) : undefined,
+    search || undefined,
+    cityTier ? parseInt(cityTier) : undefined,
+  );
+  return res.json(locationList);
+});
+
+// POST /api/accounts/:accountId/locations  (single create)
+router.post("/api/accounts/:accountId/locations", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertLocationSchema.safeParse({ ...req.body, accountId: req.params.accountId });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+  const location = await storage.createLocation(parsed.data);
+  return res.status(201).json(location);
+});
+
 // ── Services ──────────────────────────────────────────────────────────────────
 // ✅ CHANGED: storage.getServices() takes accountId (not websiteId).
 //   Resolve websiteId → accountId first so the DB query hits account_id correctly.
@@ -503,7 +604,7 @@ router.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Requ
 });
 
 router.delete("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
-  // Deletes ALL blueprints for this account (used by "Delete All" button on BlueprintsPage).
+  // Deletes ALL blueprints for this account (used by "Delete All" button on BlueprintsPage)
   const blueprints = await storage.getBlueprints(req.params.accountId);
   for (const bp of blueprints) {
     await storage.deleteBlueprint(bp.id).catch(() => {});
