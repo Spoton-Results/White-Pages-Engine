@@ -593,20 +593,48 @@ export async function getPagesForIndexing(websiteId: string, offset: number, lim
   return { rows, total: Number(value) };
 }
 
+// ✅ CHANGED: use raw SQL to avoid Drizzle ORM camelCase→snake_case bug in production
+// website_id and is_draft columns fail to map correctly in compiled production builds,
+// causing Published Pages tab to always return 0 results.
+// 🔒 UNTOUCHED: function signature, return type (Page[]), all opts params, all other page functions
 export async function getPages(websiteId: string, opts?: { status?: string; limit?: number; offset?: number; includeDrafts?: boolean }): Promise<Page[]> {
-  // Phase 6 — by default, hide drafts (is_draft=true) from regular listings.
-  // Pass includeDrafts=true (or status='draft') to surface them.
   const includeDrafts = opts?.includeDrafts === true || opts?.status === "draft";
-  const conds: any[] = [eq(pages.websiteId, websiteId)];
-  if (opts?.status) conds.push(eq(pages.status, opts.status as any));
-  if (!includeDrafts) conds.push(or(eq(pages.isDraft, false), sql`${pages.isDraft} IS NULL`));
-  return db
-    .select()
-    .from(pages)
-    .where(conds.length === 1 ? conds[0] : and(...conds))
-    .orderBy(desc(pages.updatedAt))
-    .limit(opts?.limit || 100)
-    .offset(opts?.offset || 0);
+  const params: any[] = [websiteId];
+  let query = `SELECT * FROM pages WHERE website_id = $1`;
+  if (opts?.status) {
+    params.push(opts.status);
+    query += ` AND status = $${params.length}`;
+  }
+  if (!includeDrafts) {
+    query += ` AND (is_draft = false OR is_draft IS NULL)`;
+  }
+  query += ` ORDER BY updated_at DESC`;
+  params.push(opts?.limit || 100);
+  query += ` LIMIT $${params.length}`;
+  params.push(opts?.offset || 0);
+  query += ` OFFSET $${params.length}`;
+  const res = await pool.query(query, params);
+  return res.rows.map((r: any) => ({
+    ...r,
+    websiteId: r.website_id,
+    pageType: r.page_type,
+    locationId: r.location_id,
+    serviceId: r.service_id,
+    industryId: r.industry_id,
+    queryClusterId: r.query_cluster_id,
+    blueprintId: r.blueprint_id,
+    isDraft: r.is_draft,
+    metaDescription: r.meta_description,
+    wordCount: r.word_count,
+    qualityScore: r.quality_score,
+    scoreBreakdown: r.score_breakdown,
+    lastEvaluatedAt: r.last_evaluated_at,
+    trustScore: r.trust_score,
+    evidenceScore: r.evidence_score,
+    contentQualityScore: r.content_quality_score,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  })) as Page[];
 }
 
 export async function getPage(id: string): Promise<Page | undefined> {
