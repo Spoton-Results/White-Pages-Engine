@@ -1842,3 +1842,133 @@ export async function getZeroImpressionTier1Pages(
   `);
   return (rows as any).rows ?? [];
 }
+
+// ─── Missing Exports (previously causing 500s) ────────────────────────────────
+// ✅ CHANGED: added 8 missing exported functions that callers import but did not exist.
+// 🔒 UNTOUCHED: every function above this section — zero modifications to existing logic.
+
+// publishPage — set status to "published", sync website published count
+export async function publishPage(pageId: string): Promise<Page | undefined> {
+  const [row] = await db.update(pages)
+    .set({ status: "published", isDraft: false, updatedAt: new Date() } as any)
+    .where(eq(pages.id, pageId))
+    .returning();
+  if (row) await syncWebsitePublishedCount(row.websiteId);
+  return row;
+}
+
+// unpublishPage — set status back to "draft", sync website published count
+export async function unpublishPage(pageId: string): Promise<Page | undefined> {
+  const [row] = await db.update(pages)
+    .set({ status: "draft", isDraft: true, updatedAt: new Date() } as any)
+    .where(eq(pages.id, pageId))
+    .returning();
+  if (row) await syncWebsitePublishedCount(row.websiteId);
+  return row;
+}
+
+// getAccountUsers — alias of getUsersByAccount for callers that use this name
+export async function getAccountUsers(accountId: string): Promise<User[]> {
+  return getUsersByAccount(accountId);
+}
+
+// updateWebsiteSettings — update only the settings JSON column on a website row
+export async function updateWebsiteSettings(websiteId: string, settings: Record<string, unknown>): Promise<Website | undefined> {
+  return updateWebsite(websiteId, { settings } as any);
+}
+
+// getIndustriesByAccount — alias of getIndustries for callers that use this name
+export async function getIndustriesByAccount(accountId: string): Promise<Industry[]> {
+  return getIndustries(accountId);
+}
+
+// recomputeBankCompleteness — recalculate variation_bank_completeness for all services
+// on a website by counting distinct section_names per service and scoring completeness.
+export async function recomputeBankCompleteness(websiteId: string): Promise<void> {
+  // Pull every service's section counts from content_variation_banks
+  const res = await pool.query(
+    `SELECT
+       service,
+       COUNT(DISTINCT section_name)::int                          AS section_count,
+       SUM(jsonb_array_length(variations))::int                   AS total_variations,
+       ROUND(AVG(jsonb_array_length(variations))::numeric, 2)     AS avg_variations
+     FROM content_variation_banks
+     WHERE website_id = $1
+     GROUP BY service`,
+    [websiteId]
+  );
+
+  const KNOWN_SECTIONS = ["intro", "how_it_works", "benefits", "faq", "cta",
+    "local_context", "use_case", "proof_trust", "pain_point", "local_stat"];
+  const TOTAL_SECTIONS = KNOWN_SECTIONS.length;
+
+  for (const r of res.rows) {
+    // Fetch which specific section_names exist for this service
+    const sectRes = await pool.query(
+      `SELECT DISTINCT section_name FROM content_variation_banks WHERE website_id = $1 AND service = $2`,
+      [websiteId, r.service]
+    );
+    const existing = new Set(sectRes.rows.map((s: any) => s.section_name));
+
+    const has = (name: string) => existing.has(name);
+    const completenessScore = Math.round((existing.size / TOTAL_SECTIONS) * 100);
+    const isEligibleForTier1 = completenessScore >= 80 && Number(r.avg_variations) >= 3;
+
+    await pool.query(
+      `INSERT INTO variation_bank_completeness
+         (id, website_id, service,
+          has_intro, has_how_it_works, has_benefits, has_faq, has_cta,
+          has_local_context, has_use_case, has_proof_trust, has_pain_point, has_local_stat,
+          total_variations, avg_variations_per_section, completeness_score, is_eligible_for_tier1, last_computed_at)
+       VALUES
+         (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+          $13, $14, $15, $16, NOW())
+       ON CONFLICT (website_id, service) DO UPDATE SET
+         has_intro                  = EXCLUDED.has_intro,
+         has_how_it_works           = EXCLUDED.has_how_it_works,
+         has_benefits               = EXCLUDED.has_benefits,
+         has_faq                    = EXCLUDED.has_faq,
+         has_cta                    = EXCLUDED.has_cta,
+         has_local_context          = EXCLUDED.has_local_context,
+         has_use_case               = EXCLUDED.has_use_case,
+         has_proof_trust            = EXCLUDED.has_proof_trust,
+         has_pain_point             = EXCLUDED.has_pain_point,
+         has_local_stat             = EXCLUDED.has_local_stat,
+         total_variations           = EXCLUDED.total_variations,
+         avg_variations_per_section = EXCLUDED.avg_variations_per_section,
+         completeness_score         = EXCLUDED.completeness_score,
+         is_eligible_for_tier1      = EXCLUDED.is_eligible_for_tier1,
+         last_computed_at           = NOW()`,
+      [
+        websiteId, r.service,
+        has("intro"), has("how_it_works"), has("benefits"), has("faq"), has("cta"),
+        has("local_context"), has("use_case"), has("proof_trust"), has("pain_point"), has("local_stat"),
+        r.total_variations, r.avg_variations, completenessScore, isEligibleForTier1,
+      ]
+    );
+  }
+}
+
+// createTrackedLead — insert a lead; accepts optional tracking metadata fields
+// alongside the standard InsertLead shape so callers can pass utm/referrer data.
+export async function createTrackedLead(data: InsertLead & {
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  referrerUrl?: string;
+}): Promise<Lead> {
+  // Strip tracking keys that are not part of the DB schema before inserting.
+  // Callers may log these separately; here we just ensure the insert doesn't fail.
+  const { utmSource, utmMedium, utmCampaign, referrerUrl, ...leadData } = data;
+  return createLead(leadData);
+}
+
+// getLatestPageVersion — return the highest-version row for a page (most recently created)
+export async function getLatestPageVersion(pageId: string): Promise<PageVersion | undefined> {
+  const [row] = await db.select()
+    .from(pageVersions)
+    .where(eq(pageVersions.pageId, pageId))
+    .orderBy(desc(pageVersions.version))
+    .limit(1);
+  return row;
+}
