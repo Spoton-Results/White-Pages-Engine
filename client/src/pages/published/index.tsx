@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,7 +77,14 @@ export default function PublishedPagesPage() {
       : [urlWebsite, ...(websites as any[])]
     : (websites as any[]);
 
-  // Reset website override when account context changes so we don't hold a stale id
+  // ✅ CHANGED: auto-select the first website when the list loads and no override is set
+  useEffect(() => {
+    if (!overrideWebsite && websitesList.length > 0) {
+      setOverrideWebsite(websitesList[0].id);
+    }
+  }, [websitesList.length, overrideWebsite]);
+
+  // 🔒 UNTOUCHED: fallback still in place for the first render before effect fires
   const selectedWebsite = overrideWebsite || websitesList[0]?.id || "";
 
   const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
