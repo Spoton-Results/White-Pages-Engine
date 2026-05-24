@@ -68,6 +68,54 @@ import publishedPagesSearchRouter from "./routes/published-pages-search";
 // SPA catch-all, returning a blank page instead of the rendered page HTML.
 import sitePreviewRouter from "./routes/site-preview";
 
+// ── ✅ FIXED: Previously orphaned routers — never imported or mounted ────────
+// Every router below existed in server/routes/ but had zero entry in this file.
+// Every request to their routes fell through to the Vite SPA catch-all and
+// returned <!DOCTYPE html> instead of JSON or HTML — making those features
+// completely non-functional.
+
+// spoton-pages.ts: Live production page serving for spotonresults.com /
+// pages.spotonresults.com. Uses host-matching middleware (not path params),
+// so it does NOT conflict with site-preview.ts (/sites/:domain/:slug).
+// Also provides /api/spoton-pages-repair-copy and /api/spoton-pages-debug/:slug.
+import spotonPagesRouter from "./routes/spoton-pages";
+
+// onboarding-live.ts: Live onboarding flow for new accounts/agencies.
+import onboardingLiveRouter from "./routes/onboarding-live";
+
+// nexus-stripe.ts: Stripe billing — subscriptions, webhooks, payment routes.
+import nexusStripeRouter from "./routes/nexus-stripe";
+
+// action-review-active.ts: Active action review queue.
+import actionReviewActiveRouter from "./routes/action-review-active";
+
+// autonomous-control-plane.ts: Autonomous AI control panel routes.
+import autonomousControlPlaneRouter from "./routes/autonomous-control-plane";
+
+// bank-health.ts: Variation bank health check endpoints (23KB — full diagnostics).
+import bankHealthRouter from "./routes/bank-health";
+
+// client-domain-homepage.ts: Client domain homepage serving.
+import clientDomainHomepageRouter from "./routes/client-domain-homepage";
+
+// intent-governance.ts: Intent governance rule management.
+import intentGovernanceRouter from "./routes/intent-governance";
+
+// intent-governance-run.ts: Intent governance execution/run endpoints.
+import intentGovernanceRunRouter from "./routes/intent-governance-run";
+
+// jobs.ts: Generation jobs management (list, status, cancel).
+import jobsRouter from "./routes/jobs";
+
+// public-pages-enhanced.ts: Enhanced public page serving with extra metadata.
+import publicPagesEnhancedRouter from "./routes/public-pages-enhanced";
+
+// public-website-domains.ts: Public domain resolution for client sites.
+import publicWebsiteDomainsRouter from "./routes/public-website-domains";
+
+// website-domain-edit.ts: Website domain editing endpoints.
+import websiteDomainEditRouter from "./routes/website-domain-edit";
+
 export function mountSubRouters(app: Express) {
   // ── AUTH FIRST — must be mounted before any router that might intercept /api/auth/* ──
   // auth-live.ts was previously never imported or mounted anywhere.
@@ -108,6 +156,24 @@ export function mountSubRouters(app: Express) {
   // GET /sites/:domain/:slug now serves rendered page HTML for ALL client
   // domains — not just pages.spotonresults.com.
   app.use("/", sitePreviewRouter);
+
+  // ── ✅ FIXED: Previously orphaned routers now mounted ──────────────
+  // spoton-pages uses host-matching middleware — no conflict with site-preview.
+  app.use("/", spotonPagesRouter);
+
+  // Onboarding, billing, and feature routers.
+  app.use("/", onboardingLiveRouter);
+  app.use("/", nexusStripeRouter);
+  app.use("/", actionReviewActiveRouter);
+  app.use("/", autonomousControlPlaneRouter);
+  app.use("/", bankHealthRouter);
+  app.use("/", clientDomainHomepageRouter);
+  app.use("/", intentGovernanceRouter);
+  app.use("/", intentGovernanceRunRouter);
+  app.use("/", jobsRouter);
+  app.use("/", publicPagesEnhancedRouter);
+  app.use("/", publicWebsiteDomainsRouter);
+  app.use("/", websiteDomainEditRouter);
 
   // ── Other unmounted routers ──────────────────────────────────────────
   app.use("/api/call-tracking", callTrackingRouter);
