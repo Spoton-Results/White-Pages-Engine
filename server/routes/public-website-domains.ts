@@ -28,6 +28,31 @@ function shouldIgnore(req: Request) {
   if (path.startsWith("/assets")) return true;
   if (path.startsWith("/@vite") || path.startsWith("/src/")) return true;
   if (path === "/favicon.ico") return true;
+
+  // Admin/React app routes must never be treated as public generated-page
+  // slugs. Otherwise /login, /dashboard, etc. perform public-page DB lookups
+  // before the SPA can render, causing app-entry timeouts when Postgres is busy.
+  const adminAppRoots = [
+    "/login",
+    "/logout",
+    "/dashboard",
+    "/accounts",
+    "/agencies",
+    "/websites",
+    "/services",
+    "/industries",
+    "/brand-profiles",
+    "/blueprints",
+    "/query-clusters",
+    "/hub-pages",
+    "/locations",
+    "/pages",
+    "/generation-jobs",
+    "/settings",
+    "/admin",
+  ];
+  if (adminAppRoots.some((root) => path === root || path.startsWith(`${root}/`))) return true;
+
   return false;
 }
 
@@ -44,12 +69,6 @@ function notFoundHtml(message: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Page Not Found</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;color:#0f172a}.box{max-width:620px;padding:32px;text-align:center}h1{font-size:34px;margin:0 0 10px}p{color:#64748b;line-height:1.6}</style></head><body><main class="box"><h1>404</h1><p>${escapeHtml(message)}</p></main></body></html>`;
 }
 
-// ✅ CHANGED: Added OR checks for settings->>'parentDomain' and settings->>'publicDomain'
-// Previously only lower(w.domain) = lower($1) was checked.
-// If the DB row stores domain='elitepages.io' but the site runs on pages.elitepages.io,
-// the old query returned null → next() → Vite SPA catch-all → blank page.
-// Now matches the same three-column lookup used in site-preview.ts.
-// 🔒 UNTOUCHED: all other columns selected, JOIN, function signature, callers.
 async function resolveWebsiteByHost(hostname: string) {
   if (!hostname) return null;
   const result = await pool.query(
