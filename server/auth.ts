@@ -17,29 +17,30 @@ declare module "express-session" {
 const PgSession = connectPg(session);
 
 export function sessionMiddleware() {
-  // In production behind a reverse proxy (Railway, Render, Replit) the
-  // cookie MUST be sameSite:"none" + secure:true so the browser sends it
-  // on cross-origin API calls, AND the proxy must forward the real protocol
-  // via X-Forwarded-Proto.  We keep sameSite:"lax" for local dev.
-  //
-  // admin.spotonnexus.com is same-origin (frontend + API on same domain),
-  // so sameSite:"lax" is correct in both dev and prod.
-  // If you ever split the frontend to a separate origin, change to "none"
-  // and verify secure:true is also set (browsers reject none + !secure).
   const isProd = process.env.NODE_ENV === "production";
 
+  // Emergency production hardening:
+  // The previous PG-backed session store made EVERY admin request depend on
+  // Postgres before the app could even render. When Railway Postgres is slow or
+  // the pool is exhausted, users see {"message":"timeout exceeded when trying to connect"}
+  // just opening the app. Use in-memory sessions by default so the app shell,
+  // login flow, and static UI can stay alive while feature routes handle DB
+  // errors independently. Set USE_PG_SESSION_STORE=true only after DB/pooling
+  // is stable and a separate worker is introduced for background jobs.
+  const usePgSessionStore = process.env.USE_PG_SESSION_STORE === "true";
+
   return session({
-    store: new PgSession({
-      conString: process.env.DATABASE_URL,
-      tableName: "session",
-      createTableIfMissing: true,
-    }),
+    store: usePgSessionStore
+      ? new PgSession({
+          conString: process.env.DATABASE_URL,
+          tableName: "session",
+          createTableIfMissing: true,
+        })
+      : undefined,
     secret: process.env.SESSION_SECRET || "nexus-platform-secret-2025",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      // secure:true requires trust proxy:1 in index.ts (already set)
-      // so Express honours X-Forwarded-Proto from Railway's load balancer.
       secure: isProd,
       httpOnly: true,
       sameSite: "lax",
@@ -217,8 +218,6 @@ export async function loginUser(req: Request, email: string, password: string) {
   req.session.accountId = user.accountId ?? null;
   req.session.role = user.role ?? "user";
 
-  // Force session save before responding so the Set-Cookie header is
-  // guaranteed to be written even if the response flushes very fast.
   await new Promise<void>((resolve, reject) =>
     req.session.save((err) => (err ? reject(err) : resolve()))
   );
