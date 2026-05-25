@@ -54,6 +54,8 @@ import {
 } from "../services/variation-writer";
 // ✅ CHANGED: import callAI for the ai-suggest route
 import { callAI } from "../services/ai-provider";
+// ✅ CHANGED: import STANDARD_CITIES for the load-standard route
+import { STANDARD_CITIES } from "../data/standardCities";
 
 // ── Cache invalidation stubs ──────────────────────────────────────────────────
 // The old routes.ts monolith held in-memory Maps for sitemap and page caches.
@@ -304,10 +306,7 @@ router.post("/api/accounts/:accountId/locations/ai-suggest", requireAuth, async 
   }
   try {
     const n = Math.min(requestedCount ?? 10, 50);
-    const prompt = `You are a local SEO expert. List the top ${n} cities by population in the US state with abbreviation "${stateCode.toUpperCase()}". For each city provide its name, state code, approximate population, and a cityTier (1 = top 5 largest, 2 = mid-size, 3 = small).
-
-Respond with ONLY valid JSON array:
-[{"name":"City Name","stateCode":"XX","population":123456,"cityTier":1}]`;
+    const prompt = `You are a local SEO expert. List the top ${n} cities by population in the US state with abbreviation "${stateCode.toUpperCase()}". For each city provide its name, state code, approximate population, and a cityTier (1 = top 5 largest, 2 = mid-size, 3 = small).\n\nRespond with ONLY valid JSON array:\n[{"name":"City Name","stateCode":"XX","population":123456,"cityTier":1}]`;
     const aiResponse = await callAI({ prompt, maxTokens: 1200, temperature: 0.3 });
     const raw = aiResponse.text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
     const suggestions = JSON.parse(raw) as any[];
@@ -319,10 +318,54 @@ Respond with ONLY valid JSON array:
 });
 
 // POST /api/accounts/:accountId/locations/load-standard
+// ✅ CHANGED: was a stub returning 0/0. Now seeds from STANDARD_CITIES dataset
+//   scoped to the requesting accountId via bulkCreateLocations (slug-dedup safe).
 router.post("/api/accounts/:accountId/locations/load-standard", requireAuth, async (req: Request, res: Response) => {
-  // Stub: a real implementation would seed from a bundled US cities dataset.
-  // Returns the same shape as /bulk so the frontend can consume it uniformly.
-  return res.json({ inserted: 0, skipped: 0, message: "Standard locations load not yet implemented — use CSV bulk import instead." });
+  const { accountId } = req.params;
+
+  // Map StandardCity → insertLocationSchema shape
+  const cityLocations = STANDARD_CITIES.map((city) => {
+    const slugBase = `${city.name}-${city.stateAbbreviation}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    // Assign cityTier by population: tier 1 = 500k+, tier 2 = 100k–499k, tier 3 = <100k
+    const cityTier = city.population >= 500000 ? 1 : city.population >= 100000 ? 2 : 3;
+    return {
+      accountId,
+      name: city.name,
+      stateCode: city.stateAbbreviation,
+      slug: slugBase,
+      type: "city" as const,
+      population: city.population,
+      cityTier,
+    };
+  });
+
+  // Validate each row — skip any that fail schema
+  const validItems: any[] = [];
+  let schemaSkipped = 0;
+  for (const loc of cityLocations) {
+    const parsed = insertLocationSchema.safeParse(loc);
+    if (parsed.success) {
+      validItems.push(parsed.data);
+    } else {
+      schemaSkipped++;
+    }
+  }
+
+  if (validItems.length === 0) {
+    return res.status(400).json({ message: "No valid cities could be prepared from the standard dataset", skipped: schemaSkipped });
+  }
+
+  // bulkCreateLocations deduplicates by slug — safe to call even if some cities already exist
+  const result = await storage.bulkCreateLocations(accountId, validItems);
+  const dedupSkipped = validItems.length - result.inserted;
+
+  return res.status(201).json({
+    inserted: result.inserted,
+    skipped: schemaSkipped + dedupSkipped,
+  });
 });
 
 // GET  /api/accounts/:accountId/locations  (paginated list)
@@ -1068,16 +1111,15 @@ router.post("/api/public/contact", async (req: Request, res: Response) => {
       pageId: pageId || null,
       pageSlug: pageSlug || null,
       name,
-      businessName: businessName || null,
+      businessName: businessName,
       email,
       phone: phone || null,
       message: message || null,
-      source: "contact_form",
     });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error("[contact-form] Error saving lead:", err);
-    return res.status(500).json({ success: false, message: "Failed to save submission" });
+    console.error("[public/contact]", err);
+    return res.status(500).json({ success: false, message: "Failed to submit contact form" });
   }
 });
 
