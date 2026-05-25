@@ -21,7 +21,7 @@ import { AccountPicker } from "@/components/shared/AccountPicker";
 export default function ServicesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { selectedAccountId, accounts, accountsLoading } = useAccountContext();
+  const { selectedAccountId, accountsLoading } = useAccountContext();
 
   const [showCreate, setShowCreate] = useState(false);
   const [showAI, setShowAI] = useState(false);
@@ -66,13 +66,21 @@ export default function ServicesPage() {
     if (firstWebsiteId) setBankWebsiteId(firstWebsiteId);
   }, [firstWebsiteId]);
 
-  const bankWriteJobQ = useQuery<{ jobId: string; total: number; done: number; status: string } | null>({
+  type BankWriteJob = { jobId?: string | null; total?: number; done?: number; status?: string | null } | null;
+
+  const bankWriteJobQ = useQuery<BankWriteJob>({
     queryKey: ["/api/websites", bankWebsiteId, "bank-write-job"],
     queryFn: () => api.get(`/api/websites/${bankWebsiteId}/bank-write-job`),
     enabled: !!bankWebsiteId,
     refetchInterval: 4000,
   });
-  const activeJob = bankWriteJobQ.data ?? null;
+
+  // ✅ Critical fix: the backend can return a stale placeholder object like
+  // { jobId: null, total: 54, done: 0 }. That is NOT an active job.
+  // Only show the blue progress box when a real job is running.
+  const activeJob = bankWriteJobQ.data && bankWriteJobQ.data.jobId && bankWriteJobQ.data.status === "running"
+    ? bankWriteJobQ.data
+    : null;
   const jobRunning = !!activeJob;
 
   const bankServicesQ = useQuery<string[]>({
@@ -215,7 +223,6 @@ export default function ServicesPage() {
           </div>
         </div>
 
-        {/* Always-visible account picker */}
         <AccountPicker countLabel={selectedAccountId ? `${(services as any[]).length} services` : undefined} />
 
         <Tabs value={activeTab} onValueChange={v => setActiveTab(v as "services" | "variation-banks")} className="space-y-4">
@@ -347,7 +354,7 @@ export default function ServicesPage() {
                         </div>
                         <div className="w-full bg-blue-200 rounded-full h-1.5">
                           <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-700"
-                            style={{ width: `${(activeJob?.total ?? 0) > 0 ? Math.round(((activeJob?.done ?? 0) / activeJob!.total) * 100) : 0}%` }} />
+                            style={{ width: `${(activeJob?.total ?? 0) > 0 ? Math.round(((activeJob?.done ?? 0) / activeJob!.total!) * 100) : 0}%` }} />
                         </div>
                         <p className="text-xs text-blue-600">You can keep using the app — progress is saved and resumes automatically if the server restarts.</p>
                       </div>
@@ -410,7 +417,6 @@ export default function ServicesPage() {
         </Tabs>
       </div>
 
-      {/* AI Suggest Dialog */}
       <Dialog open={showAI} onOpenChange={setShowAI}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles className="size-5 text-primary" />AI Service Suggestions</DialogTitle></DialogHeader>
@@ -433,7 +439,6 @@ export default function ServicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Review & Import Dialog */}
       <Dialog open={showReview} onOpenChange={setShowReview}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -473,7 +478,6 @@ export default function ServicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Create Service Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Service</DialogTitle></DialogHeader>
@@ -490,7 +494,6 @@ export default function ServicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm Delete Dialog */}
       <Dialog open={!!confirmDeleteId} onOpenChange={(open) => !open && setConfirmDeleteId(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Delete service?</DialogTitle></DialogHeader>
