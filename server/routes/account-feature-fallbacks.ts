@@ -78,6 +78,21 @@ function mapBlueprint(r: any) {
   };
 }
 
+function mapHubPage(r: any) {
+  return {
+    ...r,
+    websiteId: r.website_id,
+    accountId: r.account_id,
+    hubType: r.hub_type,
+    parentSlug: r.parent_slug,
+    maxChildLinks: r.max_child_links,
+    metaDescription: r.meta_description,
+    qualityScore: r.quality_score,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
 function mapBankCompleteness(r: any) {
   return {
     id: r.id,
@@ -161,10 +176,7 @@ router.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Reque
 });
 
 router.get("/api/websites/:websiteId/blueprints", requireAuth, async (req: Request, res: Response) => {
-  const scoped = await pool.query(
-    `SELECT * FROM blueprints WHERE website_id::text = $1::text ORDER BY created_at DESC`,
-    [req.params.websiteId],
-  );
+  const scoped = await pool.query(`SELECT * FROM blueprints WHERE website_id::text = $1::text ORDER BY created_at DESC`, [req.params.websiteId]);
   if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapBlueprint));
 
   const accountScoped = await pool.query(
@@ -175,6 +187,32 @@ router.get("/api/websites/:websiteId/blueprints", requireAuth, async (req: Reque
 
   const all = await pool.query(`SELECT * FROM blueprints ORDER BY created_at DESC`);
   return res.json(all.rows.map(mapBlueprint));
+});
+
+router.get("/api/websites/:websiteId/hub-pages", requireAuth, async (req: Request, res: Response) => {
+  const scoped = await pool.query(`SELECT * FROM hub_pages WHERE website_id::text = $1::text ORDER BY hub_type ASC, name ASC`, [req.params.websiteId]);
+  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapHubPage));
+
+  const account = await pool.query(`SELECT account_id FROM websites WHERE id::text = $1::text LIMIT 1`, [req.params.websiteId]);
+  const accountId = account.rows[0]?.account_id;
+
+  if (accountId) {
+    const accountScoped = await pool.query(
+      `SELECT * FROM hub_pages WHERE account_id::text = $1::text ORDER BY hub_type ASC, name ASC`,
+      [accountId],
+    );
+    if (accountScoped.rows.length > 0) return res.json(accountScoped.rows.map(mapHubPage));
+  }
+
+  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY hub_type ASC, name ASC`);
+  return res.json(all.rows.map(mapHubPage));
+});
+
+router.get("/api/accounts/:accountId/hub-pages", requireAuth, async (req: Request, res: Response) => {
+  const scoped = await pool.query(`SELECT * FROM hub_pages WHERE account_id::text = $1::text ORDER BY hub_type ASC, name ASC`, [req.params.accountId]);
+  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapHubPage));
+  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY hub_type ASC, name ASC`);
+  return res.json(all.rows.map(mapHubPage));
 });
 
 router.get("/api/websites/:websiteId/bank-completeness", requireAuth, async (req: Request, res: Response) => {
