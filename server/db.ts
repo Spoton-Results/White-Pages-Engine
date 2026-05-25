@@ -11,13 +11,17 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Keep pool small — fewer slots means fewer frozen connections when DB is unreachable.
-  max: 5,
+  // Railway can briefly stall Postgres connections during deploy/cold-starts.
+  // The app has many feature tabs that poll at the same time, so 5 slots was
+  // too tight and caused "timeout exceeded when trying to connect" during
+  // variation-bank writes and startup migrations. Keep this moderate so we do
+  // not overload Postgres, but give concurrent UI/API requests room to breathe.
+  max: Number(process.env.PG_POOL_MAX || 10),
   idleTimeoutMillis: 30000,
-  // 15s matches Railway's request timeout — if DB can't connect in 15s the
-  // request would 502 anyway. Previously 120s caused ALL 10 pool slots to
-  // freeze for 2 minutes, blocking every HTTP request behind them.
-  connectionTimeoutMillis: 15000,
+  // Give Postgres enough time to hand back a client during deploy/startup.
+  // Request handlers still catch and return JSON errors; this avoids false
+  // negatives while Railway is warming DB/network connections.
+  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 30000),
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
