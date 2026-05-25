@@ -186,6 +186,9 @@ export async function updateUser(id: string, data: Partial<InsertUser>): Promise
 
 // ─── Brand Profiles ───────────────────────────────────────────────────────────
 
+const NAV_CACHE_TTL = 30_000;
+const brandProfilesCache = new Map<string, { data: BrandProfile[]; exp: number }>();
+
 export async function getBrandProfiles(accountId: string): Promise<BrandProfile[]> {
   const cached = brandProfilesCache.get(accountId);
   if (cached && Date.now() < cached.exp) return cached.data;
@@ -353,6 +356,7 @@ export async function getLocations(accountId: string, type?: string, orderBy?: s
     ...r,
     accountId: r.account_id,
     stateCode: r.state_code,
+    stateName: r.state_name,
     cityTier: r.city_tier,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -441,6 +445,7 @@ export async function getServices(accountId: string): Promise<Service[]> {
   return res.rows.map((r: any) => ({
     ...r,
     accountId: r.account_id,
+    industryId: r.industry_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   })) as Service[];
@@ -466,4 +471,56 @@ export async function deleteService(id: string): Promise<void> {
   await db.update(pages).set({ serviceId: null }).where(eq(pages.serviceId, id));
   await db.update(queryClusters).set({ serviceId: null }).where(eq(queryClusters.serviceId, id));
   await db.delete(services).where(eq(services.id, id));
+}
+
+// ─── Industries ───────────────────────────────────────────────────────────────
+
+function mapIndustryRow(r: any): Industry {
+  return {
+    ...r,
+    accountId: r.account_id,
+    naicsCode: r.naics_code,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  } as Industry;
+}
+
+export async function getIndustries(): Promise<Industry[]> {
+  // Raw SQL keeps production behavior consistent with accounts/services/locations.
+  const res = await pool.query(`SELECT * FROM industries ORDER BY name ASC`);
+  return res.rows.map(mapIndustryRow);
+}
+
+export async function getIndustriesByAccount(accountId: string): Promise<Industry[]> {
+  const scoped = await pool.query(
+    `SELECT * FROM industries WHERE account_id = $1 ORDER BY name ASC`,
+    [accountId]
+  );
+
+  if (scoped.rows.length > 0) {
+    return scoped.rows.map(mapIndustryRow);
+  }
+
+  // Legacy compatibility: older builds treated industries like shared reference data.
+  // If an account has no scoped rows, return existing DB industries instead of making
+  // the tab look empty. This restores the data users already had before the account
+  // picker/account-scoped frontend was added.
+  const all = await pool.query(`SELECT * FROM industries ORDER BY name ASC`);
+  return all.rows.map(mapIndustryRow);
+}
+
+export async function createIndustry(data: InsertIndustry): Promise<Industry> {
+  const [row] = await db.insert(industries).values(data).returning();
+  return row;
+}
+
+export async function updateIndustry(id: string, data: Partial<InsertIndustry>): Promise<Industry | undefined> {
+  const [row] = await db.update(industries).set(data).where(eq(industries.id, id)).returning();
+  return row;
+}
+
+export async function deleteIndustry(id: string): Promise<void> {
+  await db.update(services).set({ industryId: null }).where(eq(services.industryId, id));
+  await db.update(pages).set({ industryId: null }).where(eq(pages.industryId, id));
+  await db.delete(industries).where(eq(industries.id, id));
 }
