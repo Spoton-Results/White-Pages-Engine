@@ -1,12 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -14,11 +13,14 @@ import { Plus, Factory, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-r
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
+import { useAccountContext } from "@/contexts/account-context";
+import { AccountPicker } from "@/components/shared/AccountPicker";
 
 export default function IndustriesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [overrideAccount, setOverrideAccount] = useState<string>("");
+  const { selectedAccountId, accountsLoading } = useAccountContext();
+  const selectedAccount = selectedAccountId;
   const [showCreate, setShowCreate] = useState(false);
   const { register, handleSubmit, reset, setValue, watch } = useForm<any>();
 
@@ -27,17 +29,6 @@ export default function IndustriesPage() {
 
   const industryName = watch("name");
 
-  // accounts query — always loaded, no account scope
-  const { data: accounts = [] } = useQuery({
-    queryKey: ["/api/accounts"],
-    queryFn: () => api.get<any[]>("/api/accounts"),
-  });
-
-  // selectedAccount: explicit override > first account in list
-  // Include accounts in deps so it re-derives after accounts load (prevents stale closure)
-  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
-
-  // industries: scoped to selectedAccount -> re-fetches on account change
   const { data: industries = [], isLoading } = useQuery({
     queryKey: ["/api/industries", selectedAccount],
     queryFn: () =>
@@ -47,12 +38,11 @@ export default function IndustriesPage() {
     enabled: !!selectedAccount,
   });
 
-  // create: posts to the currently selected account
   const create = useMutation({
     mutationFn: (data: any) =>
       api.post(`/api/accounts/${selectedAccount}/industries`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/industries"] });
+      qc.invalidateQueries({ queryKey: ["/api/industries", selectedAccount] });
       setShowCreate(false);
       reset();
       setAiResult(null);
@@ -65,12 +55,16 @@ export default function IndustriesPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/industries/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/industries"] });
+      qc.invalidateQueries({ queryKey: ["/api/industries", selectedAccount] });
       toast({ title: "Industry deleted" });
     },
   });
 
   async function handleAiSuggest() {
+    if (!selectedAccount) {
+      toast({ title: "Select an account first", variant: "destructive" });
+      return;
+    }
     if (!industryName?.trim()) {
       toast({ title: "Enter industry name first", variant: "destructive" });
       return;
@@ -112,21 +106,13 @@ export default function IndustriesPage() {
           )}
         </div>
 
-        {/* Account switcher: connects this page to the correct account's industries */}
-        <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-          <Select onValueChange={setOverrideAccount} value={selectedAccount}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Select account" />
-            </SelectTrigger>
-            <SelectContent>
-              {(accounts as any[]).map((a: any) => (
-                <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <AccountPicker countLabel={selectedAccount ? `${(industries as any[]).length} industries` : undefined} />
 
-        {!selectedAccount ? (
+        {accountsLoading ? (
+          <div className="bg-card rounded-lg border p-4">
+            <Skeleton className="h-10 w-64" />
+          </div>
+        ) : !selectedAccount ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
             <Factory className="size-12 text-muted-foreground/30" />
             <p className="text-muted-foreground">Select an account to manage industries</p>
@@ -184,7 +170,7 @@ export default function IndustriesPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
-                  disabled={aiLoading || !industryName?.trim()}
+                  disabled={aiLoading || !industryName?.trim() || !selectedAccount}
                   onClick={handleAiSuggest}
                   data-testid="button-industry-ai-suggest"
                 >
@@ -229,7 +215,7 @@ export default function IndustriesPage() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={create.isPending}>Add</Button>
+              <Button type="submit" disabled={create.isPending || !selectedAccount}>Add</Button>
             </DialogFooter>
           </form>
         </DialogContent>
