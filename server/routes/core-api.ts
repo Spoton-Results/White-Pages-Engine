@@ -266,7 +266,11 @@ router.get("/api/accounts/:accountId/locations/count", requireAuth, async (req: 
   return res.json({ count });
 });
 
-// POST /api/accounts/:accountId/locations/bulk  ← THE BROKEN IMPORT ROUTE
+// POST /api/accounts/:accountId/locations/bulk
+// ✅ CHANGED: pass force:true so CSV re-imports are not silently skipped when
+//   cities with matching slugs already exist in the DB for this account.
+//   bulkCreateLocations will delete existing city-type rows first, then insert fresh.
+// 🔒 UNTOUCHED: validation logic, schema parsing, skipped counter, response shape.
 router.post("/api/accounts/:accountId/locations/bulk", requireAuth, async (req: Request, res: Response) => {
   const { locations: items } = req.body as { locations?: any[] };
   if (!Array.isArray(items) || items.length === 0) {
@@ -288,9 +292,9 @@ router.post("/api/accounts/:accountId/locations/bulk", requireAuth, async (req: 
   if (validItems.length === 0) {
     return res.status(400).json({ message: "No valid location rows found in payload", skipped });
   }
-  // bulkCreateLocations deduplicates by slug and returns { inserted }
-  const result = await storage.bulkCreateLocations(req.params.accountId, validItems);
-  // Rows deduplicated by bulkCreateLocations count toward skipped too
+  // ✅ CHANGED: force:true — delete existing city rows for this account before inserting,
+  //   so re-uploads are never silently skipped due to slug deduplication.
+  const result = await storage.bulkCreateLocations(req.params.accountId, validItems, { force: true });
   const dedupSkipped = validItems.length - result.inserted;
   return res.status(201).json({
     inserted: result.inserted,
@@ -318,8 +322,10 @@ router.post("/api/accounts/:accountId/locations/ai-suggest", requireAuth, async 
 });
 
 // POST /api/accounts/:accountId/locations/load-standard
-// ✅ CHANGED: was a stub returning 0/0. Now seeds from STANDARD_CITIES dataset
-//   scoped to the requesting accountId via bulkCreateLocations (slug-dedup safe).
+// ✅ CHANGED: pass force:true so re-running this always produces a full fresh import
+//   instead of silently skipping all rows because they already exist in the DB.
+//   bulkCreateLocations will delete existing city-type rows for this account first.
+// 🔒 UNTOUCHED: city mapping logic, schema validation, schemaSkipped counter, response shape.
 router.post("/api/accounts/:accountId/locations/load-standard", requireAuth, async (req: Request, res: Response) => {
   const { accountId } = req.params;
 
@@ -358,8 +364,9 @@ router.post("/api/accounts/:accountId/locations/load-standard", requireAuth, asy
     return res.status(400).json({ message: "No valid cities could be prepared from the standard dataset", skipped: schemaSkipped });
   }
 
-  // bulkCreateLocations deduplicates by slug — safe to call even if some cities already exist
-  const result = await storage.bulkCreateLocations(accountId, validItems);
+  // ✅ CHANGED: force:true — delete existing city rows for this account before inserting,
+  //   so re-running load-standard always results in a full fresh import.
+  const result = await storage.bulkCreateLocations(accountId, validItems, { force: true });
   const dedupSkipped = validItems.length - result.inserted;
 
   return res.status(201).json({
