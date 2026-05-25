@@ -10,6 +10,7 @@ import leadsRouter from "./routes/leads";
 import dashboardAgencyRouter from "./routes/dashboard-agency";
 import dashboardAdminRouter from "./routes/dashboard-admin";
 import widgetRouter from "./routes/widget";
+import variationBankWriterFixRouter from "./routes/variation-bank-writer-fix";
 
 // ── THE REAL FIX ───────────────────────────────────────────────────────────────────
 // agency-roi-dashboard.ts registers routes with FULL paths already inside the
@@ -132,6 +133,11 @@ export function mountSubRouters(app: Express) {
   // All /api/auth/login, /api/auth/me, /api/auth/logout, /api/auth/debug
   // routes were falling through to other handlers, returning Unauthorized.
   app.use("/", authLiveRouter);
+
+  // Variation bank writer overrides must mount before core-api.
+  // Fixes stuck "Writing banks… 0/N" UI by returning real null when no job runs,
+  // and provides a real /variation-banks/write-all Claude job starter.
+  app.use("/", variationBankWriterFixRouter);
 
   // ✅ CHANGED: core-api mounted at root — defines full /api/* paths internally.
   // This fixes every tab in the app returning empty data.
