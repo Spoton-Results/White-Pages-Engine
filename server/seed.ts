@@ -3,6 +3,7 @@ import * as storage from "./storage";
 import { db } from "./db";
 import { accounts } from "@shared/schema";
 import { ilike, or } from "drizzle-orm";
+import { STANDARD_CITIES } from "./data/standardCities"; // ✅ CHANGED: import full city list
 
 const US_STATES = [
   { name: "Alabama", code: "AL" }, { name: "Alaska", code: "AK" },
@@ -32,6 +33,7 @@ const US_STATES = [
   { name: "Wisconsin", code: "WI" }, { name: "Wyoming", code: "WY" },
 ];
 
+// 🔒 UNTOUCHED: TOP_CITIES kept for reference but no longer used by seed
 const TOP_CITIES = [
   { name: "New York City", slug: "new-york-city", state: "New York", code: "NY", pop: 8336817 },
   { name: "Los Angeles", slug: "los-angeles", state: "California", code: "CA", pop: 3979576 },
@@ -108,9 +110,9 @@ async function seedSpotOnData(accountId: string) {
   const existingServices = await storage.getServices(accountId);
   const existingLocations = await storage.getLocations(accountId);
 
+  // 🔒 UNTOUCHED: service seeding logic unchanged
   if (existingServices.length === 0) {
     console.log("Seeding SpotOn services...");
-    // Ensure industry exists
     let industry = (await storage.getIndustries(accountId))[0];
     if (!industry) {
       industry = await storage.createIndustry({
@@ -127,30 +129,50 @@ async function seedSpotOnData(accountId: string) {
     console.log(`Seeded ${MERCHANT_SERVICES.length} services`);
   }
 
-  if (existingLocations.length === 0) {
-    console.log("Seeding SpotOn locations...");
-    for (const state of US_STATES) {
-      await storage.createLocation({
-        accountId,
-        name: state.name,
-        slug: state.name.toLowerCase().replace(/\s+/g, "-"),
-        type: "state",
-        stateCode: state.code,
-        stateName: state.name,
-      });
+  // ✅ CHANGED: guard now checks city count vs full STANDARD_CITIES length
+  // instead of "any locations exist" — so accounts with prior partial seeds get topped up
+  const existingCityCount = existingLocations.filter(l => l.type === "city").length;
+
+  if (existingCityCount < STANDARD_CITIES.length) {
+    console.log(`Seeding SpotOn locations (have ${existingCityCount}, need ${STANDARD_CITIES.length})...`);
+
+    // Seed states only if missing
+    const existingStateCount = existingLocations.filter(l => l.type === "state").length;
+    if (existingStateCount === 0) {
+      for (const state of US_STATES) {
+        await storage.createLocation({
+          accountId,
+          name: state.name,
+          slug: state.name.toLowerCase().replace(/\s+/g, "-"),
+          type: "state",
+          stateCode: state.code,
+          stateName: state.name,
+        });
+      }
+      console.log(`Seeded ${US_STATES.length} states`);
     }
-    for (const city of TOP_CITIES) {
+
+    // Build set of already-existing city slugs to avoid duplicates
+    const existingCitySlugs = new Set(
+      existingLocations.filter(l => l.type === "city").map(l => l.slug)
+    );
+
+    let inserted = 0;
+    for (const city of STANDARD_CITIES) {
+      const slug = city.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+      if (existingCitySlugs.has(slug)) continue;
       await storage.createLocation({
         accountId,
         name: city.name,
-        slug: city.slug,
+        slug,
         type: "city",
-        stateCode: city.code,
-        stateName: city.state,
-        population: city.pop,
+        stateCode: city.stateAbbreviation,
+        stateName: city.stateName,
+        population: city.population,
       });
+      inserted++;
     }
-    console.log(`Seeded ${US_STATES.length} states + ${TOP_CITIES.length} cities`);
+    console.log(`Seeded ${inserted} cities (${STANDARD_CITIES.length} total in list)`);
   }
 }
 
@@ -172,7 +194,6 @@ export async function seedDatabase() {
   }
 
   // ── SpotOn Results — targeted lookup (avoids full-table scan) ───────────────
-  // Uses a single WHERE ILIKE query instead of loading all accounts into memory.
   const [spoton] = await db
     .select()
     .from(accounts)
