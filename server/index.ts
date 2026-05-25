@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { mountSubRouters } from "./route-mounts";
+import accountFeatureFallbacksRouter from "./routes/account-feature-fallbacks";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
@@ -418,6 +419,7 @@ async function runBackgroundStartup() {
       for (const j of bulkJobs) {
         const settings = j.settings as any;
         const interruptCount = (settings._interruptCount ?? 0) + 1;
+
         const newSettings = { ...settings, _interruptCount: interruptCount };
 
         const startedAt = j.startedAt ? new Date(j.startedAt).getTime() : 0;
@@ -465,6 +467,7 @@ async function runBackgroundStartup() {
 }
 
 (async () => {
+  app.use("/", accountFeatureFallbacksRouter);
   mountSubRouters(app);
 
   await registerRoutes(httpServer, app);
