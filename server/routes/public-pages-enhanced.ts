@@ -11,6 +11,29 @@ function requestHost(req: Request) {
     .replace(/^www\./, "");
 }
 
+function isAdminAppPath(path: string) {
+  const roots = [
+    "/login",
+    "/logout",
+    "/dashboard",
+    "/accounts",
+    "/agencies",
+    "/websites",
+    "/services",
+    "/industries",
+    "/brand-profiles",
+    "/blueprints",
+    "/query-clusters",
+    "/hub-pages",
+    "/locations",
+    "/pages",
+    "/generation-jobs",
+    "/settings",
+    "/admin",
+  ];
+  return roots.some((root) => path === root || path.startsWith(`${root}/`));
+}
+
 function isSkippablePath(path: string) {
   return path === "/api" || path.startsWith("/api/")
     || path.startsWith("/assets")
@@ -18,7 +41,8 @@ function isSkippablePath(path: string) {
     || path.startsWith("/src/")
     || path === "/favicon.ico"
     || path === "/robots.txt"
-    || path.endsWith(".xml");
+    || path.endsWith(".xml")
+    || isAdminAppPath(path);
 }
 
 function safeSlug(path: string) {
