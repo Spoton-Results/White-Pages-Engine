@@ -27,7 +27,6 @@ async function getContext(websiteId: string): Promise<{ website: any; accountId:
   const accountId = website.accountId ?? websiteId;
   let brand = await storage.getBrandProfile(websiteId).catch(() => null);
 
-  // Legacy/account fallback: some brand profile rows are account-scoped after the account picker migration.
   if (!brand && accountId) {
     const profiles = await storage.getBrandProfiles(accountId).catch(() => []);
     brand = profiles?.[0] ?? null;
@@ -69,6 +68,35 @@ function latestRunningJob(websiteId: string): BankJob | null {
   return latest;
 }
 
+function finishJobLater(jobId: string) {
+  setTimeout(() => jobs.delete(jobId), 10 * 60 * 1000);
+}
+
+router.get("/api/websites/:websiteId/context", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { website, accountId } = await getContext(req.params.websiteId);
+    const brand = await storage.getBrandProfile(req.params.websiteId).catch(() => null);
+    return res.json({
+      brand: brand ? { id: brand.id, name: brand.name, accountId, voiceAndTone: brand.voiceAndTone } : null,
+      industry: null,
+      website: { id: website.id, name: website.name, domain: website.domain },
+    });
+  } catch (err: any) {
+    console.warn("[variation-bank-queue/context] soft-fail:", err?.message ?? String(err));
+    return res.json({ brand: null, industry: null });
+  }
+});
+
+router.get("/api/websites/:websiteId/bank-services", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const services = await storage.getVariationBankServices(req.params.websiteId);
+    return res.json(services);
+  } catch (err: any) {
+    console.warn("[variation-bank-queue/bank-services] soft-fail:", err?.message ?? String(err));
+    return res.json([]);
+  }
+});
+
 router.get("/api/websites/:websiteId/bank-write-job", requireAuth, async (req: Request, res: Response) => {
   const job = latestRunningJob(req.params.websiteId);
   if (!job) return res.json(null);
@@ -76,62 +104,70 @@ router.get("/api/websites/:websiteId/bank-write-job", requireAuth, async (req: R
 });
 
 router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const service = String(req.body?.service ?? "").trim();
-    if (!service) return res.status(400).json({ message: "service is required" });
+  const service = String(req.body?.service ?? "").trim();
+  if (!service) return res.status(400).json({ message: "service is required" });
 
-    const { websiteId } = req.params;
-    const { accountId, ctx } = await getContext(websiteId);
-    const jobId = `bank-one-${Date.now()}-${randomBytes(4).toString("hex")}`;
-    const job: BankJob = { jobId, websiteId, status: "running", total: 1, done: 0, errors: [], startedAt: Date.now() };
-    jobs.set(jobId, job);
+  const { websiteId } = req.params;
+  const jobId = `bank-one-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  const job: BankJob = { jobId, websiteId, status: "running", total: 1, done: 0, errors: [], startedAt: Date.now() };
+  jobs.set(jobId, job);
 
-    setImmediate(async () => {
+  // Return before ANY database or Claude work. This prevents Railway/browser
+  // request timeouts when Postgres or Claude is slow.
+  res.status(202).json({ started: true, jobId, total: 1 });
+
+  setImmediate(async () => {
+    try {
+      const { accountId, ctx } = await getContext(websiteId);
       await writeOne(job, service, accountId, websiteId, ctx);
       job.status = job.errors.length ? "error" : "done";
-      setTimeout(() => jobs.delete(jobId), 10 * 60 * 1000);
-    });
-
-    return res.status(202).json({ started: true, jobId, total: 1 });
-  } catch (err: any) {
-    console.error("[variation-bank-queue/write]", err);
-    return res.status(err.status ?? 500).json({ message: err.message ?? "Failed to queue bank write" });
-  }
+    } catch (err: any) {
+      job.errors.push(`${service}: ${err?.message ?? String(err)}`);
+      job.done = Math.max(job.done, 1);
+      job.status = "error";
+    } finally {
+      finishJobLater(jobId);
+    }
+  });
 });
 
 router.post("/api/websites/:websiteId/variation-banks/write-all", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { websiteId } = req.params;
-    const force = Boolean(req.body?.force);
-    const { accountId, ctx } = await getContext(websiteId);
-    const website = await storage.getWebsite(websiteId);
-    if (!website) return res.status(404).json({ message: "Website not found" });
+  const { websiteId } = req.params;
+  const force = Boolean(req.body?.force);
+  const jobId = `bank-all-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  const job: BankJob = { jobId, websiteId, status: "running", total: 0, done: 0, errors: [], startedAt: Date.now() };
+  jobs.set(jobId, job);
 
-    const services = await storage.getServices(website.accountId ?? accountId);
-    const serviceNames = services.map((s: any) => String(s.name)).filter(Boolean);
-    if (!serviceNames.length) return res.json({ alreadyDone: true, total: 0 });
+  // Return before resolving services/context from DB. The background worker will
+  // update total once services are loaded.
+  res.status(202).json({ started: true, jobId, total: 0 });
 
-    const banked = new Set(await storage.getVariationBankServices(websiteId).catch(() => []));
-    const targetServices = force ? serviceNames : serviceNames.filter((name: string) => !banked.has(name));
-    if (!targetServices.length) return res.json({ alreadyDone: true, total: 0 });
+  setImmediate(async () => {
+    try {
+      const { website, accountId, ctx } = await getContext(websiteId);
+      const services = await storage.getServices(website.accountId ?? accountId);
+      const serviceNames = services.map((s: any) => String(s.name)).filter(Boolean);
 
-    const jobId = `bank-all-${Date.now()}-${randomBytes(4).toString("hex")}`;
-    const job: BankJob = { jobId, websiteId, status: "running", total: targetServices.length, done: 0, errors: [], startedAt: Date.now() };
-    jobs.set(jobId, job);
+      const banked = new Set(await storage.getVariationBankServices(websiteId).catch(() => []));
+      const targetServices = force ? serviceNames : serviceNames.filter((name: string) => !banked.has(name));
+      job.total = targetServices.length;
 
-    setImmediate(async () => {
+      if (!targetServices.length) {
+        job.status = "done";
+        return;
+      }
+
       for (const service of targetServices) {
         await writeOne(job, service, accountId, websiteId, ctx);
       }
       job.status = job.errors.length && job.done === 0 ? "error" : "done";
-      setTimeout(() => jobs.delete(jobId), 10 * 60 * 1000);
-    });
-
-    return res.status(202).json({ started: true, jobId, total: targetServices.length });
-  } catch (err: any) {
-    console.error("[variation-bank-queue/write-all]", err);
-    return res.status(err.status ?? 500).json({ message: err.message ?? "Failed to queue bank writes" });
-  }
+    } catch (err: any) {
+      job.errors.push(err?.message ?? String(err));
+      job.status = "error";
+    } finally {
+      finishJobLater(jobId);
+    }
+  });
 });
 
 export default router;
