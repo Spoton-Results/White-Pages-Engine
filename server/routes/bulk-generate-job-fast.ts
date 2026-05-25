@@ -12,6 +12,7 @@ const DEAD_JOB_MINUTES = Number(process.env.DEAD_JOB_MINUTES || 30);
 const DEAD_JOB_INTERVAL_MS = Number(process.env.DEAD_JOB_INTERVAL_MS || 5 * 60 * 1000);
 const PENDING_BULK_JOB_INTERVAL_MS = Number(process.env.PENDING_BULK_JOB_INTERVAL_MS || 15 * 1000);
 const PENDING_BULK_JOB_BATCH_LIMIT = Math.max(1, Number(process.env.PENDING_BULK_JOB_BATCH_LIMIT || 3));
+const ENABLE_BACKGROUND_JOB_PUMPS = process.env.ENABLE_BACKGROUND_JOB_PUMPS === "true";
 const NO_CLUSTER_SENTINEL = "__NO_CLUSTERS__";
 let deadJobRecoveryStarted = false;
 let deadJobRecoveryRunning = false;
@@ -129,7 +130,7 @@ async function recoverDeadGenerationJobs(minutes = DEAD_JOB_MINUTES) {
 }
 
 function startDeadJobRecoveryLoop() {
-  if (deadJobRecoveryStarted || process.env.DISABLE_DEAD_JOB_RECOVERY === "true") return;
+  if (!ENABLE_BACKGROUND_JOB_PUMPS || deadJobRecoveryStarted || process.env.DISABLE_DEAD_JOB_RECOVERY === "true") return;
   deadJobRecoveryStarted = true;
 
   const run = async () => {
@@ -325,7 +326,7 @@ async function findPendingBulkGenerationJobs(limit = PENDING_BULK_JOB_BATCH_LIMI
 }
 
 function startPendingBulkJobPump() {
-  if (pendingBulkJobPumpStarted || process.env.DISABLE_PENDING_BULK_JOB_PUMP === "true") return;
+  if (!ENABLE_BACKGROUND_JOB_PUMPS || pendingBulkJobPumpStarted || process.env.DISABLE_PENDING_BULK_JOB_PUMP === "true") return;
   pendingBulkJobPumpStarted = true;
 
   const run = async () => {
