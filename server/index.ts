@@ -502,86 +502,94 @@ async function runBackgroundStartup() {
     () => {
       log(`serving on port ${port}`);
 
-      setImmediate(async () => {
-        try {
-          const { scheduleDailyBackup } = await import("./backup");
-          scheduleDailyBackup(3);
-        } catch (err) {
-          console.error("[backup] Failed to schedule daily backup (non-fatal):", err);
-        }
-      });
+      if (process.env.ENABLE_WEB_BACKGROUND_TASKS === "true") {
+        setImmediate(async () => {
+          try {
+            const { scheduleDailyBackup } = await import("./backup");
+            scheduleDailyBackup(3);
+          } catch (err) {
+            console.error("[backup] Failed to schedule daily backup (non-fatal):", err);
+          }
+        });
 
-      setTimeout(async () => {
-        try {
-          const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
-          await runWeeklyAutoDemoteWithJobs();
-        } catch (err) {
-          console.error("[auto6] Initial auto-demote run failed (non-fatal):", err);
-        }
-        setInterval(async () => {
+        setTimeout(async () => {
           try {
             const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
             await runWeeklyAutoDemoteWithJobs();
           } catch (err) {
-            console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
+            console.error("[auto6] Initial auto-demote run failed (non-fatal):", err);
           }
-        }, 7 * 24 * 60 * 60 * 1000);
-      }, 5 * 60 * 1000);
+          setInterval(async () => {
+            try {
+              const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
+              await runWeeklyAutoDemoteWithJobs();
+            } catch (err) {
+              console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
+            }
+          }, 7 * 24 * 60 * 60 * 1000);
+        }, 5 * 60 * 1000);
 
-      setTimeout(async () => {
-        try {
-          const { runDailyWaveCheck } = await import("./services/launch-governors");
-          await runDailyWaveCheck();
-        } catch (err) {
-          console.error("[Wave Unlock] Initial wave check failed (non-fatal):", err);
-        }
-        setInterval(async () => {
+        setTimeout(async () => {
           try {
             const { runDailyWaveCheck } = await import("./services/launch-governors");
             await runDailyWaveCheck();
           } catch (err) {
-            console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err);
+            console.error("[Wave Unlock] Initial wave check failed (non-fatal):", err);
           }
-        }, 24 * 60 * 60 * 1000);
-      }, 10 * 60 * 1000);
+          setInterval(async () => {
+            try {
+              const { runDailyWaveCheck } = await import("./services/launch-governors");
+              await runDailyWaveCheck();
+            } catch (err) {
+              console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err);
+            }
+          }, 24 * 60 * 60 * 1000);
+        }, 10 * 60 * 1000);
 
-      setInterval(async () => {
-        const now = new Date();
-        if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 60) {
-          try {
-            const { sendWeeklySummaryEmails } = await import("./services/automation");
-            await sendWeeklySummaryEmails();
-          } catch (err) {
-            console.error("[auto8] Weekly email failed (non-fatal):", err);
+        setInterval(async () => {
+          const now = new Date();
+          if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 60) {
+            try {
+              const { sendWeeklySummaryEmails } = await import("./services/automation");
+              await sendWeeklySummaryEmails();
+            } catch (err) {
+              console.error("[auto8] Weekly email failed (non-fatal):", err);
+            }
           }
-        }
-      }, 60 * 60 * 1000);
+        }, 60 * 60 * 1000);
 
-      setInterval(async () => {
-        const now = new Date();
-        if (now.getUTCDay() === 1 && now.getUTCHours() === 6 && now.getUTCMinutes() < 60) {
-          try {
-            const { runWeeklyLaunchHealth } = await import("./services/launch-health");
-            await runWeeklyLaunchHealth();
-          } catch (err) {
-            console.error("[Launch Health] Weekly run failed (non-fatal):", err);
+        setInterval(async () => {
+          const now = new Date();
+          if (now.getUTCDay() === 1 && now.getUTCHours() === 6 && now.getUTCMinutes() < 60) {
+            try {
+              const { runWeeklyLaunchHealth } = await import("./services/launch-health");
+              await runWeeklyLaunchHealth();
+            } catch (err) {
+              console.error("[Launch Health] Weekly run failed (non-fatal):", err);
+            }
           }
-        }
-      }, 60 * 60 * 1000);
+        }, 60 * 60 * 1000);
 
-      setInterval(async () => {
-        const now = new Date();
-        if (now.getUTCDay() === 1 && now.getUTCHours() === 9 && now.getUTCMinutes() < 60) {
-          try {
-            const { runWeeklyClientDigests } = await import("./services/client-digest");
-            await runWeeklyClientDigests();
-          } catch (err) {
-            console.error("[Client Digest] Weekly run failed (non-fatal):", err);
+        setInterval(async () => {
+          const now = new Date();
+          if (now.getUTCDay() === 1 && now.getUTCHours() === 9 && now.getUTCMinutes() < 60) {
+            try {
+              const { runWeeklyClientDigests } = await import("./services/client-digest");
+              await runWeeklyClientDigests();
+            } catch (err) {
+              console.error("[Client Digest] Weekly run failed (non-fatal):", err);
+            }
           }
-        }
-      }, 60 * 60 * 1000);
+        }, 60 * 60 * 1000);
+      } else {
+        console.log("[startup] Web background tasks disabled. Set ENABLE_WEB_BACKGROUND_TASKS=true to enable schedulers in this container.");
+      }
 
-      runBackgroundStartup();
+      if (process.env.ENABLE_STARTUP_DB_TASKS === "true") {
+        runBackgroundStartup();
+      } else {
+        console.log("[startup] Startup DB tasks disabled. Set ENABLE_STARTUP_DB_TASKS=true to run migrations/seeding/job recovery in this container.");
+      }
     },
   );
 })();
