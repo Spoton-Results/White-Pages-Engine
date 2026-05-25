@@ -14,7 +14,6 @@ router.post("/api/auth/login", async (req, res, next) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    // Verbose logging so we can see exactly what is failing in production logs
     console.log(`[auth/login] attempt email=${email} passwordLen=${secret.length}`);
 
     const user = await loginUser(req, email, secret);
@@ -22,6 +21,12 @@ router.post("/api/auth/login", async (req, res, next) => {
       console.warn(`[auth/login] loginUser returned null for email=${email}`);
       return res.status(401).json({ message: "Invalid email or password" });
     }
+
+    // Store enough user info in session so /api/auth/me does not need to hit
+    // Postgres on every app boot. This prevents the whole UI from failing with
+    // {"message":"timeout exceeded when trying to connect"} when DB is slow.
+    (req.session as any).userEmail = user.email;
+    (req.session as any).username = user.username;
 
     console.log(`[auth/login] success userId=${user.id} isSuperAdmin=${user.isSuperAdmin}`);
 
@@ -53,10 +58,7 @@ router.get("/api/auth/debug", async (req, res) => {
     const adminPasswordRaw = String(process.env.ADMIN_PASSWORD || "");
     const adminPasswordTrimmed = adminPasswordRaw.trim();
 
-    // Check if user row exists in DB
-    const dbUser = adminEmail ? await storage.getUserByEmail(adminEmail) : null;
-
-    // Check session table exists
+    const dbUser = adminEmail ? await storage.getUserByEmail(adminEmail).catch(() => null) : null;
     const sessionTableCheck = await pool
       .query(`SELECT to_regclass('public.session') AS tbl`)
       .catch(() => ({ rows: [{ tbl: "ERROR" }] }));
@@ -89,31 +91,23 @@ router.get("/api/auth/debug", async (req, res) => {
   }
 });
 
-router.get("/api/auth/me", async (req, res, next) => {
-  try {
-    if (!req.session?.userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const user = await storage.getUser(req.session.userId);
-    if (!user) {
-      req.session.destroy(() => {});
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    return res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-        isSuperAdmin: user.isSuperAdmin,
-        accountId: user.accountId,
-      },
-    });
-  } catch (err) {
-    next(err);
+router.get("/api/auth/me", async (req, res) => {
+  if (!req.session?.userId) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
+
+  // Fast path: do NOT hit Postgres during app boot. The session is already the
+  // source of truth for whether the user is authenticated.
+  const sessionUser = {
+    id: req.session.userId,
+    email: (req.session as any).userEmail ?? null,
+    username: (req.session as any).username ?? "admin",
+    role: req.session.role ?? "user",
+    isSuperAdmin: req.session.isSuperAdmin === true,
+    accountId: req.session.accountId ?? null,
+  };
+
+  return res.json({ user: sessionUser });
 });
 
 router.post("/api/auth/logout", async (req, res) => {
