@@ -462,4 +462,8 @@ export async function updateService(id: string, data: Partial<InsertService>): P
 }
 
 export async function deleteService(id: string): Promise<void> {
-  // pages.serviceId and queryClusters.serviceId have no cascade — null out before
+  // pages.serviceId and queryClusters.serviceId have no cascade — null out before deleting
+  await db.update(pages).set({ serviceId: null }).where(eq(pages.serviceId, id));
+  await db.update(queryClusters).set({ serviceId: null }).where(eq(queryClusters.serviceId, id));
+  await db.delete(services).where(eq(services.id, id));
+}
