@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,17 +7,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Briefcase, Building2, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
+import { Plus, Briefcase, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
+import { useAccountContext } from "@/contexts/account-context";
+import { AccountPicker } from "@/components/shared/AccountPicker";
 
 export default function BrandProfilesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [overrideAccount, setOverrideAccount] = useState<string>("");
+  const { selectedAccountId, accountsLoading } = useAccountContext();
+  const selectedAccount = selectedAccountId;
   const [showCreate, setShowCreate] = useState(false);
   const { register, handleSubmit, reset, setValue, watch } = useForm<any>();
 
@@ -25,13 +27,6 @@ export default function BrandProfilesPage() {
   const [aiResult, setAiResult] = useState<{ tagline: string; description: string; voiceAndTone: string } | null>(null);
 
   const brandName = watch("name");
-
-  const { data: accounts = [] } = useQuery({
-    queryKey: ["/api/accounts"],
-    queryFn: () => api.get<any[]>("/api/accounts"),
-  });
-
-  const selectedAccount = overrideAccount || (accounts as any[])[0]?.id || "";
 
   const { data: brands = [], isLoading } = useQuery({
     queryKey: ["/api/brand-profiles", selectedAccount],
@@ -42,7 +37,7 @@ export default function BrandProfilesPage() {
   const create = useMutation({
     mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/brand-profiles`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/brand-profiles"] });
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles", selectedAccount] });
       setShowCreate(false);
       reset();
       setAiResult(null);
@@ -54,12 +49,16 @@ export default function BrandProfilesPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/brand-profiles/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/brand-profiles"] });
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles", selectedAccount] });
       toast({ title: "Brand profile deleted" });
     },
   });
 
   async function handleAiSuggest() {
+    if (!selectedAccount) {
+      toast({ title: "Select an account first", variant: "destructive" });
+      return;
+    }
     if (!brandName?.trim()) {
       toast({ title: "Enter brand name first", variant: "destructive" });
       return;
@@ -104,20 +103,13 @@ export default function BrandProfilesPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 bg-card p-3 rounded-lg border">
-          <Select onValueChange={setOverrideAccount} value={selectedAccount}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Select account" />
-            </SelectTrigger>
-            <SelectContent>
-              {accounts.map((a: any) => (
-                <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <AccountPicker countLabel={selectedAccount ? `${(brands as any[]).length} brand profiles` : undefined} />
 
-        {!selectedAccount ? (
+        {accountsLoading ? (
+          <div className="bg-card rounded-lg border p-4">
+            <Skeleton className="h-10 w-64" />
+          </div>
+        ) : !selectedAccount ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
             <Briefcase className="size-12 text-muted-foreground/30" />
             <p className="text-muted-foreground">Select an account to manage brand profiles</p>
@@ -126,7 +118,7 @@ export default function BrandProfilesPage() {
           <div className="grid gap-3 md:grid-cols-2">
             {[1,2].map(i => <Skeleton key={i} className="h-48 w-full" />)}
           </div>
-        ) : brands.length === 0 ? (
+        ) : (brands as any[]).length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 border rounded-lg bg-card text-center gap-3">
             <Briefcase className="size-12 text-muted-foreground/30" />
             <div>
@@ -137,7 +129,7 @@ export default function BrandProfilesPage() {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {brands.map((brand: any) => (
+            {(brands as any[]).map((brand: any) => (
               <Card key={brand.id} className="hover:border-primary/40 transition-colors">
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
@@ -179,7 +171,7 @@ export default function BrandProfilesPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
-                  disabled={aiLoading || !brandName?.trim()}
+                  disabled={aiLoading || !brandName?.trim() || !selectedAccount}
                   onClick={handleAiSuggest}
                   data-testid="button-brand-ai-suggest"
                 >
@@ -228,7 +220,7 @@ export default function BrandProfilesPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={create.isPending}>Create</Button>
+              <Button type="submit" disabled={create.isPending || !selectedAccount}>Create</Button>
             </DialogFooter>
           </form>
         </DialogContent>
