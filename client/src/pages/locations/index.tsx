@@ -154,11 +154,13 @@ export default function LocationsPage() {
 
   const { data: countData } = useQuery({
     queryKey: ["/api/locations-count", selectedAccount, countParams.toString()],
-    queryFn: () => api.get<{ total: number }>(`/api/accounts/${selectedAccount}/locations/count?${countParams}`),
+    queryFn: () => api.get<{ count: number }>(`/api/accounts/${selectedAccount}/locations/count?${countParams}`),
     enabled: !!selectedAccount,
     staleTime: 60_000,
   });
-  const totalCount = countData?.total ?? 0;
+  // ✅ CHANGED: server returns { count: N }, not { total: N } — reading the correct key
+  // 🔒 UNTOUCHED: all query logic, pagination math, rendering
+  const totalCount = countData?.count ?? 0;
 
   const create = useMutation({
     mutationFn: (data: any) => api.post(`/api/accounts/${selectedAccount}/locations`, data),
