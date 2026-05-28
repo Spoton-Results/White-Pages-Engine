@@ -29,9 +29,6 @@ function shouldIgnore(req: Request) {
   if (path.startsWith("/@vite") || path.startsWith("/src/")) return true;
   if (path === "/favicon.ico") return true;
 
-  // Admin/React app routes must never be treated as public generated-page
-  // slugs. Otherwise /login, /dashboard, etc. perform public-page DB lookups
-  // before the SPA can render, causing app-entry timeouts when Postgres is busy.
   const adminAppRoots = [
     "/login",
     "/logout",
@@ -63,6 +60,16 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normalizeUrl(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+}
+
+function telHref(phone: string) {
+  return phone.replace(/[^+\d]/g, "");
 }
 
 function notFoundHtml(message: string) {
@@ -163,19 +170,27 @@ async function serveSitemap(ctx: any, host: string, slug: string, res: Response)
 }
 
 function renderHtml(ctx: any, page: any, version: any, host: string) {
-  const brandName = ctx.brand_name || ctx.website_name || ctx.website_domain || host;
-  const primaryColor = ctx.primary_color || "#2563eb";
-  const phone = ctx.phone || ctx.website_settings?.phone || "";
-  const email = ctx.email || ctx.website_settings?.email || "";
-  const mainWebsiteUrl = ctx.website_settings?.mainWebsiteUrl || ctx.website_settings?.main_website_url || "";
-  const ctaHeading = ctx.website_settings?.ctaHeading || `Visit ${brandName}`;
-  const ctaText = ctx.website_settings?.ctaText || "See how we can help your business grow.";
-  const ctaButtonLabel = ctx.website_settings?.ctaButtonLabel || "Learn More";
+  const settings = ctx.website_settings || {};
+  const brandName = ctx.brand_name || settings.brandName || settings.siteName || ctx.website_name || ctx.website_domain || host;
+  const primaryColor = ctx.primary_color || settings.primaryColor || "#2563eb";
+  const phone = settings.phone || ctx.phone || "";
+  const email = settings.email || ctx.email || "";
+  const mainWebsiteUrl = normalizeUrl(settings.mainWebsiteUrl || settings.main_website_url || settings.websiteUrl || "");
+  const ctaHeading = settings.ctaHeading || `Visit ${brandName}`;
+  const ctaText = settings.ctaText || "See how we can help your business grow.";
+  const ctaButtonLabel = settings.ctaButtonLabel || "Learn More";
+  const demoBannerUrl = normalizeUrl(settings.demoBannerUrl || "");
+  const demoBannerHeading = settings.demoBannerHeading || "See This Platform in Action";
+  const demoBannerSubtext = settings.demoBannerSubtext || "See how this page was built and how the system works.";
+  const demoBannerButtonLabel = settings.demoBannerButtonLabel || "Watch the Live Demo →";
   const title = page.title || page.h1 || brandName;
   const description = page.meta_description || page.metaDescription || "";
   const contentHtml = version?.content_html || version?.contentHtml || "";
   const canonicalUrl = `https://${host}/${page.slug}`;
   const noindex = page.noindex === true || page.tier === 3 || page.status !== "published";
+  const demoBanner = demoBannerUrl
+    ? `<section class="demo"><div class="wrap"><div><p class="eyebrow">Live walkthrough</p><h2>${escapeHtml(demoBannerHeading)}</h2><p>${escapeHtml(demoBannerSubtext)}</p></div><a class="btn light" href="${escapeHtml(demoBannerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(demoBannerButtonLabel)}</a></div></section>`
+    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -189,15 +204,17 @@ function renderHtml(ctx: any, page: any, version: any, host: string) {
   <style>
     :root{--brand:${primaryColor};--ink:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#ffffff;}
     *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
-    header{background:linear-gradient(135deg,var(--brand),#0f172a);color:white;padding:54px 20px 42px}header .wrap,main,.footer-inner{max-width:1100px;margin:0 auto}.brand{font-weight:800;letter-spacing:.02em;margin-bottom:20px}h1{font-size:clamp(34px,5vw,58px);line-height:1.05;margin:0 0 16px}.lead{font-size:20px;max-width:760px;opacity:.92}
+    .wrap,main,.footer-inner{max-width:1100px;margin:0 auto}.demo{background:linear-gradient(135deg,#0f172a,var(--brand));color:white}.demo .wrap{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 20px}.demo h2{font-size:clamp(22px,3vw,34px);line-height:1.15;margin:0 0 4px}.demo p{margin:0;opacity:.92}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;color:#bfdbfe;margin:0 0 8px}
+    header{background:linear-gradient(135deg,var(--brand),#0f172a);color:white;padding:54px 20px 42px}.brand{font-weight:800;letter-spacing:.02em;margin-bottom:20px}h1{font-size:clamp(34px,5vw,58px);line-height:1.05;margin:0 0 16px}.lead{font-size:20px;max-width:760px;opacity:.92}
     main{padding:42px 20px}.content{background:var(--card);border:1px solid #e2e8f0;border-radius:24px;box-shadow:0 18px 45px rgba(15,23,42,.08);padding:clamp(24px,4vw,48px)}
-    h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}p{margin:0 0 16px}a{color:var(--brand)}ul,ol{padding-left:24px}.cta{margin-top:34px;padding:24px;border-radius:18px;background:#f1f5f9;border:1px solid #e2e8f0}.btn{display:inline-block;margin-top:12px;background:var(--brand);color:white;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:700}
-    footer{padding:30px 20px;color:var(--muted)}
+    h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}p{margin:0 0 16px}a{color:var(--brand)}ul,ol{padding-left:24px}.cta{margin-top:34px;padding:24px;border-radius:18px;background:#f1f5f9;border:1px solid #e2e8f0}.btn{display:inline-block;margin-top:12px;background:var(--brand);color:white!important;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:700}.btn.light{background:white;color:#0f172a!important;border:1px solid white}
+    footer{padding:30px 20px;color:var(--muted)}@media(max-width:760px){.demo .wrap{align-items:flex-start;flex-direction:column}.btn{width:100%;text-align:center}}
   </style>
 </head>
 <body>
+  ${demoBanner}
   <header><div class="wrap"><div class="brand">${escapeHtml(brandName)}</div><h1>${escapeHtml(page.h1 || title)}</h1>${description ? `<p class="lead">${escapeHtml(description)}</p>` : ""}</div></header>
-  <main><article class="content">${contentHtml}<section class="cta"><h2>${escapeHtml(ctaHeading)}</h2><p>${escapeHtml(ctaText)}</p>${mainWebsiteUrl ? `<a class="btn" href="${escapeHtml(mainWebsiteUrl)}">${escapeHtml(ctaButtonLabel)}</a>` : ""}${phone ? `<p>Call: <a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a></p>` : ""}${email ? `<p>Email: <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>` : ""}</section></article></main>
+  <main><article class="content">${contentHtml}<section class="cta"><h2>${escapeHtml(ctaHeading)}</h2><p>${escapeHtml(ctaText)}</p>${mainWebsiteUrl ? `<a class="btn" href="${escapeHtml(mainWebsiteUrl)}">${escapeHtml(ctaButtonLabel)}</a>` : ""}${phone ? `<p>Call: <a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a></p>` : ""}${email ? `<p>Email: <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>` : ""}</section></article></main>
   <footer><div class="footer-inner">&copy; ${new Date().getFullYear()} ${escapeHtml(brandName)}</div></footer>
 </body>
 </html>`;
@@ -226,7 +243,10 @@ async function servePage(ctx: any, host: string, slug: string, res: Response) {
   const version = versionResult.rows[0];
   if (!version) return res.status(404).type("text/html").send(notFoundHtml("This page is published but does not have an active page version yet."));
 
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("X-Nexus-Public-Renderer", "website-settings-cta-demo-v1");
   res.type("text/html").send(renderHtml(ctx, page, version, host));
 }
 
