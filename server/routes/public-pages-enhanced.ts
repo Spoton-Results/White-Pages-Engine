@@ -71,14 +71,14 @@ function postProcess(html: string, page: any, canonical: string, req: Request) {
   let out = html;
   const status = leadStatusHtml(req);
   if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
-  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}</head>`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="pages-effective-settings-v1"/></head>`);
   return out;
 }
 
 async function getWebsiteForHost(host: string) {
   const result = await pool.query(
-    `SELECT id, domain, COALESCE(settings, '{}'::jsonb) AS settings,
-            COALESCE(settings->>'brandName', settings->>'siteName', settings->>'businessName', domain) AS website_name
+    `SELECT id, account_id, domain, COALESCE(settings, '{}'::jsonb) AS settings,
+            COALESCE(settings->>'brandName', settings->>'siteName', settings->>'businessName', name, domain) AS website_name
      FROM websites
      WHERE lower(domain) = $1
         OR lower(settings->>'parentDomain') = $1
@@ -88,6 +88,31 @@ async function getWebsiteForHost(host: string) {
     [host]
   );
   return result.rows[0] || null;
+}
+
+async function getEffectiveSettings(website: any) {
+  const current = website?.settings || {};
+  const hasCta = Boolean(current.demoBannerUrl || current.ctaHeading || current.ctaText || current.mainWebsiteUrl || current.phone);
+  if (hasCta || !website?.account_id) return current;
+
+  const fallback = await pool.query(
+    `SELECT COALESCE(settings, '{}'::jsonb) AS settings
+     FROM websites
+     WHERE account_id::text = $1::text
+       AND id::text <> $2::text
+       AND (
+         COALESCE(settings->>'demoBannerUrl', '') <> ''
+         OR COALESCE(settings->>'ctaHeading', '') <> ''
+         OR COALESCE(settings->>'ctaText', '') <> ''
+         OR COALESCE(settings->>'mainWebsiteUrl', '') <> ''
+         OR COALESCE(settings->>'phone', '') <> ''
+       )
+     ORDER BY updated_at DESC NULLS LAST
+     LIMIT 1`,
+    [website.account_id, website.id]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  return { ...(fallback.rows[0]?.settings || {}), ...current };
 }
 
 async function getPublishedPageForWebsite(websiteId: string, slug: string) {
@@ -135,19 +160,24 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const page = await getPublishedPageForWebsite(website.id, slug);
     if (!page) return next();
 
+    const effectiveSettings = await getEffectiveSettings(website);
     const content = await getActiveContent(page.id, page);
     const canonical = `https://${host}/${page.slug}`;
     const links = await getPublicInternalLinks(page.id, page.website_id || page.websiteId || website.id);
 
-    res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("X-Nexus-Public-Renderer", "pages-effective-settings-v1");
 
     const html = buildEnhancedPublicPageHtml({
       page,
       website: {
         ...website,
         ...page,
-        settings: website.settings || {},
-        name: website.website_name,
+        settings: effectiveSettings,
+        name: effectiveSettings.brandName || website.website_name,
+        websiteName: website.website_name,
       },
       contentHtml: content,
       canonicalUrl: canonical,
