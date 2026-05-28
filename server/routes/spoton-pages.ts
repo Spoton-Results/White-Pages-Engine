@@ -77,7 +77,7 @@ function enhanceLiveHtml(html: string, page: any, canonical: string, req: Reques
   let out = sanitizeSpotOnCopy(html);
   const status = leadStatusHtml(req);
   if (status) out = out.replace('<section class="hero">', `${status}<section class="hero">`);
-  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}</head>`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="spoton-settings-v2"/></head>`);
   return sanitizeSpotOnCopy(out);
 }
 
@@ -91,7 +91,7 @@ async function getPublishedPage(slug: string) {
           OR lower(settings->>'publicDomain') IN ($1, $2)
           OR lower(settings->>'legacyParentDomain') = $2
      )
-     SELECT p.*, w.domain, w.settings,
+     SELECT p.*, w.domain, COALESCE(w.settings, '{}'::jsonb) AS settings,
             COALESCE(w.settings->>'brandName', w.settings->>'siteName', w.domain) AS website_name
      FROM pages p
      JOIN spoton_websites w ON p.website_id::text = w.id::text
@@ -211,7 +211,7 @@ router.get("/api/spoton-pages-debug/:slug", async (req: Request, res: Response, 
       exactSlugPageCount: pages.rowCount,
       exactSlugPages: pages.rows,
       matchedPublishedPage: page
-        ? { id: page.id, website_id: page.website_id, slug: page.slug, status: page.status, title: page.title }
+        ? { id: page.id, website_id: page.website_id, slug: page.slug, status: page.status, title: page.title, settings: page.settings || {} }
         : null,
     });
   } catch (err) {
@@ -257,11 +257,16 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    res.setHeader("X-SpotOn-Page", "v1");
+    res.setHeader("X-SpotOn-Page", "settings-v2");
 
     const html = buildEnhancedPublicPageHtml({
       page,
-      website: { ...page, name: page.website_name },
+      website: {
+        ...page,
+        name: page.website_name,
+        websiteName: page.website_name,
+        settings: page.settings || {},
+      },
       contentHtml: content,
       canonicalUrl: canonical,
       links,
