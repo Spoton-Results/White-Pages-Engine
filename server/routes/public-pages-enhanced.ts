@@ -71,8 +71,14 @@ function postProcess(html: string, page: any, canonical: string, req: Request) {
   let out = html;
   const status = leadStatusHtml(req);
   if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
-  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="pages-effective-settings-v1"/></head>`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="pages-effective-settings-v2"/></head>`);
   return out;
+}
+
+function compactSettings(settings: any) {
+  return Object.fromEntries(
+    Object.entries(settings || {}).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== ""),
+  );
 }
 
 async function getWebsiteForHost(host: string) {
@@ -91,9 +97,8 @@ async function getWebsiteForHost(host: string) {
 }
 
 async function getEffectiveSettings(website: any) {
-  const current = website?.settings || {};
-  const hasCta = Boolean(current.demoBannerUrl || current.ctaHeading || current.ctaText || current.mainWebsiteUrl || current.phone);
-  if (hasCta || !website?.account_id) return current;
+  const current = compactSettings(website?.settings || {});
+  if (!website?.account_id) return current;
 
   const fallback = await pool.query(
     `SELECT COALESCE(settings, '{}'::jsonb) AS settings
@@ -102,9 +107,18 @@ async function getEffectiveSettings(website: any) {
        AND id::text <> $2::text
        AND (
          COALESCE(settings->>'demoBannerUrl', '') <> ''
+         OR COALESCE(settings->>'demoBannerHeading', '') <> ''
+         OR COALESCE(settings->>'demoBannerSubtext', '') <> ''
+         OR COALESCE(settings->>'demoBannerButtonLabel', '') <> ''
          OR COALESCE(settings->>'ctaHeading', '') <> ''
          OR COALESCE(settings->>'ctaText', '') <> ''
+         OR COALESCE(settings->>'ctaButtonLabel', '') <> ''
          OR COALESCE(settings->>'mainWebsiteUrl', '') <> ''
+         OR COALESCE(settings->>'websiteUrl', '') <> ''
+         OR COALESCE(settings->>'brandWebsiteUrl', '') <> ''
+         OR COALESCE(settings->>'brandName', '') <> ''
+         OR COALESCE(settings->>'siteName', '') <> ''
+         OR COALESCE(settings->>'businessName', '') <> ''
          OR COALESCE(settings->>'phone', '') <> ''
        )
      ORDER BY updated_at DESC NULLS LAST
@@ -112,7 +126,7 @@ async function getEffectiveSettings(website: any) {
     [website.account_id, website.id]
   ).catch(() => ({ rows: [] as any[] }));
 
-  return { ...(fallback.rows[0]?.settings || {}), ...current };
+  return { ...compactSettings(fallback.rows[0]?.settings || {}), ...current };
 }
 
 async function getPublishedPageForWebsite(websiteId: string, slug: string) {
@@ -168,7 +182,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    res.setHeader("X-Nexus-Public-Renderer", "pages-effective-settings-v1");
+    res.setHeader("X-Nexus-Public-Renderer", "pages-effective-settings-v2");
 
     const html = buildEnhancedPublicPageHtml({
       page,
@@ -176,7 +190,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
         ...website,
         ...page,
         settings: effectiveSettings,
-        name: effectiveSettings.brandName || website.website_name,
+        name: effectiveSettings.brandName || effectiveSettings.siteName || effectiveSettings.businessName || website.website_name,
         websiteName: website.website_name,
       },
       contentHtml: content,
