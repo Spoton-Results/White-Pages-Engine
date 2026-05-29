@@ -21,6 +21,10 @@ function getRequestHostname(req: Request) {
   );
 }
 
+function isEnhancedPagesHost(hostname: string) {
+  return hostname.startsWith("pages.") || hostname.startsWith("page.") || hostname.startsWith("seo.") || hostname.startsWith("local.");
+}
+
 function shouldIgnore(req: Request) {
   const path = req.path || "/";
   if (req.method !== "GET" && req.method !== "HEAD") return true;
@@ -254,6 +258,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (shouldIgnore(req)) return next();
     const host = getRequestHostname(req);
+    if (isEnhancedPagesHost(host)) return next();
     const ctx = await resolveWebsiteByHost(host);
     if (!ctx) return next();
 
