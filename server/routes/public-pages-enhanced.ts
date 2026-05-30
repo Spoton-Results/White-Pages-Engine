@@ -49,8 +49,13 @@ function safeSlug(path: string) {
   return decodeURIComponent(String(path || "/").replace(/^\/+/, "").replace(/^pages\//, "")).trim();
 }
 
-function isPublicPagesHost(host: string) {
-  return host.startsWith("pages.") || host.startsWith("page.") || host.startsWith("seo.") || host.startsWith("local.");
+function isNeverPublicHost(host: string) {
+  return !host
+    || host.includes("localhost")
+    || host.includes("127.0.0.1")
+    || host.includes("railway.app")
+    || host.startsWith("admin.")
+    || host.startsWith("app.");
 }
 
 function socialMetaHtml(page: any, canonical: string) {
@@ -71,7 +76,7 @@ function postProcess(html: string, page: any, canonical: string, req: Request) {
   let out = html;
   const status = leadStatusHtml(req);
   if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
-  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="brand-profile-hydrated-v3"/></head>`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="public-domain-brand-v4"/></head>`);
   return out;
 }
 
@@ -111,9 +116,8 @@ async function getBrandProfile(website: any) {
     `SELECT *
      FROM brand_profiles
      WHERE account_id::text = $1::text
-       AND ($2::text = '' OR id::text = $2::text)
      ORDER BY
-       CASE WHEN id::text = $2::text THEN 0 ELSE 1 END,
+       CASE WHEN id::text = COALESCE($2::text, '') THEN 0 ELSE 1 END,
        updated_at DESC NULLS LAST,
        created_at DESC NULLS LAST
      LIMIT 1`,
@@ -184,7 +188,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
 
     const host = requestHost(req);
-    if (!host || !isPublicPagesHost(host)) return next();
+    if (isNeverPublicHost(host)) return next();
 
     const path = req.path || "/";
     if (isSkippablePath(path)) return next();
@@ -192,6 +196,9 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const slug = safeSlug(path);
     if (!slug) return next();
 
+    // Route by database ownership, not by hostname prefix. This supports
+    // pages.*, seo.*, local.*, and bare custom domains as long as the domain is
+    // registered in websites.domain/settings.
     const website = await getWebsiteForHost(host);
     if (!website) return next();
 
@@ -206,7 +213,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    res.setHeader("X-Nexus-Public-Renderer", "brand-profile-hydrated-v3");
+    res.setHeader("X-Nexus-Public-Renderer", "public-domain-brand-v4");
 
     console.log("[PUBLIC_HOST_RENDER]", {
       host,
@@ -219,7 +226,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
       hasPhone: !!effectiveSettings.phone,
       hasCta: !!effectiveSettings.ctaHeading || !!effectiveSettings.ctaText,
       hasDemoBanner: !!effectiveSettings.demoBannerUrl,
-      renderer: "brand-profile-hydrated-v3",
+      renderer: "public-domain-brand-v4",
     });
 
     const html = buildEnhancedPublicPageHtml({
