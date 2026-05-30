@@ -71,7 +71,7 @@ function postProcess(html: string, page: any, canonical: string, req: Request) {
   let out = html;
   const status = leadStatusHtml(req);
   if (status) out = out.replace("<section class=\"hero\">", `${status}<section class="hero">`);
-  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="pages-effective-settings-v2"/></head>`);
+  out = out.replace("</head>", `${socialMetaHtml(page, canonical)}<meta name="x-nexus-public-renderer" content="brand-profile-hydrated-v3"/></head>`);
   return out;
 }
 
@@ -81,14 +81,23 @@ function compactSettings(settings: any) {
   );
 }
 
+function firstNonEmpty(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 async function getWebsiteForHost(host: string) {
   const result = await pool.query(
-    `SELECT id, account_id, domain, COALESCE(settings, '{}'::jsonb) AS settings,
+    `SELECT id, account_id, brand_profile_id, domain, name, COALESCE(settings, '{}'::jsonb) AS settings,
             COALESCE(settings->>'brandName', settings->>'siteName', settings->>'businessName', name, domain) AS website_name
      FROM websites
      WHERE lower(domain) = $1
         OR lower(settings->>'parentDomain') = $1
         OR lower(settings->>'publicDomain') = $1
+        OR lower(settings->>'legacyParentDomain') = $1
      ORDER BY updated_at DESC NULLS LAST
      LIMIT 1`,
     [host]
@@ -96,37 +105,52 @@ async function getWebsiteForHost(host: string) {
   return result.rows[0] || null;
 }
 
+async function getBrandProfile(website: any) {
+  if (!website?.account_id) return null;
+  const result = await pool.query(
+    `SELECT *
+     FROM brand_profiles
+     WHERE account_id::text = $1::text
+       AND ($2::text = '' OR id::text = $2::text)
+     ORDER BY
+       CASE WHEN id::text = $2::text THEN 0 ELSE 1 END,
+       updated_at DESC NULLS LAST,
+       created_at DESC NULLS LAST
+     LIMIT 1`,
+    [website.account_id, website.brand_profile_id || ""],
+  ).catch(() => ({ rows: [] as any[] }));
+  return result.rows[0] || null;
+}
+
 async function getEffectiveSettings(website: any) {
   const current = compactSettings(website?.settings || {});
-  if (!website?.account_id) return current;
+  const brand = await getBrandProfile(website);
+  const brandFields = compactSettings(brand?.custom_fields || brand?.customFields || {});
 
-  const fallback = await pool.query(
-    `SELECT COALESCE(settings, '{}'::jsonb) AS settings
-     FROM websites
-     WHERE account_id::text = $1::text
-       AND id::text <> $2::text
-       AND (
-         COALESCE(settings->>'demoBannerUrl', '') <> ''
-         OR COALESCE(settings->>'demoBannerHeading', '') <> ''
-         OR COALESCE(settings->>'demoBannerSubtext', '') <> ''
-         OR COALESCE(settings->>'demoBannerButtonLabel', '') <> ''
-         OR COALESCE(settings->>'ctaHeading', '') <> ''
-         OR COALESCE(settings->>'ctaText', '') <> ''
-         OR COALESCE(settings->>'ctaButtonLabel', '') <> ''
-         OR COALESCE(settings->>'mainWebsiteUrl', '') <> ''
-         OR COALESCE(settings->>'websiteUrl', '') <> ''
-         OR COALESCE(settings->>'brandWebsiteUrl', '') <> ''
-         OR COALESCE(settings->>'brandName', '') <> ''
-         OR COALESCE(settings->>'siteName', '') <> ''
-         OR COALESCE(settings->>'businessName', '') <> ''
-         OR COALESCE(settings->>'phone', '') <> ''
-       )
-     ORDER BY updated_at DESC NULLS LAST
-     LIMIT 1`,
-    [website.account_id, website.id]
-  ).catch(() => ({ rows: [] as any[] }));
+  const inherited = brand ? {
+    brandName: firstNonEmpty(brand.name),
+    siteName: firstNonEmpty(brand.name),
+    businessName: firstNonEmpty(brand.name),
+    websiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    mainWebsiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    brandWebsiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    phone: firstNonEmpty(brand.phone_override, brand.phoneOverride, brand.phone),
+    email: firstNonEmpty(brand.email),
+    ctaHeading: firstNonEmpty(brand.cta_heading, brand.ctaHeading),
+    ctaText: firstNonEmpty(brand.cta_body, brand.ctaBody, brand.description),
+    ctaButtonLabel: firstNonEmpty(brand.cta_button_label, brand.ctaButtonLabel),
+    demoBannerUrl: firstNonEmpty(brand.demo_banner_url, brand.demoBannerUrl),
+    demoBannerHeading: firstNonEmpty(brand.demo_banner_heading, brand.demoBannerHeading),
+    demoBannerSubtext: firstNonEmpty(brand.demo_banner_subtext, brand.demoBannerSubtext),
+    demoBannerButtonLabel: firstNonEmpty(brand.demo_banner_button, brand.demoBannerButton),
+  } : {};
 
-  return { ...compactSettings(fallback.rows[0]?.settings || {}), ...current };
+  return {
+    ...brandFields,
+    ...compactSettings(inherited),
+    ...current,
+    __brandProfileId: brand?.id || "",
+  };
 }
 
 async function getPublishedPageForWebsite(websiteId: string, slug: string) {
@@ -182,7 +206,21 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    res.setHeader("X-Nexus-Public-Renderer", "pages-effective-settings-v2");
+    res.setHeader("X-Nexus-Public-Renderer", "brand-profile-hydrated-v3");
+
+    console.log("[PUBLIC_HOST_RENDER]", {
+      host,
+      websiteId: website.id,
+      websiteDomain: website.domain,
+      accountId: website.account_id,
+      brandProfileId: effectiveSettings.__brandProfileId || null,
+      slug,
+      brandName: effectiveSettings.brandName || effectiveSettings.siteName || effectiveSettings.businessName || null,
+      hasPhone: !!effectiveSettings.phone,
+      hasCta: !!effectiveSettings.ctaHeading || !!effectiveSettings.ctaText,
+      hasDemoBanner: !!effectiveSettings.demoBannerUrl,
+      renderer: "brand-profile-hydrated-v3",
+    });
 
     const html = buildEnhancedPublicPageHtml({
       page,
@@ -191,7 +229,11 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
         ...page,
         settings: effectiveSettings,
         name: effectiveSettings.brandName || effectiveSettings.siteName || effectiveSettings.businessName || website.website_name,
-        websiteName: website.website_name,
+        websiteName: effectiveSettings.siteName || effectiveSettings.brandName || website.website_name,
+        brandName: effectiveSettings.brandName,
+        mainWebsiteUrl: effectiveSettings.mainWebsiteUrl,
+        brandWebsiteUrl: effectiveSettings.brandWebsiteUrl,
+        phone: effectiveSettings.phone,
       },
       contentHtml: content,
       canonicalUrl: canonical,
