@@ -179,14 +179,14 @@ function renderHtml(ctx: any, page: any, version: any, host: string) {
   const primaryColor = ctx.primary_color || settings.primaryColor || "#2563eb";
   const phone = settings.phone || ctx.phone || "";
   const email = settings.email || ctx.email || "";
-  const mainWebsiteUrl = normalizeUrl(settings.mainWebsiteUrl || settings.main_website_url || settings.websiteUrl || "");
-  const ctaHeading = settings.ctaHeading || `Visit ${brandName}`;
-  const ctaText = settings.ctaText || "See how we can help your business grow.";
-  const ctaButtonLabel = settings.ctaButtonLabel || "Learn More";
-  const demoBannerUrl = normalizeUrl(settings.demoBannerUrl || "");
-  const demoBannerHeading = settings.demoBannerHeading || "See This Platform in Action";
-  const demoBannerSubtext = settings.demoBannerSubtext || "See how this page was built and how the system works.";
-  const demoBannerButtonLabel = settings.demoBannerButtonLabel || "Watch the Live Demo →";
+  const mainWebsiteUrl = normalizeUrl(settings.mainWebsiteUrl || settings.main_website_url || settings.websiteUrl || settings.website_url || "");
+  const ctaHeading = settings.ctaHeading || settings.cta_heading || `Visit ${brandName}`;
+  const ctaText = settings.ctaText || settings.ctaBody || settings.cta_body || "See how we can help your business grow.";
+  const ctaButtonLabel = settings.ctaButtonLabel || settings.cta_button_label || "Learn More";
+  const demoBannerUrl = normalizeUrl(settings.demoBannerUrl || settings.demo_banner_url || "");
+  const demoBannerHeading = settings.demoBannerHeading || settings.demo_banner_heading || "See This Platform in Action";
+  const demoBannerSubtext = settings.demoBannerSubtext || settings.demo_banner_subtext || "See how this page was built and how the system works.";
+  const demoBannerButtonLabel = settings.demoBannerButtonLabel || settings.demoBannerButton || settings.demo_banner_button || "Watch the Live Demo →";
   const title = page.title || page.h1 || brandName;
   const description = page.meta_description || page.metaDescription || "";
   const contentHtml = version?.content_html || version?.contentHtml || "";
@@ -248,9 +248,6 @@ async function servePage(ctx: any, host: string, slug: string, res: Response) {
   if (!version) return res.status(404).type("text/html").send(notFoundHtml("This page is published but does not have an active page version yet."));
 
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-  res.setHeader("X-Nexus-Public-Renderer", "website-settings-cta-demo-v1");
   res.type("text/html").send(renderHtml(ctx, page, version, host));
 }
 
@@ -258,24 +255,23 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (shouldIgnore(req)) return next();
     const host = getRequestHostname(req);
+    if (!host || host.includes("localhost") || host.includes("127.0.0.1")) return next();
+    if (host === "admin.spotonexus.com" || host === "spotonexus.com" || host === "www.spotonexus.com") return next();
     if (isEnhancedPagesHost(host)) return next();
+
     const ctx = await resolveWebsiteByHost(host);
     if (!ctx) return next();
 
-    const pathname = decodeURIComponent((req.path || "/").replace(/^\/+/, ""));
-    if (pathname === ".well-known/nexus-domain-health") return serveHealth(ctx, host, res);
-    if (pathname === "robots.txt") return serveRobots(ctx, host, res);
-    if (/^sitemap(?:[-\w]*)?\.xml$/i.test(pathname)) return serveSitemap(ctx, host, pathname, res);
+    const cleanPath = (req.path || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+    if (cleanPath === "robots.txt") return serveRobots(ctx, host, res);
+    if (cleanPath === "sitemap.xml" || /^sitemap[^/]*\.xml$/i.test(cleanPath)) return serveSitemap(ctx, host, cleanPath, res);
+    if (cleanPath === "_nexus/health") return serveHealth(ctx, host, res);
 
-    if (!pathname) {
-      const homeSlug = await resolveHomepageSlug(ctx);
-      if (!homeSlug) return res.status(404).type("text/html").send(notFoundHtml("This website domain is connected, but no published homepage or hub page exists yet."));
-      return servePage(ctx, host, homeSlug, res);
-    }
-
-    return servePage(ctx, host, pathname, res);
-  } catch (err) {
-    return next(err);
+    const slug = cleanPath || await resolveHomepageSlug(ctx);
+    if (!slug) return res.status(404).type("text/html").send(notFoundHtml("No published Nexus homepage exists for this website yet."));
+    return servePage(ctx, host, slug, res);
+  } catch (error) {
+    return next(error);
   }
 });
 
