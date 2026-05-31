@@ -75,27 +75,97 @@ function isFullHtmlDocument(contentHtml: string): boolean {
   return trimmed.startsWith("<!doctype") || trimmed.startsWith("<html");
 }
 
+function compactObject(value: any) {
+  return Object.fromEntries(
+    Object.entries(value || {}).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== ""),
+  );
+}
+
+function firstNonEmpty(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+async function getBrandProfile(row: any) {
+  if (!row?.account_id) return null;
+  const result = await pool.query(
+    `SELECT *
+     FROM brand_profiles
+     WHERE account_id::text = $1::text
+     ORDER BY
+       CASE WHEN id::text = COALESCE($2::text, '') THEN 0 ELSE 1 END,
+       updated_at DESC NULLS LAST,
+       created_at DESC NULLS LAST
+     LIMIT 1`,
+    [row.account_id, row.brand_profile_id || ""],
+  ).catch(() => ({ rows: [] as any[] }));
+  return result.rows[0] || null;
+}
+
+async function buildWebsiteForStaticRender(row: any) {
+  const brand = await getBrandProfile(row);
+  const inherited = brand ? {
+    brandName: firstNonEmpty(brand.name),
+    siteName: firstNonEmpty(brand.name),
+    businessName: firstNonEmpty(brand.name),
+    websiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    mainWebsiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    brandWebsiteUrl: firstNonEmpty(brand.website_url, brand.websiteUrl),
+    phone: firstNonEmpty(brand.phone_override, brand.phoneOverride, brand.phone),
+    email: firstNonEmpty(brand.email),
+    ctaHeading: firstNonEmpty(brand.cta_heading, brand.ctaHeading),
+    ctaText: firstNonEmpty(brand.cta_body, brand.ctaBody, brand.description),
+    ctaButtonLabel: firstNonEmpty(brand.cta_button_label, brand.ctaButtonLabel),
+    demoBannerUrl: firstNonEmpty(brand.demo_banner_url, brand.demoBannerUrl),
+    demoBannerHeading: firstNonEmpty(brand.demo_banner_heading, brand.demoBannerHeading),
+    demoBannerSubtext: firstNonEmpty(brand.demo_banner_subtext, brand.demoBannerSubtext),
+    demoBannerButtonLabel: firstNonEmpty(brand.demo_banner_button, brand.demoBannerButton),
+  } : {};
+
+  const settings = {
+    ...compactObject(brand?.custom_fields || brand?.customFields),
+    ...compactObject(inherited),
+    ...compactObject(row.settings),
+  };
+
+  return {
+    ...row,
+    name: settings.brandName || settings.siteName || settings.businessName || row.website_name,
+    websiteName: settings.siteName || settings.brandName || row.website_name,
+    brandName: settings.brandName,
+    phone: settings.phone,
+    mainWebsiteUrl: settings.mainWebsiteUrl,
+    brandWebsiteUrl: settings.brandWebsiteUrl,
+    settings,
+    __brandProfileId: brand?.id || "",
+  };
+}
+
 async function buildStaticHtml(row: any): Promise<string> {
   const contentHtml = sanitizeStaticHtmlCopy(row.content_html ?? "");
   const canonical = buildCanonicalUrl(row.domain, row.slug, row.canonical_url);
 
-  if (isFullHtmlDocument(contentHtml) && contentHtml.includes("nexus-demo")) {
+  // Old static HTML may already be a full document, but it can be missing the current
+  // brand shell. Only reuse it when it was rendered by the brand-aware static renderer.
+  if (isFullHtmlDocument(contentHtml) && contentHtml.includes("x-nexus-static-renderer=brand-hydrated-r2-v1")) {
     return contentHtml;
   }
 
   const links = await getPublicInternalLinks(row.id, row.website_id);
+  const website = await buildWebsiteForStaticRender(row);
 
-  return buildEnhancedPublicPageHtml({
+  const html = buildEnhancedPublicPageHtml({
     page: row,
-    website: {
-      ...row,
-      name: row.website_name,
-      settings: row.settings || {},
-    },
+    website,
     contentHtml,
     canonicalUrl: canonical,
     links,
   });
+
+  return html.replace("</head>", `<meta name="x-nexus-static-renderer" content="brand-hydrated-r2-v1"/></head>`);
 }
 
 async function getPublishedPage(options: RenderPublishedPageToR2Options): Promise<any | null> {
@@ -142,6 +212,8 @@ async function getPublishedPage(options: RenderPublishedPageToR2Options): Promis
       p.quality_score,
       p.published_at,
       w.domain,
+      w.account_id,
+      w.brand_profile_id,
       w.name AS website_name,
       w.settings,
       pv.content_html
