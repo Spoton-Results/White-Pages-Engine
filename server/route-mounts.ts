@@ -28,6 +28,7 @@ import publishedPagesSearchRouter from "./routes/published-pages-search";
 import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import { registerDebugSectionsRoute } from "./routes/debug-sections";
 import sitePreviewRouter from "./routes/site-preview";
+import pagesSubdomainPublicRouter from "./routes/pages-subdomain-public";
 import spotonPagesRouter from "./routes/spoton-pages";
 import onboardingLiveRouter from "./routes/onboarding-live";
 import nexusStripeRouter from "./routes/nexus-stripe";
@@ -63,6 +64,12 @@ export function mountSubRouters(app: Express) {
   app.use("/", publishedPagesSearchRouter);
   app.use("/", legacyPublicUrlRedirectRouter);
   app.use("/", sitePreviewRouter);
+
+  // Public pages.* host renderer. This must run before older public/static/R2
+  // fallbacks so https://pages.clientdomain.com/{slug} uses the same enhanced
+  // HTML shell that works in /sites/:domain/:slug admin preview.
+  app.use("/", pagesSubdomainPublicRouter);
+
   app.use("/", spotonPagesRouter);
   app.use("/", onboardingLiveRouter);
   app.use("/", nexusStripeRouter);
