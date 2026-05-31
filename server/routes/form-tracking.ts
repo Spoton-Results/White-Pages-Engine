@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { db, pool } from "../db"; // ✅ CHANGED: added pool for raw SQL read queries
-import { trackedLeads, bookedJobs } from "@shared/schema";
-import { eq, and, gte, lt, desc, inArray } from "drizzle-orm"; // 🔒 UNTOUCHED: used for inserts
+import { db, pool } from "../db";
+import { trackedLeads, bookedJobs, leads as simpleLeads } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { sendLeadNotification } from "../services/lead-notify";
 
@@ -79,8 +78,16 @@ function mapJobRow(r: any) {
   };
 }
 
+function pageSlugFromUrl(value: unknown) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.pathname.replace(/^\/+|\/+$/g, "");
+  } catch {
+    return "";
+  }
+}
+
 // POST /api/form-tracking/submit  (public — called from public-facing page forms)
-// 🔒 UNTOUCHED: write path — Drizzle insert works fine
 router.post("/submit", async (req, res) => {
   try {
     const {
@@ -97,50 +104,81 @@ router.post("/submit", async (req, res) => {
       sourcePageTitle,
     } = req.body;
 
-    if (!pageId || !websiteId || !serviceId || !submitterEmail) {
+    if (!pageId || !websiteId || !submitterEmail) {
       if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "error");
-      return res.status(400).json({ error: "Missing required fields: pageId, serviceId, websiteId, submitterEmail" });
+      return res.status(400).json({ error: "Missing required fields: pageId, websiteId, submitterEmail" });
     }
 
+    if (serviceId) {
+      const [lead] = await db
+        .insert(trackedLeads)
+        .values({
+          websiteId,
+          pageId,
+          serviceId,
+          locationId: locationId || null,
+          formName: formName || "Contact Form",
+          submitterName: submitterName || null,
+          submitterEmail,
+          submitterPhone: submitterPhone || null,
+          message: message || null,
+          sourcePageUrl: sourcePageUrl || null,
+          sourcePageTitle: sourcePageTitle || null,
+          formTimestamp: new Date(),
+        })
+        .returning();
+
+      sendLeadNotification({
+        leadId: lead.id,
+        websiteId: lead.websiteId,
+        pageId: lead.pageId,
+        submitterName: lead.submitterName,
+        submitterEmail: lead.submitterEmail,
+        submitterPhone: lead.submitterPhone,
+        message: lead.message,
+        formName: lead.formName,
+        sourcePageUrl: lead.sourcePageUrl,
+        sourcePageTitle: lead.sourcePageTitle,
+        formTimestamp: lead.formTimestamp ?? new Date(),
+      });
+
+      if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "success");
+      return res.json({ success: true, leadId: lead.id, message: "Form submitted successfully" });
+    }
+
+    // Some legacy/AI-generated pages do not have service_id populated. Do not hide
+    // or reject the public form for those pages; store them in the general leads
+    // table so every published page can capture inquiries.
     const [lead] = await db
-      .insert(trackedLeads)
+      .insert(simpleLeads)
       .values({
         websiteId,
         pageId,
-        serviceId,
-        locationId: locationId || null,
-        formName: formName || "Contact Form",
-        submitterName: submitterName || null,
-        submitterEmail,
-        submitterPhone: submitterPhone || null,
-        message: message || null,
-        sourcePageUrl: sourcePageUrl || null,
-        sourcePageTitle: sourcePageTitle || null,
-        formTimestamp: new Date(),
+        pageSlug: pageSlugFromUrl(sourcePageUrl),
+        name: submitterName || "Website Lead",
+        businessName: null,
+        email: submitterEmail,
+        phone: submitterPhone || null,
+        message: message || sourcePageTitle || formName || null,
       })
       .returning();
 
     sendLeadNotification({
       leadId: lead.id,
-      websiteId: lead.websiteId,
-      pageId: lead.pageId,
-      submitterName: lead.submitterName,
-      submitterEmail: lead.submitterEmail,
-      submitterPhone: lead.submitterPhone,
+      websiteId,
+      pageId,
+      submitterName: lead.name,
+      submitterEmail: lead.email,
+      submitterPhone: lead.phone,
       message: lead.message,
-      formName: lead.formName,
-      sourcePageUrl: lead.sourcePageUrl,
-      sourcePageTitle: lead.sourcePageTitle,
-      formTimestamp: lead.formTimestamp ?? new Date(),
+      formName: formName || "Public Page Quote Form",
+      sourcePageUrl: sourcePageUrl || null,
+      sourcePageTitle: sourcePageTitle || null,
+      formTimestamp: new Date(),
     });
 
     if (wantsHtmlRedirect(req)) return redirectWithStatus(res, sourcePageUrl, "success");
-
-    return res.json({
-      success: true,
-      leadId: lead.id,
-      message: "Form submitted successfully",
-    });
+    return res.json({ success: true, leadId: lead.id, fallbackLead: true, message: "Form submitted successfully" });
   } catch (error) {
     console.error("Error recording form:", error);
     if (wantsHtmlRedirect(req)) return redirectWithStatus(res, req.body?.sourcePageUrl, "error");
@@ -154,7 +192,6 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
     const { websiteId } = req.params;
     const { month } = req.query as { month?: string };
 
-    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug in production
     let query = `SELECT * FROM tracked_leads WHERE website_id = $1`;
     const params: any[] = [websiteId];
     if (month) {
@@ -184,10 +221,7 @@ router.get("/leads/:websiteId", requireAuth, async (req, res) => {
     }
     const enriched = page.map((l) => ({ ...l, bookedJob: jobsByLeadId[l.id] ?? null }));
 
-    return res.json({
-      totalForms: leads.length,
-      leads: enriched,
-    });
+    return res.json({ totalForms: leads.length, leads: enriched });
   } catch (error) {
     console.error("Error fetching leads:", error);
     return res.status(500).json({ error: "Failed to fetch leads" });
@@ -204,15 +238,10 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const cached = getCachedLeads(cacheKey);
     if (cached) return res.json(cached);
 
-    // ✅ CHANGED: raw SQL for websites lookup (fixes account_id mapping bug)
-    const siteRes = await pool.query(
-      `SELECT id FROM websites WHERE account_id = $1`,
-      [accountId]
-    );
+    const siteRes = await pool.query(`SELECT id FROM websites WHERE account_id = $1`, [accountId]);
     const websiteIds = siteRes.rows.map((r: any) => r.id);
     if (!websiteIds.length) return res.json({ leads: [], totalForms: 0 });
 
-    // ✅ CHANGED: raw SQL for tracked_leads (fixes website_id mapping bug)
     let query = `SELECT * FROM tracked_leads WHERE website_id = ANY($1)`;
     const params: any[] = [websiteIds];
     if (month) {
@@ -229,10 +258,7 @@ router.get("/account-leads", requireAuth, async (req, res) => {
     const leadIds = leads.map((l) => l.id);
     let jobs: any[] = [];
     if (leadIds.length > 0) {
-      const jobsRes = await pool.query(
-        `SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`,
-        [leadIds]
-      );
+      const jobsRes = await pool.query(`SELECT * FROM booked_jobs WHERE lead_id = ANY($1)`, [leadIds]);
       jobs = jobsRes.rows.map(mapJobRow);
     }
     const jobsByLeadId: Record<string, any> = {};
@@ -258,7 +284,6 @@ router.get("/metrics/:websiteId", requireAuth, async (req, res) => {
     const { websiteId } = req.params;
     const { month } = req.query as { month?: string };
 
-    // ✅ CHANGED: raw SQL to fix Drizzle camelCase→snake_case bug in production
     let query = `SELECT page_id, service_id FROM tracked_leads WHERE website_id = $1`;
     const params: any[] = [websiteId];
     if (month) {
@@ -269,10 +294,7 @@ router.get("/metrics/:websiteId", requireAuth, async (req, res) => {
     }
 
     const formsRes = await pool.query(query, params);
-    const forms = formsRes.rows.map((r: any) => ({
-      pageId:    r.page_id,
-      serviceId: r.service_id,
-    }));
+    const forms = formsRes.rows.map((r: any) => ({ pageId: r.page_id, serviceId: r.service_id }));
 
     const formsByPage: Record<string, number> = {};
     const formsByService: Record<string, number> = {};
@@ -282,12 +304,7 @@ router.get("/metrics/:websiteId", requireAuth, async (req, res) => {
       formsByService[form.serviceId] = (formsByService[form.serviceId] ?? 0) + 1;
     }
 
-    return res.json({
-      totalForms: forms.length,
-      formsByPage,
-      formsByService,
-      forms: forms.slice(0, 50),
-    });
+    return res.json({ totalForms: forms.length, formsByPage, formsByService, forms: forms.slice(0, 50) });
   } catch (error) {
     console.error("Error fetching metrics:", error);
     return res.status(500).json({ error: "Failed to fetch metrics" });
