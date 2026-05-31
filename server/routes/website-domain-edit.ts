@@ -2,12 +2,14 @@ import { Router } from "express";
 import { requireAuth } from "../auth";
 import { pool } from "../db";
 import { invalidateWebsiteDomainCache } from "../storage";
-import { invalidatePageCache } from "../routes"; // ✅ CHANGED: added import
+import { invalidatePageCache } from "../routes";
+import { renderPublishedPagesBatchToR2 } from "../services/static-page-renderer";
 
 const router = Router();
 
 const SPOTON_ROOT_DOMAIN = "spotonresults.com";
 const SPOTON_PAGES_DOMAIN = "pages.spotonresults.com";
+const R2_REBUILD_LIMIT = Math.max(25, Math.min(Number(process.env.R2_REBUILD_AFTER_WEBSITE_EDIT_LIMIT || 500), 5000));
 
 function normalizeHostname(value: unknown) {
   return String(value || "")
@@ -75,6 +77,41 @@ function toWebsite(rawRow: any) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function invalidatePublishedR2ForWebsite(websiteId: string) {
+  const result = await pool.query(
+    `UPDATE pages
+     SET r2_key = NULL,
+         content_hash = NULL,
+         rendered_at = NULL,
+         updated_at = NOW()
+     WHERE website_id::text = $1::text
+       AND status = 'published'`,
+    [websiteId],
+  );
+  return result.rowCount || 0;
+}
+
+function rebuildPublishedR2InBackground(websiteId: string) {
+  setImmediate(async () => {
+    try {
+      const result = await renderPublishedPagesBatchToR2({
+        websiteId,
+        limit: R2_REBUILD_LIMIT,
+        force: true,
+      });
+      console.log("[WEBSITE_EDIT_R2_REBUILD]", {
+        websiteId,
+        attempted: result.attempted,
+        rendered: result.rendered,
+        skipped: result.skipped,
+        failed: result.failed,
+      });
+    } catch (error) {
+      console.error("[WEBSITE_EDIT_R2_REBUILD_FAILED]", { websiteId, error });
+    }
+  });
 }
 
 // Must be mounted before the main /api/websites route. This makes the Websites
@@ -146,9 +183,23 @@ router.patch("/api/websites/:id", requireAuth, async (req, res, next) => {
     invalidateWebsiteDomainCache(current.domain);
     invalidateWebsiteDomainCache(nextDomain);
     if (nextDomain === SPOTON_PAGES_DOMAIN) invalidateWebsiteDomainCache(SPOTON_ROOT_DOMAIN);
-    invalidatePageCache(websiteId); // ✅ CHANGED: bust all cached page HTML for this website so new settings render immediately
+    invalidatePageCache(websiteId);
 
-    return res.json(toWebsite(updated.rows[0]));
+    const invalidatedR2Pages = await invalidatePublishedR2ForWebsite(websiteId).catch((error) => {
+      console.error("[WEBSITE_EDIT_R2_INVALIDATE_FAILED]", { websiteId, error });
+      return 0;
+    });
+
+    rebuildPublishedR2InBackground(websiteId);
+
+    return res.json({
+      ...toWebsite(updated.rows[0]),
+      publicPagesRefresh: {
+        invalidatedR2Pages,
+        rebuildStarted: true,
+        rebuildLimit: R2_REBUILD_LIMIT,
+      },
+    });
   } catch (err: any) {
     if (err?.code === "23505") {
       return res.status(409).json({ message: "That website domain is already used by another website." });
@@ -188,6 +239,11 @@ router.post("/api/websites/repair/spoton-results-pages-domain", requireAuth, asy
 
     invalidateWebsiteDomainCache(SPOTON_ROOT_DOMAIN);
     invalidateWebsiteDomainCache(SPOTON_PAGES_DOMAIN);
+    for (const row of result.rows) {
+      invalidatePageCache(row.id);
+      await invalidatePublishedR2ForWebsite(row.id).catch(() => 0);
+      rebuildPublishedR2InBackground(row.id);
+    }
 
     return res.json({
       message: "SpotOn Results public pages now use pages.spotonresults.com at the root path.",
