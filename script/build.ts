@@ -141,11 +141,19 @@ function getEffectiveClusters(settings: BulkJobSettings) {`);
   await writeFile(file, source);
 }
 
+async function patchPublicLeadFormGuard() {
+  const file = "server/services/public-page-enhancements.ts";
+  let source = await readFile(file, "utf-8");
+  source = source.replace('if (!websiteId || !pageId || !serviceId) return "";', 'if (!websiteId || !pageId) return "";');
+  await writeFile(file, source);
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
   await patchBulkGeneratorForMaxPages();
   await patchBulkGeneratorUiToBackendCampaign();
   await patchBackendCampaignChunking();
+  await patchPublicLeadFormGuard();
   console.log("building client...");
   await viteBuild();
   console.log("building server...");
