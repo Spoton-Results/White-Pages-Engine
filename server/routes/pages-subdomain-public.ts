@@ -31,6 +31,23 @@ function first(...values: any[]) {
   return "";
 }
 
+function normalizePublicSettings(settings: any) {
+  const s = settings || {};
+  return {
+    ...s,
+    mainWebsiteUrl: first(s.mainWebsiteUrl, s.main_website_url, s.websiteUrl, s.website_url, s.brandWebsiteUrl, s.brand_website_url),
+    websiteUrl: first(s.websiteUrl, s.website_url, s.mainWebsiteUrl, s.main_website_url),
+    brandWebsiteUrl: first(s.brandWebsiteUrl, s.brand_website_url, s.websiteUrl, s.website_url),
+    ctaHeading: first(s.ctaHeading, s.cta_heading),
+    ctaText: first(s.ctaText, s.ctaBody, s.cta_body),
+    ctaButtonLabel: first(s.ctaButtonLabel, s.cta_button_label),
+    demoBannerUrl: first(s.demoBannerUrl, s.demo_banner_url),
+    demoBannerHeading: first(s.demoBannerHeading, s.demo_banner_heading),
+    demoBannerSubtext: first(s.demoBannerSubtext, s.demo_banner_subtext),
+    demoBannerButtonLabel: first(s.demoBannerButtonLabel, s.demoBannerButton, s.demo_banner_button),
+  };
+}
+
 async function websiteForHost(h: string) {
   const root = rootHost(h);
   const candidates = Array.from(new Set([h, root])).filter(Boolean);
@@ -71,7 +88,7 @@ async function effectiveWebsite(w: any) {
     ctaHeading: first(b.cta_heading, b.ctaHeading), ctaText: first(b.cta_body, b.ctaBody, b.description), ctaButtonLabel: first(b.cta_button_label, b.ctaButtonLabel),
     demoBannerUrl: first(b.demo_banner_url, b.demoBannerUrl), demoBannerHeading: first(b.demo_banner_heading, b.demoBannerHeading), demoBannerSubtext: first(b.demo_banner_subtext, b.demoBannerSubtext), demoBannerButtonLabel: first(b.demo_banner_button, b.demoBannerButton),
   } : {};
-  const settings = { ...clean(b?.custom_fields || b?.customFields), ...clean(inherited), ...clean(w.settings) };
+  const settings = normalizePublicSettings({ ...clean(b?.custom_fields || b?.customFields), ...clean(inherited), ...clean(w.settings) });
   return { ...w, settings, name: settings.brandName || settings.siteName || settings.businessName || w.website_name || w.name || w.domain, websiteName: settings.siteName || settings.brandName || w.website_name, brandName: settings.brandName, phone: settings.phone, mainWebsiteUrl: settings.mainWebsiteUrl, brandWebsiteUrl: settings.brandWebsiteUrl, __brandProfileId: b?.id || "" };
 }
 
