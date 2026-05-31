@@ -122,6 +122,7 @@ async function resolveClientDomain(hostname: string) {
 
 function shouldIgnorePublicResolver(req: Request) {
   const path = req.path || "/";
+  if (path.startsWith("/sites/")) return true;
   if (path.startsWith("/api")) return true;
   if (path.startsWith("/assets")) return true;
   if (path.startsWith("/@vite") || path.startsWith("/src/")) return true;
@@ -320,171 +321,70 @@ function extractValidation(result: any) {
   };
 }
 
-async function createCloudflareHostname(hostname: string) {
+router.post("/api/websites/:websiteId/client-domains", requireAuth, async (req: Request, res: Response) => {
+  await ensureClientDomainsTable();
+  const access = await assertWebsiteAccess(req, res, req.params.websiteId);
+  if (!access) return;
+  const hostname = normalizeHostname(req.body?.hostname || req.body?.domain);
+  if (!hostname || !hostname.includes(".")) return res.status(400).json({ message: "A valid hostname is required." });
+
+  const existing = await pool.query(`SELECT id FROM client_domains WHERE lower(hostname) = lower($1) LIMIT 1`, [hostname]);
+  if (existing.rows.length) return res.status(409).json({ message: "This hostname is already connected." });
+
+  const created = await pool.query(
+    `INSERT INTO client_domains (website_id, account_id, hostname, status, created_at, updated_at)
+     VALUES ($1, $2, $3, 'pending_dns', NOW(), NOW())
+     RETURNING *`,
+    [access.id, access.account_id, hostname],
+  );
+
   try {
-    return await cfRequest(`/custom_hostnames`, {
+    const result = await cfRequest(`/custom_hostnames`, {
       method: "POST",
       body: JSON.stringify({
         hostname,
-        ssl: {
-          method: process.env.CF_CUSTOM_HOSTNAME_SSL_METHOD || "txt",
-          type: "dv",
-          settings: {
-            http2: "on",
-            min_tls_version: "1.2",
-            tls_1_3: "on",
-          },
-        },
+        ssl: { method: "txt", type: "dv", settings: { min_tls_version: "1.2" } },
       }),
     });
-  } catch (err: any) {
-    const code = err.cloudflare?.errors?.[0]?.code;
-    if (code === 1406) {
-      const list = await cfRequest(`/custom_hostnames?hostname=${encodeURIComponent(hostname)}`);
-      return Array.isArray(list) ? list[0] : list?.[0];
-    }
-    throw err;
-  }
-}
-
-async function fetchStatus(url: string) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-  try {
-    const res = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
-    return { ok: res.ok, status: res.status, url: res.url };
-  } catch (err: any) {
-    return { ok: false, status: 0, error: err?.name === "AbortError" ? "Timed out" : err?.message || "Fetch failed" };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function buildReadiness(row: any) {
-  const hostname = row.hostname;
-  const expectedTarget = dnsTarget().replace(/\.$/, "").toLowerCase();
-  let cnameRecords: string[] = [];
-  let aRecords: string[] = [];
-  let dnsError: string | null = null;
-  try { cnameRecords = (await resolveCname(hostname)).map((r) => r.replace(/\.$/, "").toLowerCase()); }
-  catch (err: any) { dnsError = err?.code || err?.message || "CNAME lookup failed"; }
-  try { aRecords = await resolve4(hostname); } catch { /* A records are optional when CNAME exists. */ }
-
-  const dnsDetected = cnameRecords.includes(expectedTarget) || cnameRecords.some((r) => r.endsWith(expectedTarget)) || aRecords.length > 0;
-  const cloudflareActive = row.status === "active";
-  const sslActive = row.ssl_status === "active" || row.ssl_status === "issued" || row.status === "active";
-
-  const homepageSlug = await resolveHomepageSlug({ website_id: row.website_id, website_settings: row.website_settings || {} });
-  const homepageAssigned = !!homepageSlug;
-  const [health, homepage, robots, sitemap] = await Promise.all([
-    fetchStatus(`https://${hostname}/.well-known/nexus-domain-health`),
-    fetchStatus(`https://${hostname}/`),
-    fetchStatus(`https://${hostname}/robots.txt`),
-    fetchStatus(`https://${hostname}/sitemap.xml`),
-  ]);
-
-  const checks = {
-    dns: { ok: dnsDetected, label: dnsDetected ? "DNS detected" : "DNS not detected", expectedTarget, cnameRecords, aRecords, error: dnsError },
-    cloudflare: { ok: cloudflareActive, label: cloudflareActive ? "Cloudflare active" : "Cloudflare pending", status: row.status },
-    ssl: { ok: sslActive, label: sslActive ? "SSL active" : "SSL pending", status: row.ssl_status || row.status },
-    resolver: { ok: health.ok, label: health.ok ? "Hostname resolves to Nexus" : "Hostname not resolving to Nexus", ...health },
-    homepage: { ok: homepageAssigned && homepage.ok, label: homepageAssigned ? (homepage.ok ? "Homepage reachable" : "Homepage assigned but not reachable") : "No homepage assigned", slug: homepageSlug, ...homepage },
-    robots: { ok: robots.ok, label: robots.ok ? "Robots reachable" : "Robots not reachable", ...robots },
-    sitemap: { ok: sitemap.ok, label: sitemap.ok ? "Sitemap reachable" : "Sitemap not reachable", ...sitemap },
-  };
-  const ready = Object.values(checks).every((check: any) => check.ok);
-  return { ready, hostname, checkedAt: new Date().toISOString(), checks };
-}
-
-router.get("/api/websites/:websiteId/client-domains", async (req, res, next) => {
-  try {
-    await ensureClientDomainsTable();
-    const website = await assertWebsiteAccess(req, res, req.params.websiteId); if (!website) return;
-    const rows = (await pool.query(`SELECT * FROM client_domains WHERE website_id::text = $1::text ORDER BY created_at DESC`, [req.params.websiteId])).rows;
-    res.json({ dnsTarget: dnsTarget(), domains: rows });
-  } catch (err) { next(err); }
-});
-
-router.post("/api/websites/:websiteId/client-domains", async (req, res, next) => {
-  try {
-    await ensureClientDomainsTable();
-    const website = await assertWebsiteAccess(req, res, req.params.websiteId); if (!website) return;
-    const hostname = normalizeHostname(req.body?.hostname);
-    if (!hostname || !hostname.includes(".")) return res.status(400).json({ message: "Enter a valid hostname like pages.client.com" });
-
-    let cfResult: any = null;
-    let cfError: string | null = null;
-    try { cfResult = await createCloudflareHostname(hostname); } catch (e: any) { cfError = e.message || "Cloudflare registration failed"; }
-    const validation = extractValidation(cfResult);
-    const status = cfResult?.status === "active" ? "active" : cfError ? "cloudflare_error" : "pending_dns";
-
-    const row = (await pool.query(
-      `INSERT INTO client_domains (website_id, account_id, hostname, status, cloudflare_hostname_id, ownership_txt_name, ownership_txt_value, ssl_status, error, verified_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-       ON CONFLICT (hostname) DO UPDATE SET website_id = EXCLUDED.website_id, account_id = EXCLUDED.account_id, status = EXCLUDED.status, cloudflare_hostname_id = COALESCE(EXCLUDED.cloudflare_hostname_id, client_domains.cloudflare_hostname_id), ownership_txt_name = COALESCE(EXCLUDED.ownership_txt_name, client_domains.ownership_txt_name), ownership_txt_value = COALESCE(EXCLUDED.ownership_txt_value, client_domains.ownership_txt_value), ssl_status = COALESCE(EXCLUDED.ssl_status, client_domains.ssl_status), error = EXCLUDED.error, verified_at = EXCLUDED.verified_at, updated_at = NOW()
-       RETURNING *`,
-      [website.id, website.account_id, hostname, status, cfResult?.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus, cfError, status === "active" ? new Date() : null],
-    )).rows[0];
-
-    res.json({
-      ok: true,
-      dnsTarget: dnsTarget(),
-      domain: row,
-      cloudflare: cfResult ? { id: cfResult.id, status: cfResult.status, sslStatus: cfResult.ssl?.status, sslMethod: cfResult.ssl?.method || process.env.CF_CUSTOM_HOSTNAME_SSL_METHOD || "txt" } : null,
-    });
-  } catch (err) { next(err); }
-});
-
-router.post("/api/client-domains/:id/check", async (req, res, next) => {
-  try {
-    await ensureClientDomainsTable();
-    const row = (await pool.query(`SELECT * FROM client_domains WHERE id::text = $1::text LIMIT 1`, [req.params.id])).rows[0];
-    if (!row) return res.status(404).json({ message: "Client domain not found" });
-    const website = await assertWebsiteAccess(req, res, row.website_id); if (!website) return;
-
-    let result: any = null;
-    let error: string | null = null;
-    try {
-      result = row.cloudflare_hostname_id ? await cfRequest(`/custom_hostnames/${row.cloudflare_hostname_id}`) : await createCloudflareHostname(row.hostname);
-    } catch (e: any) { error = e.message || "Cloudflare check failed"; }
     const validation = extractValidation(result);
-    const status = result?.status === "active" ? "active" : error ? "cloudflare_error" : "pending_dns";
-    const updated = (await pool.query(
-      `UPDATE client_domains SET status=$2, cloudflare_hostname_id=COALESCE($3, cloudflare_hostname_id), ownership_txt_name=COALESCE($4, ownership_txt_name), ownership_txt_value=COALESCE($5, ownership_txt_value), ssl_status=COALESCE($6, ssl_status), error=$7, verified_at=CASE WHEN $2='active' THEN NOW() ELSE verified_at END, updated_at=NOW() WHERE id::text=$1::text RETURNING *`,
-      [row.id, status, result?.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus, error],
-    )).rows[0];
-    res.json({ ok: true, dnsTarget: dnsTarget(), domain: updated });
-  } catch (err) { next(err); }
+    await pool.query(
+      `UPDATE client_domains
+       SET cloudflare_hostname_id = $2,
+           ownership_txt_name = $3,
+           ownership_txt_value = $4,
+           ssl_status = $5,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [created.rows[0].id, result.id || null, validation.ownershipTxtName, validation.ownershipTxtValue, validation.sslStatus],
+    );
+  } catch (err: any) {
+    await pool.query(`UPDATE client_domains SET error = $2, updated_at = NOW() WHERE id = $1`, [created.rows[0].id, err?.message || "Cloudflare setup failed"]);
+  }
+
+  const row = (await pool.query(`SELECT * FROM client_domains WHERE id = $1`, [created.rows[0].id])).rows[0];
+  res.status(201).json({ ...row, dnsTarget: dnsTarget() });
 });
 
-router.get("/api/client-domains/:id/readiness", async (req, res, next) => {
-  try {
-    await ensureClientDomainsTable();
-    const row = (await pool.query(
-      `SELECT cd.*, COALESCE(w.settings, '{}') AS website_settings
-       FROM client_domains cd
-       JOIN websites w ON w.id::text = cd.website_id::text
-       WHERE cd.id::text = $1::text
-       LIMIT 1`,
-      [req.params.id],
-    )).rows[0];
-    if (!row) return res.status(404).json({ message: "Client domain not found" });
-    const website = await assertWebsiteAccess(req, res, row.website_id); if (!website) return;
-    const readiness = await buildReadiness(row);
-    res.json(readiness);
-  } catch (err) { next(err); }
+router.get("/api/websites/:websiteId/client-domains", requireAuth, async (req: Request, res: Response) => {
+  await ensureClientDomainsTable();
+  const access = await assertWebsiteAccess(req, res, req.params.websiteId);
+  if (!access) return;
+  const result = await pool.query(`SELECT * FROM client_domains WHERE website_id::text = $1::text ORDER BY created_at DESC`, [access.id]);
+  res.json({ domains: result.rows, dnsTarget: dnsTarget() });
 });
 
-router.delete("/api/client-domains/:id", async (req, res, next) => {
-  try {
-    await ensureClientDomainsTable();
-    const row = (await pool.query(`SELECT * FROM client_domains WHERE id::text = $1::text LIMIT 1`, [req.params.id])).rows[0];
-    if (!row) return res.status(404).json({ message: "Client domain not found" });
-    const website = await assertWebsiteAccess(req, res, row.website_id); if (!website) return;
-    if (row.cloudflare_hostname_id) await cfRequest(`/custom_hostnames/${row.cloudflare_hostname_id}`, { method: "DELETE" }).catch(() => null);
-    await pool.query(`DELETE FROM client_domains WHERE id::text = $1::text`, [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { next(err); }
+router.delete("/api/websites/:websiteId/client-domains/:domainId", requireAuth, async (req: Request, res: Response) => {
+  await ensureClientDomainsTable();
+  const access = await assertWebsiteAccess(req, res, req.params.websiteId);
+  if (!access) return;
+  const domain = (await pool.query(`SELECT * FROM client_domains WHERE id::text = $1::text AND website_id::text = $2::text LIMIT 1`, [req.params.domainId, access.id])).rows[0];
+  if (!domain) return res.status(404).json({ message: "Client domain not found" });
+
+  if (domain.cloudflare_hostname_id) {
+    cfRequest(`/custom_hostnames/${domain.cloudflare_hostname_id}`, { method: "DELETE" }).catch(() => null);
+  }
+  await pool.query(`DELETE FROM client_domains WHERE id::text = $1::text`, [req.params.domainId]);
+  res.json({ ok: true });
 });
 
 export default router;
