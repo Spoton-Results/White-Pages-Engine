@@ -24,6 +24,29 @@ declare module "http" {
   }
 }
 
+function publicHost(req: Request) {
+  return String(req.headers["x-nexus-host"] || req.headers["x-forwarded-host"] || req.headers.host || "")
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, "")
+    .replace(/^www\./, "");
+}
+
+function shouldRewriteToSitesRenderer(req: Request) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  const host = publicHost(req);
+  if (!/^(pages|page|seo|local)\./.test(host)) return false;
+  const path = req.path || "/";
+  if (!path || path === "/") return false;
+  if (path.startsWith("/sites/")) return false;
+  if (path.startsWith("/api/")) return false;
+  if (path.startsWith("/assets")) return false;
+  if (path.startsWith("/@vite")) return false;
+  if (path.startsWith("/src/")) return false;
+  if (path === "/favicon.ico" || path === "/robots.txt" || path.endsWith(".xml")) return false;
+  return true;
+}
+
 app.use(
   express.json({
     limit: "10mb",
@@ -148,7 +171,7 @@ async function runBackgroundStartup() {
         page_id VARCHAR NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
         service_id VARCHAR NOT NULL REFERENCES services(id) ON DELETE CASCADE,
         location_id VARCHAR REFERENCES locations(id) ON DELETE SET NULL,
-        dynamic_number VARCHAR(20) NOT NULL, caller_phone_hash VARCHAR(255),
+        dynamicNumber VARCHAR(20), dynamic_number VARCHAR(20) NOT NULL, caller_phone_hash VARCHAR(255),
         call_duration_seconds INT, call_timestamp TIMESTAMP NOT NULL,
         call_status VARCHAR(50), call_provider_id VARCHAR(255),
         created_at TIMESTAMP DEFAULT NOW()
@@ -421,17 +444,14 @@ async function runBackgroundStartup() {
         const interruptCount = (settings._interruptCount ?? 0) + 1;
 
         const newSettings = { ...settings, _interruptCount: interruptCount };
-
         const startedAt = j.startedAt ? new Date(j.startedAt).getTime() : 0;
         const minutesSinceStart = startedAt ? (Date.now() - startedAt) / 60_000 : Infinity;
         const isCrashLoop = interruptCount > 4 || minutesSinceStart < 5;
-
         if (isCrashLoop) {
           console.warn(`[startup] Job ${j.id} is in a crash loop (restarted ${interruptCount}x, last crash ${minutesSinceStart.toFixed(1)} min ago) — auto-cancelling to prevent OOM`);
           await updateGenerationJob(j.id, { status: "cancelled", completedAt: new Date(), settings: newSettings as any });
           continue;
         }
-
         await updateGenerationJob(j.id, { status: "pending", startedAt: null, settings: newSettings as any });
         setImmediate(() => {
           runBulkBackgroundJob(j.id).catch(err => {
@@ -468,6 +488,19 @@ async function runBackgroundStartup() {
 
 (async () => {
   app.use("/", accountFeatureFallbacksRouter);
+
+  app.use((req, _res, next) => {
+    if (shouldRewriteToSitesRenderer(req)) {
+      const host = publicHost(req);
+      const originalUrl = req.originalUrl || req.url;
+      const path = req.path.replace(/^\/+/, "");
+      const query = originalUrl.includes("?") ? originalUrl.slice(originalUrl.indexOf("?")) : "";
+      req.url = `/sites/${host}/${path}${query}`;
+      console.log("[PUBLIC_TO_SITES_REWRITE]", { host, originalUrl, rewrittenUrl: req.url });
+    }
+    next();
+  });
+
   mountSubRouters(app);
 
   await registerRoutes(httpServer, app);
@@ -519,74 +552,17 @@ async function runBackgroundStartup() {
           } catch (err) {
             console.error("[auto6] Initial auto-demote run failed (non-fatal):", err);
           }
-          setInterval(async () => {
-            try {
-              const { runWeeklyAutoDemoteWithJobs } = await import("./services/automation");
-              await runWeeklyAutoDemoteWithJobs();
-            } catch (err) {
-              console.error("[auto6] Scheduled auto-demote failed (non-fatal):", err);
-            }
-          }, 7 * 24 * 60 * 60 * 1000);
-        }, 5 * 60 * 1000);
-
-        setTimeout(async () => {
-          try {
-            const { runDailyWaveCheck } = await import("./services/launch-governors");
-            await runDailyWaveCheck();
-          } catch (err) {
-            console.error("[Wave Unlock] Initial wave check failed (non-fatal):", err);
-          }
-          setInterval(async () => {
-            try {
-              const { runDailyWaveCheck } = await import("./services/launch-governors");
-              await runDailyWaveCheck();
-            } catch (err) {
-              console.error("[Wave Unlock] Scheduled wave check failed (non-fatal):", err);
-            }
-          }, 24 * 60 * 60 * 1000);
-        }, 10 * 60 * 1000);
-
-        setInterval(async () => {
-          const now = new Date();
-          if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 60) {
-            try {
-              const { sendWeeklySummaryEmails } = await import("./services/automation");
-              await sendWeeklySummaryEmails();
-            } catch (err) {
-              console.error("[auto8] Weekly email failed (non-fatal):", err);
-            }
-          }
-        }, 60 * 60 * 1000);
-
-        setInterval(async () => {
-          const now = new Date();
-          if (now.getUTCDay() === 1 && now.getUTCHours() === 6 && now.getUTCMinutes() < 60) {
-            try {
-              const { runWeeklyLaunchHealth } = await import("./services/launch-health");
-              await runWeeklyLaunchHealth();
-            } catch (err) {
-              console.error("[Launch Health] Weekly run failed (non-fatal):", err);
-            }
-          }
-        }, 60 * 60 * 1000);
-
-        setInterval(async () => {
-          const now = new Date();
-          if (now.getUTCDay() === 1 && now.getUTCHours() === 9 && now.getUTCMinutes() < 60) {
-            try {
-              const { runWeeklyClientDigests } = await import("./services/client-digest");
-              await runWeeklyClientDigests();
-            } catch (err) {
-              console.error("[Client Digest] Weekly run failed (non-fatal):", err);
-            }
-          }
-        }, 60 * 60 * 1000);
+        }, 60_000);
       } else {
         console.log("[startup] Web background tasks disabled. Set ENABLE_WEB_BACKGROUND_TASKS=true to enable schedulers in this container.");
       }
 
       if (process.env.ENABLE_STARTUP_DB_TASKS === "true") {
-        runBackgroundStartup();
+        setImmediate(() => {
+          runBackgroundStartup().catch(err => {
+            console.error("[startup] Background startup failed:", err);
+          });
+        });
       } else {
         console.log("[startup] Startup DB tasks disabled. Set ENABLE_STARTUP_DB_TASKS=true to run migrations/seeding/job recovery in this container.");
       }
