@@ -148,12 +148,21 @@ async function patchPublicLeadFormGuard() {
   await writeFile(file, source);
 }
 
+async function removePublicRewriteWorkaround() {
+  const file = "server/index.ts";
+  let source = await readFile(file, "utf-8");
+  source = source.replace(/\nfunction publicHost\(req: Request\) \{[\s\S]*?\n\}\n\nfunction shouldRewriteToSitesRenderer\(req: Request\) \{[\s\S]*?\n\}\n/, "\n");
+  source = source.replace(/\n\s*app\.use\(\(req, _res, next\) => \{\n\s*if \(shouldRewriteToSitesRenderer\(req\)\) \{[\s\S]*?\n\s*\}\n\s*next\(\);\n\s*\}\);\n/, "\n");
+  await writeFile(file, source);
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
   await patchBulkGeneratorForMaxPages();
   await patchBulkGeneratorUiToBackendCampaign();
   await patchBackendCampaignChunking();
   await patchPublicLeadFormGuard();
+  await removePublicRewriteWorkaround();
   console.log("building client...");
   await viteBuild();
   console.log("building server...");
