@@ -49,6 +49,19 @@ function normalizeResponse<T>(url: string, data: T): T {
   return normalizeSpotonWebsite(data) as T;
 }
 
+function parseJsonOrThrow(text: string, url: string, status: number) {
+  const body = text.trim();
+  if (!body) return undefined;
+  if (body.startsWith("<")) {
+    throw new Error(`API route returned HTML instead of JSON: ${url} (HTTP ${status})`);
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(`API route returned invalid JSON: ${url} (HTTP ${status})`);
+  }
+}
+
 async function request<T>(method: string, url: string, body?: any): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -57,14 +70,17 @@ async function request<T>(method: string, url: string, body?: any): Promise<T> {
     credentials: "include",
   });
 
+  if (res.status === 204) return undefined as T;
+
+  const text = await res.text();
+  const data = parseJsonOrThrow(text, url, res.status);
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
+    const err = data || { message: res.statusText };
     throw new Error(err.message || err.error || res.statusText || `HTTP ${res.status}`);
   }
 
-  if (res.status === 204) return undefined as T;
-  const data = await res.json();
-  return normalizeResponse<T>(url, data);
+  return normalizeResponse<T>(url, data as T);
 }
 
 export const api = {
