@@ -24,6 +24,7 @@ import deploymentQaRouter from "./routes/deployment-qa";
 import systemIntegrityRouter from "./routes/system-integrity";
 import bulkGenerateJobFastRouter from "./routes/bulk-generate-job-fast";
 import coreApiRouter from "./routes/core-api";
+import locationsApiRouter from "./routes/locations-api";
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
 import { registerDebugSectionsRoute } from "./routes/debug-sections";
@@ -49,6 +50,7 @@ export function mountSubRouters(app: Express) {
   app.use("/", variationBankWriterFixRouter);
   app.use("/", variationBankQueueRouter);
   app.use("/", coreApiRouter);
+  app.use("/", locationsApiRouter);
   app.use("/", brandR2RepairRouter);
   app.use("/", agencyRoiDashboardRouter);
   app.use("/", agencyDashboardRouter);
