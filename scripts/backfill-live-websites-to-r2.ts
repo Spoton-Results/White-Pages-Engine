@@ -33,6 +33,7 @@ async function getWebsiteCoverage(domains: string[]) {
        w.id,
        w.name,
        w.domain,
+       w.subdomain,
        COUNT(p.id)::int AS total,
        COUNT(p.id) FILTER (WHERE p.r2_key IS NOT NULL)::int AS has_r2,
        COUNT(p.id) FILTER (WHERE p.r2_key IS NULL)::int AS missing_r2,
@@ -42,8 +43,9 @@ async function getWebsiteCoverage(domains: string[]) {
        ON p.website_id::text = w.id::text
       AND p.status = 'published'
      WHERE w.domain = ANY($1::text[])
-     GROUP BY w.id, w.name, w.domain
-     ORDER BY array_position($1::text[], w.domain)`,
+        OR w.subdomain = ANY($1::text[])
+     GROUP BY w.id, w.name, w.domain, w.subdomain
+     ORDER BY COALESCE(array_position($1::text[], w.subdomain), array_position($1::text[], w.domain))`,
     [domains],
   );
 
@@ -80,6 +82,7 @@ async function main() {
     const websites = await getWebsiteCoverage(domains);
     console.table(websites.map((row: any) => ({
       domain: row.domain,
+      subdomain: row.subdomain,
       name: row.name,
       total: Number(row.total || 0),
       has_r2: Number(row.has_r2 || 0),
@@ -93,6 +96,7 @@ async function main() {
         console.log("[backfill-live-websites-to-r2] Skipping complete website", {
           websiteId: website.id,
           domain: website.domain,
+          subdomain: website.subdomain,
         });
         continue;
       }
@@ -101,6 +105,7 @@ async function main() {
       console.log("[backfill-live-websites-to-r2] Rendering batch", {
         websiteId: website.id,
         domain: website.domain,
+        subdomain: website.subdomain,
         limit,
         missingBefore: missing,
       });
@@ -115,6 +120,7 @@ async function main() {
       console.log("[backfill-live-websites-to-r2] Batch finished", {
         websiteId: result.websiteId,
         domain: website.domain,
+        subdomain: website.subdomain,
         attempted: result.attempted,
         rendered: result.rendered,
         skipped: result.skipped,
@@ -138,6 +144,7 @@ async function main() {
   console.log("[backfill-live-websites-to-r2] Final coverage");
   console.table(finalCoverage.map((row: any) => ({
     domain: row.domain,
+    subdomain: row.subdomain,
     name: row.name,
     total: Number(row.total || 0),
     has_r2: Number(row.has_r2 || 0),
