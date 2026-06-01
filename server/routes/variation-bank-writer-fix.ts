@@ -86,6 +86,26 @@ function startWriteJob(websiteId: string, accountId: string, ctx: BrandContext, 
   return jobId;
 }
 
+router.get("/api/websites/:websiteId/context", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ctx } = await getContext(req.params.websiteId);
+    return res.json({
+      brand: ctx.brandName ? {
+        name: ctx.brandName,
+        description: ctx.brandDescription || "",
+        voiceAndTone: ctx.voiceAndTone || "",
+      } : null,
+      industry: ctx.industryName ? {
+        name: ctx.industryName,
+        description: "",
+      } : null,
+    });
+  } catch (error: any) {
+    if (error?.status === 404) return res.status(404).json({ message: error.message });
+    next(error);
+  }
+});
+
 router.get("/api/websites/:websiteId/bank-services", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     return res.json(await getBankedServices(req.params.websiteId));
