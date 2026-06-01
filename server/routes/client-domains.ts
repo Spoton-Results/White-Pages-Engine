@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { pool } from "../db";
 import { requireAuth } from "../auth";
 import { resolveCname, resolve4 } from "node:dns/promises";
+import { getPageHtml } from "../services/r2"; // ✅ CHANGED
 
 const router = Router();
 
@@ -226,6 +227,20 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
   if (!page) {
     logCustomDomainFallbackHit(ctx.website_id, slug).catch(() => null);
     return res.status(404).type("text/html").send(notFoundHtml("No published Nexus page exists for this URL yet. The request was logged for promotion review."));
+  }
+
+  // ✅ CHANGED: Prefer fully-rendered R2 artifact before legacy shell renderer.
+  // 🔒 UNTOUCHED: Existing page lookup, version lookup, and fallback renderer remain unchanged.
+  if (page.r2_key) {
+    try {
+      const html = await getPageHtml(page.r2_key);
+      if (html) {
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+        return res.type("text/html").send(html);
+      }
+    } catch (error) {
+      console.error("[CLIENT_DOMAIN_R2_READ_FAILED]", { pageId: page.id, slug, r2Key: page.r2_key, error });
+    }
   }
 
   const versionResult = await pool.query(

@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { pool } from "../db";
+import { getPageHtml } from "../services/r2"; // ✅ CHANGED
 
 const router = Router();
 
@@ -235,6 +236,20 @@ async function servePage(ctx: any, host: string, slug: string, res: Response) {
   );
   const page = pageResult.rows[0];
   if (!page) return res.status(404).type("text/html").send(notFoundHtml("No published Nexus page exists for this URL yet."));
+
+  // ✅ CHANGED: Prefer fully-rendered R2 artifact before legacy shell renderer.
+  // 🔒 UNTOUCHED: Existing page lookup, version lookup, and fallback renderer remain unchanged.
+  if (page.r2_key) {
+    try {
+      const html = await getPageHtml(page.r2_key);
+      if (html) {
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
+        return res.type("text/html").send(html);
+      }
+    } catch (error) {
+      console.error("[PUBLIC_DOMAIN_R2_READ_FAILED]", { pageId: page.id, slug, r2Key: page.r2_key, error });
+    }
+  }
 
   const versionResult = await pool.query(
     `SELECT * FROM page_versions
