@@ -5,14 +5,29 @@ import { buildEnhancedPublicPageHtml, getPublicInternalLinks } from "../services
 const router = Router();
 
 function host(req: Request) {
-  return String(req.headers["x-nexus-host"] || req.headers["x-forwarded-host"] || req.headers.host || "")
+  return String(
+    req.headers["x-nexus-host"] ||
+    req.headers["x-forwarded-host"] ||
+    req.headers["x-original-host"] ||
+    req.headers["x-host"] ||
+    req.headers["cf-connecting-host"] ||
+    req.headers.host ||
+    ""
+  )
+    .split(",")[0]
+    .trim()
     .toLowerCase()
     .replace(/:\d+$/, "")
     .replace(/^www\./, "");
 }
 
 function slug(path: string) {
-  return decodeURIComponent(String(path || "/").replace(/^\/+/, "").replace(/^pages\//, "")).trim();
+  return decodeURIComponent(
+    String(path || "/")
+      .replace(/^\/+/, "")
+      .replace(/^sites\/[^/]+\//, "")
+      .replace(/^pages\//, "")
+  ).trim();
 }
 
 function rootHost(h: string) {
