@@ -181,7 +181,10 @@ router.get("/sites/:domain/:slug", async (req: Request, res: Response, next: Nex
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.setHeader("X-Site-Preview", "brand-hydrated-v2");
-    return res.type("html").send(html);
+    res.setHeader("X-Nexus-Public-Renderer", "site-preview-brand-hydrated-v3");
+    return res.type("html").send(
+      html.replace("</head>", `<meta name="x-nexus-public-renderer" content="site-preview-brand-hydrated-v3"/></head>`)
+    );
   } catch (err) {
     return next(err);
   }
