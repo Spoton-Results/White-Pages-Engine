@@ -14,6 +14,7 @@ const PENDING_BULK_JOB_INTERVAL_MS = Number(process.env.PENDING_BULK_JOB_INTERVA
 const PENDING_BULK_JOB_BATCH_LIMIT = Math.max(1, Number(process.env.PENDING_BULK_JOB_BATCH_LIMIT || 3));
 const ENABLE_BACKGROUND_JOB_PUMPS = process.env.ENABLE_BACKGROUND_JOB_PUMPS === "true";
 const NO_CLUSTER_SENTINEL = "__NO_CLUSTERS__";
+const BULK_CAMPAIGN_CHILD_MAX_PAGES = Math.max(1000, Number(process.env.BULK_CAMPAIGN_CHILD_MAX_PAGES || 75000));
 let deadJobRecoveryStarted = false;
 let deadJobRecoveryRunning = false;
 let pendingBulkJobPumpStarted = false;
@@ -93,6 +94,41 @@ function getTargetCount(settings: BulkJobSettings) {
   if (settings.mode === "specific_states") return settings.states?.length || 0;
   if (settings.mode === "specific_cities") return settings.cities?.length || 0;
   return 50;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  const safeSize = Math.max(1, size);
+  for (let i = 0; i < items.length; i += safeSize) chunks.push(items.slice(i, i + safeSize));
+  return chunks;
+}
+
+function buildCampaignChunks(settings: AnyJob, blueprintIds: string[]) {
+  const services = Array.isArray(settings.services) ? settings.services.map(String).filter(Boolean) : [];
+  const clusterCount = Math.max(1, Number(settings.clusterCount || 1));
+  const cities = Array.isArray(settings.childBaseSettings?.cities) ? settings.childBaseSettings.cities : Array.isArray(settings.cities) ? settings.cities : [];
+  const states = Array.isArray(settings.childBaseSettings?.states) ? settings.childBaseSettings.states : Array.isArray(settings.states) ? settings.states : [];
+  const mode = settings.childBaseSettings?.mode || settings.mode;
+  const targetCount = Number(settings.targetCount || (mode === "specific_cities" ? cities.length : mode === "specific_states" ? states.length : 50));
+  const targetsPerService = Math.max(1, targetCount * clusterCount);
+  const maxPages = BULK_CAMPAIGN_CHILD_MAX_PAGES;
+  const serviceChunkSize = Math.max(1, Math.floor(maxPages / targetsPerService));
+  const chunks: AnyJob[] = [];
+  for (const blueprintId of blueprintIds) {
+    if (serviceChunkSize >= services.length) {
+      const targetChunkSize = Math.max(1, Math.floor(maxPages / Math.max(1, services.length * clusterCount)));
+      if (mode === "specific_cities" && cities.length > targetChunkSize) {
+        for (const cityChunk of chunkArray(cities, targetChunkSize)) chunks.push({ blueprintId, services, cities: cityChunk, states: undefined, targetCount: cityChunk.length });
+      } else if (mode === "specific_states" && states.length > targetChunkSize) {
+        for (const stateChunk of chunkArray(states, targetChunkSize)) chunks.push({ blueprintId, services, cities: undefined, states: stateChunk, targetCount: stateChunk.length });
+      } else {
+        chunks.push({ blueprintId, services, targetCount });
+      }
+    } else {
+      for (const serviceChunk of chunkArray(services, serviceChunkSize)) chunks.push({ blueprintId, services: serviceChunk, targetCount });
+    }
+  }
+  return chunks.map((chunk, index) => ({ ...chunk, index: index + 1, total: chunks.length, totalPages: chunk.services.length * Number(chunk.targetCount || targetCount) * clusterCount }));
 }
 
 function getEffectiveClusters(settings: BulkJobSettings) {
@@ -191,12 +227,13 @@ async function runBulkCampaign(parentJobId: string) {
     const services = Array.isArray(settings.services) ? settings.services.map(String) : [];
     const targetCount = Number(settings.targetCount || 0);
     const clusterCount = Number(settings.clusterCount || 1);
+    const campaignChunks = buildCampaignChunks(settings, blueprintIds);
     const childTotalPages = services.length * targetCount * clusterCount;
 
     await storage.updateGenerationJob(parentJobId, {
       status: JOB_STATUS.RUNNING as any,
       startedAt: new Date(),
-      settings: { ...settings, currentBlueprintIndex: 0, childTotalPages } as any,
+      settings: { ...settings, currentBlueprintIndex: 0, childTotalPages, childChunkMaxPages: BULK_CAMPAIGN_CHILD_MAX_PAGES, childChunkCount: campaignChunks.length } as any,
     } as any);
 
     let processedPages = Number((parentJob as any).processedPages || 0);
@@ -453,6 +490,94 @@ router.post("/api/websites/:websiteId/bulk-generate-job", requireAuth, async (re
     } as any);
     res.status(202).json({ jobId: job.id, status: JOB_STATUS.PENDING, message: "Bulk generation queued in background." });
     launchBulkJob(job.id, "route");
+  } catch (error) {
+    return next(error);
+  }
+});
+
+
+// ✅ CHANGED: Generation Jobs management routes return JSON instead of falling through to HTML.
+// 🔒 UNTOUCHED: Bulk generation, campaign creation, background runners, schemas, and page generation logic remain unchanged.
+router.delete("/api/jobs/completed", requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM generation_jobs
+       WHERE status IN ($1::job_status, $2::job_status, $3::job_status)
+       RETURNING id`,
+      [JOB_STATUS.COMPLETED, JOB_STATUS.FAILED, JOB_STATUS.CANCELLED],
+    );
+
+    return res.json({ deleted: result.rowCount ?? 0, ids: result.rows.map((row: AnyJob) => row.id) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ✅ CHANGED: Batch delete selected non-running jobs.
+// 🔒 UNTOUCHED: Running jobs are protected; users must cancel before deleting.
+router.post("/api/jobs/delete-batch", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [];
+    if (ids.length === 0) return res.status(400).json({ error: "No job ids provided." });
+
+    const result = await pool.query(
+      `DELETE FROM generation_jobs
+       WHERE id = ANY($1::varchar[])
+         AND status <> $2::job_status
+       RETURNING id`,
+      [ids, JOB_STATUS.RUNNING],
+    );
+
+    return res.json({ deleted: result.rowCount ?? 0, ids: result.rows.map((row: AnyJob) => row.id) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ✅ CHANGED: Cancel a job through the JSON API.
+// 🔒 UNTOUCHED: Background runner cancellation behavior still relies on existing job status checks.
+router.post("/api/jobs/:id/cancel", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id || "");
+    if (!id) return res.status(400).json({ error: "Missing job id." });
+
+    const job = await storage.getGenerationJob(id).catch(() => null);
+    if (!job) return res.status(404).json({ error: "Job not found." });
+
+    await storage.updateGenerationJob(id, {
+      status: JOB_STATUS.CANCELLED as any,
+      completedAt: new Date(),
+    } as any);
+
+    return res.json({ id, status: JOB_STATUS.CANCELLED });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ✅ CHANGED: Delete one non-running job through the JSON API.
+// 🔒 UNTOUCHED: Running jobs are protected; users must cancel before deleting.
+router.delete("/api/jobs/:id", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id || "");
+    if (!id) return res.status(400).json({ error: "Missing job id." });
+
+    const job = await storage.getGenerationJob(id).catch(() => null);
+    if (!job) return res.status(404).json({ error: "Job not found." });
+
+    const status = String((job as any).status || "").toLowerCase();
+    if (status === JOB_STATUS.RUNNING) {
+      return res.status(409).json({ error: "Cannot delete a running job. Cancel it first." });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM generation_jobs
+       WHERE id = $1
+       RETURNING id`,
+      [id],
+    );
+
+    return res.json({ deleted: result.rowCount ?? 0, id });
   } catch (error) {
     return next(error);
   }
