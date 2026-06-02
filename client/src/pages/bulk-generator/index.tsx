@@ -90,7 +90,16 @@ export default function BulkGeneratorPage() {
   const selectedWebsite = websites.find((w: any) => w.id === websiteId);
   const accountId = selectedWebsite?.accountId || "";
 
-  const servicesQ = useQuery<string[]>({ queryKey: ["/api/websites", websiteId, "variation-services"], queryFn: () => apiFetch(`/api/websites/${websiteId}/variation-services`), enabled: !!websiteId });
+  const servicesQ = useQuery<string[]>({
+    queryKey: ["/api/accounts", accountId, "services", "bulk-generator"],
+    queryFn: async () => {
+      const rows = await api.get<any[]>(`/api/accounts/${accountId}/services`);
+      return rows
+        .map((service: any) => typeof service === "string" ? service : service.name)
+        .filter(Boolean);
+    },
+    enabled: !!accountId,
+  });
   const bankServicesQ = useQuery<string[]>({ queryKey: ["/api/websites", websiteId, "bank-services"], queryFn: () => apiFetch(`/api/websites/${websiteId}/bank-services`), enabled: !!websiteId });
   const locationsQ = useQuery<any[]>({
     queryKey: ["/api/accounts", accountId, "locations", "bulk-generator"],
