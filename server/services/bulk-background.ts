@@ -282,17 +282,52 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const brand = await bulkGetBrandProfile(website.brandProfileId as string);
   const brandName = brand?.name || website.name || website.domain;
 
-  // ✅ CHANGED: build brandContext from job settings overrides with fallbacks
+  // ✅ CHANGED: build brandContext from job settings, then Website Edit settings, then brand defaults.
+  // 🔒 UNTOUCHED: Page targeting, blueprint selection, services, locations, and job progress logic remain unchanged.
+  const websiteSettings = (website.settings as any) || {};
   const brandContext: BrandContext = {
-    websiteUrl:        settings.websiteUrl        || `https://${website.domain}`,
-    phoneOverride:     settings.phoneOverride     || (brand as any)?.phone || "",
-    ctaHeading:        settings.ctaHeading        || "",
-    ctaBody:           settings.ctaBody           || "",
-    ctaButtonLabel:    settings.ctaButtonLabel    || "",
-    demoBannerUrl:     settings.demoBannerUrl     || "",
-    demoBannerHeading: settings.demoBannerHeading || "",
-    demoBannerSubtext: settings.demoBannerSubtext || "",
-    demoBannerButton:  settings.demoBannerButton  || "",
+    websiteUrl:
+      settings.websiteUrl ||
+      websiteSettings.mainWebsiteUrl ||
+      websiteSettings.websiteUrl ||
+      websiteSettings.brandWebsiteUrl ||
+      `https://${website.domain}`,
+    phoneOverride:
+      settings.phoneOverride ||
+      websiteSettings.phone ||
+      websiteSettings.phoneOverride ||
+      (brand as any)?.phone ||
+      "",
+    ctaHeading:
+      settings.ctaHeading ||
+      websiteSettings.ctaHeading ||
+      "",
+    ctaBody:
+      settings.ctaBody ||
+      websiteSettings.ctaBody ||
+      websiteSettings.ctaText ||
+      "",
+    ctaButtonLabel:
+      settings.ctaButtonLabel ||
+      websiteSettings.ctaButtonLabel ||
+      "",
+    demoBannerUrl:
+      settings.demoBannerUrl ||
+      websiteSettings.demoBannerUrl ||
+      "",
+    demoBannerHeading:
+      settings.demoBannerHeading ||
+      websiteSettings.demoBannerHeading ||
+      "",
+    demoBannerSubtext:
+      settings.demoBannerSubtext ||
+      websiteSettings.demoBannerSubtext ||
+      "",
+    demoBannerButton:
+      settings.demoBannerButton ||
+      websiteSettings.demoBannerButton ||
+      websiteSettings.demoBannerButtonLabel ||
+      "",
   };
 
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
