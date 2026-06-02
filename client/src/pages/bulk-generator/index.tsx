@@ -92,7 +92,18 @@ export default function BulkGeneratorPage() {
 
   const servicesQ = useQuery<string[]>({ queryKey: ["/api/websites", websiteId, "variation-services"], queryFn: () => apiFetch(`/api/websites/${websiteId}/variation-services`), enabled: !!websiteId });
   const bankServicesQ = useQuery<string[]>({ queryKey: ["/api/websites", websiteId, "bank-services"], queryFn: () => apiFetch(`/api/websites/${websiteId}/bank-services`), enabled: !!websiteId });
-  const locationsQ = useQuery<any[]>({ queryKey: ["/api/websites", websiteId, "locations"], queryFn: () => api.get<any[]>(`/api/websites/${websiteId}/locations`), enabled: !!websiteId });
+  const locationsQ = useQuery<any[]>({
+    queryKey: ["/api/accounts", accountId, "locations", "bulk-generator"],
+    queryFn: async () => {
+      const rows = await api.get<any[]>(`/api/accounts/${accountId}/locations?limit=5000`);
+      return rows.map((loc: any) => ({
+        ...loc,
+        stateCode: loc.stateCode || loc.state_code,
+        stateName: loc.stateName || loc.state_name,
+      }));
+    },
+    enabled: !!accountId,
+  });
   const blueprintsQ = useQuery<any[]>({ queryKey: ["/api/accounts", accountId, "blueprints"], queryFn: () => api.get<any[]>(`/api/accounts/${accountId}/blueprints`), enabled: !!accountId });
   const queryClustersQ = useQuery<QueryCluster[]>({ queryKey: ["/api/accounts", accountId, "query-clusters"], queryFn: () => api.get<QueryCluster[]>(`/api/accounts/${accountId}/query-clusters`), enabled: !!accountId });
 
