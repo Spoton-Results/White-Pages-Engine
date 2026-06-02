@@ -152,9 +152,9 @@ router.get("/api/agency-dashboard/summary", requireAuth, async (req, res, next) 
       // ✅ CHANGED: Use recent generation-job progress as a lightweight 30-day work proxy instead of scanning pages.
       // 🔒 UNTOUCHED: Response field remains pagesBuiltThisMonth for frontend compatibility.
       pool.query(`SELECT COALESCE(SUM(COALESCE(gj.passed_pages, gj.processed_pages, 0)), 0)::int AS count FROM generation_jobs gj JOIN accounts a ON a.id::text = gj.account_id::text WHERE gj.created_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
-      // ✅ CHANGED: Count clients with recent jobs/links/sitemaps without joining pages.
+      // ✅ CHANGED: Keep summary lightweight; count recent work from generation_jobs only.
       // 🔒 UNTOUCHED: Existing clientsWithNewWork response field remains unchanged.
-      pool.query(`SELECT COUNT(DISTINCT a.id)::int AS count FROM accounts a LEFT JOIN generation_jobs gj ON gj.account_id::text = a.id::text AND gj.created_at >= NOW() - INTERVAL '30 days' LEFT JOIN internal_links il ON il.website_id::text IN (SELECT w.id::text FROM websites w WHERE w.account_id::text = a.id::text) AND il.created_at >= NOW() - INTERVAL '30 days' LEFT JOIN sitemaps sm ON sm.website_id::text IN (SELECT w.id::text FROM websites w WHERE w.account_id::text = a.id::text) AND sm.updated_at >= NOW() - INTERVAL '30 days' ${scope.clause} ${scope.clause ? "AND" : "WHERE"} (gj.id IS NOT NULL OR il.id IS NOT NULL OR sm.id IS NOT NULL)`, scope.params),
+      pool.query(`SELECT COUNT(DISTINCT a.id)::int AS count FROM accounts a JOIN generation_jobs gj ON gj.account_id::text = a.id::text AND gj.created_at >= NOW() - INTERVAL '30 days' ${scope.clause}`, scope.params),
       pool.query(`SELECT COUNT(DISTINCT l.slug)::int AS count FROM locations l JOIN accounts a ON a.id::text = l.account_id::text WHERE l.type = 'city' ${andScope.clause}`, andScope.params),
       pool.query(`SELECT COUNT(DISTINCT s.slug)::int AS count FROM services s JOIN accounts a ON a.id::text = s.account_id::text ${scope.clause}`, scope.params),
       pool.query(`SELECT COUNT(*)::int AS count FROM generation_jobs gj JOIN accounts a ON a.id::text = gj.account_id::text WHERE gj.status = 'failed' AND gj.created_at >= NOW() - INTERVAL '30 days' ${andScope.clause}`, andScope.params),
