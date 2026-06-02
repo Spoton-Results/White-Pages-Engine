@@ -26,7 +26,7 @@ const emptySummary: Summary = { activeClients: 0, pagesLive: 0, citiesCovered: 0
 const emptyActivity: Activity = { pagesGenerated: 0, pagesImproved: 0, linksAdded: 0, faqExpansions: 0, intentClustersBuilt: 0, sitemapUpdates: 0, contentRepairs: 0, qualityFixes: 0 };
 const emptyCoverage: Coverage = { statesCovered: 0, citiesCovered: 0, cityCoveragePercentage: 0, stateCoverage: [], pageTypes: { stateHubs: 0, cityHubs: 0, cityService: 0, industryCity: 0, problemIntent: 0 }, expansionOpportunities: [] };
 
-function AgencyDashboardContent() {
+export default function AgencyDashboardPage() {
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [activity, setActivity] = useState<Activity>(emptyActivity);
   const [coverage, setCoverage] = useState<Coverage>(emptyCoverage);
@@ -99,6 +99,7 @@ function AgencyDashboardContent() {
   const detailPageTypes = clientDetail?.pageTypes || {};
 
   return (
+    <DashboardLayout>
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div><div className="flex items-center gap-2"><div className="rounded-lg bg-indigo-50 p-2 text-indigo-700"><TrendingUp className="h-5 w-5" /></div><h1 className="text-2xl font-bold tracking-tight text-gray-900">Executive ROI Dashboard</h1></div><p className="mt-2 max-w-3xl text-sm text-gray-500">Proof-of-work and market visibility dashboard for managed agency growth. Built to show clients what has been created, expanded, linked, and protected.</p></div>
