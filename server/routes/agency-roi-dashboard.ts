@@ -51,12 +51,47 @@ function getRecommendedNextAction(input: RoiInputs) {
   return "Send monthly report to client.";
 }
 
+function selectedScope(req: any, alias = "a") {
+  // ✅ CHANGED: Super admins can scope dashboard data by selected client or agency.
+  // 🔒 UNTOUCHED: Existing session account scoping remains fallback behavior.
+  const accountId = typeof req.query?.accountId === "string" && req.query.accountId !== "all" ? req.query.accountId : null;
+  const agencyId = typeof req.query?.agencyId === "string" && req.query.agencyId !== "all" ? req.query.agencyId : null;
+
+  if (accountId) {
+    return {
+      where: `WHERE ${alias}.id::text = $1::text`,
+      and: `AND ${alias}.id::text = $1::text`,
+      params: [accountId] as any[],
+    };
+  }
+
+  if (agencyId) {
+    return {
+      where: `WHERE ${alias}.agency_id::text = $1::text`,
+      and: `AND ${alias}.agency_id::text = $1::text`,
+      params: [agencyId] as any[],
+    };
+  }
+
+  if (!req.session.isSuperAdmin && req.session.accountId) {
+    return {
+      where: `WHERE ${alias}.id::text = $1::text`,
+      and: `AND ${alias}.id::text = $1::text`,
+      params: [req.session.accountId] as any[],
+    };
+  }
+
+  return { where: "", and: "", params: [] as any[] };
+}
+
 function accountScope(req: any, alias = "a") {
-  return req.session.isSuperAdmin ? { clause: "", params: [] as any[] } : { clause: `WHERE ${alias}.id::text = $1::text`, params: [req.session.accountId] as any[] };
+  const scope = selectedScope(req, alias);
+  return { clause: scope.where, params: scope.params };
 }
 
 function accountAnd(req: any, alias = "a") {
-  return req.session.isSuperAdmin ? { clause: "", params: [] as any[] } : { clause: `AND ${alias}.id::text = $1::text`, params: [req.session.accountId] as any[] };
+  const scope = selectedScope(req, alias);
+  return { clause: scope.and, params: scope.params };
 }
 
 async function assertClientAccess(req: any, res: any, accountId: string) {

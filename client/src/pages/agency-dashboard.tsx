@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { useAccountContext } from "@/hooks/use-account-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,15 +38,25 @@ export default function AgencyDashboardPage() {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // ✅ CHANGED: Read global Agency/Client switcher state so this dashboard can request scoped data.
+  // 🔒 UNTOUCHED: Dropdown UI remains owned by DashboardLayout.
+  const { selectedAgencyId, selectedAccountId } = useAccountContext();
+  const filterQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (selectedAgencyId) params.set("agencyId", selectedAgencyId);
+    if (selectedAccountId) params.set("accountId", selectedAccountId);
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }, [selectedAgencyId, selectedAccountId]);
 
   async function load() {
     setLoading(true); setError(null);
     try {
       const [s, a, c, clientRows] = await Promise.all([
-        fetchJson<Summary>("/api/agency-dashboard/summary"),
-        fetchJson<Activity>("/api/agency-dashboard/activity"),
-        fetchJson<Coverage>("/api/agency-dashboard/coverage"),
-        fetchJson<ClientBreakdown[]>("/api/agency-dashboard/clients"),
+        fetchJson<Summary>(`/api/agency-dashboard/summary${filterQuery}`),
+        fetchJson<Activity>(`/api/agency-dashboard/activity${filterQuery}`),
+        fetchJson<Coverage>(`/api/agency-dashboard/coverage${filterQuery}`),
+        fetchJson<ClientBreakdown[]>(`/api/agency-dashboard/clients${filterQuery}`),
       ]);
       setSummary(s); setActivity(a); setCoverage(c); setClients(clientRows);
     } catch (e: any) { setError(e.message || "Failed to load agency dashboard"); }
@@ -81,7 +92,7 @@ export default function AgencyDashboardPage() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [filterQuery]);
 
   const totalIntentPages = useMemo(() => { const p = coverage.pageTypes; return p.stateHubs + p.cityHubs + p.cityService + p.industryCity + p.problemIntent; }, [coverage]);
   const activityTotal = useMemo(() => Object.values(activity).reduce((sum, value) => sum + (Number(value) || 0), 0), [activity]);
