@@ -207,13 +207,13 @@ router.get("/api/agency-dashboard/clients", requireAuth, async (req, res, next) 
          SELECT w.account_id::text AS account_id, COUNT(p.id)::int AS pages_live, COUNT(CASE WHEN p.created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS pages_30d
          FROM websites w LEFT JOIN pages p ON p.website_id::text = w.id::text AND p.status = 'published' GROUP BY w.account_id::text
        ), city_counts AS (
-         SELECT account_id, COUNT(DISTINCT slug)::int AS cities_covered FROM locations WHERE type = 'city' GROUP BY account_id::text
+         SELECT account_id::text AS account_id, COUNT(DISTINCT slug)::int AS cities_covered FROM locations WHERE type = 'city' GROUP BY account_id::text
        ), service_counts AS (
-         SELECT account_id, COUNT(DISTINCT slug)::int AS services_covered FROM services GROUP BY account_id::text
+         SELECT account_id::text AS account_id, COUNT(DISTINCT slug)::int AS services_covered FROM services GROUP BY account_id::text
        ), link_counts AS (
          SELECT w.account_id::text AS account_id, COUNT(il.id)::int AS links_30d FROM websites w LEFT JOIN internal_links il ON il.website_id::text = w.id::text AND il.created_at >= NOW() - INTERVAL '30 days' GROUP BY w.account_id::text
        ), job_counts AS (
-         SELECT account_id, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' AND settings->>'type' = 'intent_page_improvement' THEN 1 END)::int AS improvements_30d, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS jobs_30d, COUNT(CASE WHEN status = 'failed' AND created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS failed_jobs_30d, MAX(created_at) AS last_job_date FROM generation_jobs GROUP BY account_id::text
+         SELECT account_id::text AS account_id, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' AND settings->>'type' = 'intent_page_improvement' THEN 1 END)::int AS improvements_30d, COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS jobs_30d, COUNT(CASE WHEN status = 'failed' AND created_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS failed_jobs_30d, MAX(created_at) AS last_job_date FROM generation_jobs GROUP BY account_id::text
        ), sitemap_counts AS (
          SELECT w.account_id::text AS account_id, COUNT(CASE WHEN sm.updated_at >= NOW() - INTERVAL '30 days' THEN 1 END)::int AS sitemap_updates_30d FROM websites w LEFT JOIN sitemaps sm ON sm.website_id::text = w.id::text GROUP BY w.account_id::text
        ), thin_bank_counts AS (
