@@ -8,7 +8,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Loader2, Play, XCircle, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -17,21 +16,6 @@ type ProgressRow = { service: string; status: string; created: number; updated: 
 type CityLimit = "100" | "500" | "1000" | "5000" | "all";
 type QueryCluster = { id: string; serviceId?: string | null; name: string; intentType: string; primaryKeyword: string; secondaryKeywords?: string[] };
 type ClusterMode = "none" | "selected" | "all";
-
-// ✅ CHANGED: brand + CTA + demo banner state shape
-type BrandOverride = {
-  websiteUrl: string;
-  phoneOverride: string;
-  ctaHeading: string;
-  ctaBody: string;
-  ctaButtonLabel: string;
-};
-type DemoBanner = {
-  url: string;
-  heading: string;
-  subtext: string;
-  buttonLabel: string;
-};
 
 async function apiFetch<T = any>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...opts });
@@ -95,23 +79,6 @@ export default function BulkGeneratorPage() {
   const [lastResult, setLastResult] = useState<{ created: number; skipped: number; errors: number; slugs: string[]; warning?: string } | null>(null);
   const [lastFailure, setLastFailure] = useState("");
   const [bpQueueDisplay, setBpQueueDisplay] = useState({ idx: 0, total: 1, label: "" });
-
-  // ✅ CHANGED: brand override state
-  const [brandOverride, setBrandOverride] = useState<BrandOverride>({
-    websiteUrl: "",
-    phoneOverride: "",
-    ctaHeading: "",
-    ctaBody: "",
-    ctaButtonLabel: "",
-  });
-
-  // ✅ CHANGED: demo banner state
-  const [demoBanner, setDemoBanner] = useState<DemoBanner>({
-    url: "",
-    heading: "",
-    subtext: "",
-    buttonLabel: "",
-  });
 
   const bpQueueRef = useRef<QueueItem[]>([]);
   const bpQueueIdxRef = useRef(0);
@@ -274,7 +241,6 @@ export default function BulkGeneratorPage() {
     setCycleBlueprints(false);
     bpQueueRef.current = [];
     bpQueueIdxRef.current = 0;
-    handledTerminalJobRef.current = "";
   }
 
   function buildStatePayload() {
@@ -331,44 +297,14 @@ export default function BulkGeneratorPage() {
     return [];
   }
 
-  // ✅ CHANGED: brand override helper
-  function setBrand(field: keyof BrandOverride, value: string) {
-    setBrandOverride((prev) => ({ ...prev, [field]: value }));
-  }
-
-  // ✅ CHANGED: demo banner helper
-  function setDemo(field: keyof DemoBanner, value: string) {
-    setDemoBanner((prev) => ({ ...prev, [field]: value }));
-  }
-
   async function submitJobForBlueprint(item: QueueItem) {
     try {
       const queryClusterIds = selectedQueryClusterIds();
-
-      // ✅ CHANGED: include brand and demo banner in every job payload
-      const brandPayload: Record<string, string> = {};
-      if (brandOverride.websiteUrl.trim())    brandPayload.websiteUrl    = brandOverride.websiteUrl.trim();
-      if (brandOverride.phoneOverride.trim()) brandPayload.phoneOverride = brandOverride.phoneOverride.trim();
-      if (brandOverride.ctaHeading.trim())    brandPayload.ctaHeading    = brandOverride.ctaHeading.trim();
-      if (brandOverride.ctaBody.trim())       brandPayload.ctaBody       = brandOverride.ctaBody.trim();
-      if (brandOverride.ctaButtonLabel.trim()) brandPayload.ctaButtonLabel = brandOverride.ctaButtonLabel.trim();
-
-      const demoBannerPayload: Record<string, string> | null = demoBanner.url.trim()
-        ? {
-            url:         demoBanner.url.trim(),
-            heading:     demoBanner.heading.trim(),
-            subtext:     demoBanner.subtext.trim(),
-            buttonLabel: demoBanner.buttonLabel.trim(),
-          }
-        : null; // null = hide banner (leave URL blank to hide)
 
       const payload: Record<string, any> = {
         services: Array.from(selectedServices),
         ...item.locPayload,
         overwrite,
-        // ✅ CHANGED: new fields forwarded to the server
-        ...(Object.keys(brandPayload).length > 0 ? { brandOverride: brandPayload } : {}),
-        ...(demoBannerPayload ? { demoBanner: demoBannerPayload } : {}),
       };
       if (item.bpId) payload.blueprintId = item.bpId;
       if (queryClusterIds.length > 0) payload.queryClusterIds = queryClusterIds;
@@ -476,113 +412,6 @@ export default function BulkGeneratorPage() {
             </Select>
             {selectedBlueprint && !cycleBlueprints && <p className="text-xs text-muted-foreground">Selected: {selectedBlueprint.name}</p>}
             {blueprints.length > 1 && <label className="flex gap-2 items-center text-sm"><Checkbox checked={cycleBlueprints} onCheckedChange={(v) => setCycleBlueprints(!!v)} />Run all {blueprints.length} blueprints</label>}
-          </CardContent>
-        </Card>}
-
-        {/* ✅ CHANGED: Brand & Contact overrides card — new section */}
-        {websiteId && <Card>
-          <CardHeader>
-            <CardTitle>Brand &amp; Contact</CardTitle>
-            <CardDescription>Override brand values on every generated page. Leave blank to use account defaults.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor="websiteUrl">Main Website URL</Label>
-              <Input
-                id="websiteUrl"
-                placeholder="https://yoursite.com"
-                value={brandOverride.websiteUrl}
-                onChange={(e) => setBrand("websiteUrl", e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">Header brand link &amp; footer</p>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="phoneOverride">Phone Number</Label>
-              <Input
-                id="phoneOverride"
-                placeholder="(800) 555-0100"
-                value={brandOverride.phoneOverride}
-                onChange={(e) => setBrand("phoneOverride", e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">Overrides brand profile phone</p>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ctaHeading">CTA Section Heading</Label>
-              <Input
-                id="ctaHeading"
-                placeholder="Ready to Get Started?"
-                value={brandOverride.ctaHeading}
-                onChange={(e) => setBrand("ctaHeading", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ctaButtonLabel">CTA Button Label</Label>
-              <Input
-                id="ctaButtonLabel"
-                placeholder="Get a Free Quote"
-                value={brandOverride.ctaButtonLabel}
-                onChange={(e) => setBrand("ctaButtonLabel", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor="ctaBody">CTA Body Text</Label>
-              <Textarea
-                id="ctaBody"
-                placeholder="Contact us today to learn how we can help your business."
-                value={brandOverride.ctaBody}
-                onChange={(e) => setBrand("ctaBody", e.target.value)}
-                rows={3}
-              />
-            </div>
-          </CardContent>
-        </Card>}
-
-        {/* ✅ CHANGED: Demo Banner card — new section */}
-        {websiteId && <Card>
-          <CardHeader>
-            <CardTitle>Demo Banner</CardTitle>
-            <CardDescription>Appears at the top of every generated page. Leave URL blank to hide the banner.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor="demoBannerUrl">Demo URL</Label>
-              <Input
-                id="demoBannerUrl"
-                placeholder="https://demo.yoursite.com  (leave blank to hide banner)"
-                value={demoBanner.url}
-                onChange={(e) => setDemo("url", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="demoBannerHeading">Heading</Label>
-              <Input
-                id="demoBannerHeading"
-                placeholder="See It In Action"
-                value={demoBanner.heading}
-                onChange={(e) => setDemo("heading", e.target.value)}
-                disabled={!demoBanner.url.trim()}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="demoBannerButton">Button Label</Label>
-              <Input
-                id="demoBannerButton"
-                placeholder="View Demo"
-                value={demoBanner.buttonLabel}
-                onChange={(e) => setDemo("buttonLabel", e.target.value)}
-                disabled={!demoBanner.url.trim()}
-              />
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor="demoBannerSubtext">Subtext</Label>
-              <Input
-                id="demoBannerSubtext"
-                placeholder="No commitment required."
-                value={demoBanner.subtext}
-                onChange={(e) => setDemo("subtext", e.target.value)}
-                disabled={!demoBanner.url.trim()}
-              />
-            </div>
           </CardContent>
         </Card>}
 
