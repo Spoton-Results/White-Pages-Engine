@@ -27,6 +27,15 @@ import { db } from "./db";
 import { eq as dEq, and as dAnd, desc, like } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
+// ✅ CHANGED: Hub Pages bulk job status cache for existing frontend polling
+const hubBulkJobs = new Map<string, {
+  status: "done" | "error";
+  created: number;
+  failed: number;
+  error?: string;
+}>();
+
+
 // ── Cloudflare for SaaS custom hostname registration ─────────────────────────
 // When a client domain is saved, auto-register it as a CF custom hostname so
 // Cloudflare for SaaS routes their traffic to Nexus without any manual steps.
@@ -926,6 +935,91 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 // ✅ CHANGED: added missing export that index.ts requires
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
   // CHANGED: Restore website-scoped locations route used by Hub Pages state/city bulk generation.
+
+  // ✅ CHANGED: Restore missing Hub Pages bulk-generate route used by client/src/pages/hub-pages/index.tsx
+  app.post("/api/websites/:websiteId/hub-pages/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { websiteId } = req.params;
+      const { hubType, services = [], states = [], cities = [], maxChildLinks = 30, generateAI = false } = req.body ?? {};
+
+      const website = await storage.getWebsite(websiteId);
+      if (!website) {
+        return res.status(404).json({ error: "Website not found" });
+      }
+
+      const names: string[] =
+        hubType === "service" ? services :
+        hubType === "state" ? states :
+        hubType === "city" ? cities :
+        [];
+
+      if (!["service", "state", "city"].includes(hubType)) {
+        return res.status(400).json({ error: "Invalid hub type" });
+      }
+
+      if (!Array.isArray(names) || names.length === 0) {
+        return res.status(400).json({ error: "No hub names selected" });
+      }
+
+      const jobId = randomBytes(8).toString("hex");
+      let created = 0;
+      let failed = 0;
+
+      for (const rawName of names) {
+        try {
+          const cleanName = String(rawName).trim();
+          if (!cleanName) {
+            failed++;
+            continue;
+          }
+
+          const slug = slugify(cleanName);
+
+          // 🔒 UNTOUCHED: use existing hub page storage helper/schema shape
+          await storage.createHubPage({
+            websiteId,
+            hubType,
+            name: cleanName,
+            slug,
+            parentSlug: null,
+            maxChildLinks,
+            metaDescription: null,
+            status: generateAI ? "published" : "draft",
+            content: null,
+          } as any);
+
+          created++;
+        } catch (err: any) {
+          failed++;
+          console.error("[hub-pages] bulk create failed:", err?.message ?? err);
+        }
+      }
+
+      hubBulkJobs.set(jobId, { status: "done", created, failed });
+
+      return res.json({ jobId });
+    } catch (err: any) {
+      console.error("[hub-pages] bulk-generate failed:", err);
+      return res.status(500).json({ error: err?.message ?? "Bulk hub generation failed" });
+    }
+  });
+
+  // ✅ CHANGED: Restore missing Hub Pages bulk-job polling route used by the existing frontend
+  app.get("/api/websites/:websiteId/hub-pages/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+    const job = hubBulkJobs.get(req.params.jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        status: "error",
+        created: 0,
+        failed: 0,
+        error: "Hub bulk job not found",
+      });
+    }
+
+    return res.json(job);
+  });
+
   app.get("/api/websites/:websiteId/locations", requireAuth, async (req: Request, res: Response) => {
     try {
       const websiteId = req.params.websiteId;
