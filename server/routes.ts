@@ -927,6 +927,59 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
   // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
   // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
+  // CHANGED: Admin sitemap index XML route for Sitemap Manager "View Sitemap Index".
+  // UNTOUCHED: Public domain sitemap serving remains handled by public/client domain routers.
+  app.get("/api/websites/:websiteId/sitemap.xml", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).type("application/xml").send('<?xml version="1.0" encoding="UTF-8"?><error>Website not found</error>');
+      }
+
+      const sitemapRows = await storage.getSitemapsMeta(websiteId);
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapRows.map((sm: any) => {
+  const slug = String(sm.slug || "").replace(/\.xml$/i, "");
+  const lastmod = sm.lastGenerated || sm.updatedAt || sm.createdAt;
+  return `  <sitemap>
+    <loc>${baseUrl}/api/websites/${websiteId}/sitemaps/${slug}.xml</loc>
+    ${lastmod ? `<lastmod>${new Date(lastmod).toISOString()}</lastmod>` : ""}
+  </sitemap>`;
+}).join("\n")}
+</sitemapindex>`;
+
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err: any) {
+      console.error("[sitemaps] Failed to serve admin sitemap index:", err);
+      return res.status(500).type("application/xml").send('<?xml version="1.0" encoding="UTF-8"?><error>Failed to serve sitemap index</error>');
+    }
+  });
+
+  // CHANGED: Admin sitemap chunk XML route for generated sitemap rows.
+  app.get("/api/websites/:websiteId/sitemaps/:slug.xml", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const slug = String(req.params.slug || "").replace(/\.xml$/i, "");
+      const sitemap = await storage.getSitemapBySlug(websiteId, slug);
+
+      if (!sitemap?.xmlContent) {
+        return res.status(404).type("application/xml").send('<?xml version="1.0" encoding="UTF-8"?><error>Sitemap not found</error>');
+      }
+
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      return res.send(sitemap.xmlContent);
+    } catch (err: any) {
+      console.error("[sitemaps] Failed to serve admin sitemap chunk:", err);
+      return res.status(500).type("application/xml").send('<?xml version="1.0" encoding="UTF-8"?><error>Failed to serve sitemap</error>');
+    }
+  });
+
   app.post("/api/websites/:websiteId/sitemaps/generate", requireAuth, async (req: Request, res: Response) => {
     try {
       const websiteId = req.params.websiteId;

@@ -55,7 +55,11 @@ export default function SitemapsPage() {
     mutationFn: () => api.post(`/api/websites/${selectedWebsite}/sitemaps/generate`, {}),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/sitemaps"] });
-      toast({ title: `Sitemaps generated`, description: `${data.keys?.length || 0} sitemap files created.` });
+      if (data?.queued) {
+        toast({ title: "Sitemap generation started", description: "Refresh in a moment to see generated sitemap files." });
+      } else {
+        toast({ title: "Sitemaps generated", description: `${data.keys?.length || 0} sitemap files created.` });
+      }
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
