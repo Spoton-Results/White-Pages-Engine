@@ -925,5 +925,44 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 // contract in index.ts without registering any duplicate routes.
 // ✅ CHANGED: added missing export that index.ts requires
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
+  // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
+  // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
+  app.post("/api/websites/:websiteId/sitemaps/generate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ success: false, message: "Website not found" });
+      }
+
+      const domain = website.domain;
+      const settings = (website as any).settings || {};
+      const proxyPath = settings.proxyPath || (website as any).proxyPath || "";
+      const normalizedProxyPath = proxyPath
+        ? `/${String(proxyPath).replace(/^\/+|\/+$/g, "")}`
+        : "";
+      const canonicalBase = `https://${domain}${normalizedProxyPath}`;
+
+      const sitemapSlugs = await generateSitemapsForWebsite(website.id, domain, canonicalBase);
+
+      invalidateSitemapCache(website.id);
+      await warmSitemapCache(website.id).catch(() => {});
+
+      return res.json({
+        success: true,
+        websiteId: website.id,
+        count: sitemapSlugs.length,
+        sitemaps: sitemapSlugs,
+      });
+    } catch (err: any) {
+      console.error("[sitemaps] Failed to generate sitemaps:", err);
+      return res.status(500).json({
+        success: false,
+        message: err?.message || "Failed to generate sitemaps",
+      });
+    }
+  });
+
   return server;
 }
