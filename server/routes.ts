@@ -927,6 +927,24 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
   // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
   // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
+  // CHANGED: Restore Sitemap Manager list route for generated sitemap chunks.
+  app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const sitemapRows = await storage.getSitemapsMeta(websiteId);
+      return res.json(sitemapRows);
+    } catch (err: any) {
+      console.error("[sitemaps] Failed to list sitemaps:", err);
+      return res.status(500).json({ message: err?.message || "Failed to list sitemaps" });
+    }
+  });
+
   // CHANGED: Admin sitemap index XML route for Sitemap Manager "View Sitemap Index".
   // UNTOUCHED: Public domain sitemap serving remains handled by public/client domain routers.
   app.get("/api/websites/:websiteId/sitemap.xml", requireAuth, async (req: Request, res: Response) => {

@@ -54,7 +54,7 @@ export default function SitemapsPage() {
   const generate = useMutation({
     mutationFn: () => api.post(`/api/websites/${selectedWebsite}/sitemaps/generate`, {}),
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ["/api/sitemaps"] });
+      qc.invalidateQueries({ queryKey: ["/api/sitemaps", selectedWebsite] });
       if (data?.queued) {
         toast({ title: "Sitemap generation started", description: "Refresh in a moment to see generated sitemap files." });
       } else {
