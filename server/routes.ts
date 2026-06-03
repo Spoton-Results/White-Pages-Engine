@@ -927,6 +927,103 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
   // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
   // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
+  // CHANGED: Restore Internal Links stats route used by Internal Links page.
+  app.get("/api/websites/:websiteId/internal-links/stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const stats = await storage.getInternalLinkStats(websiteId);
+      return res.json(stats);
+    } catch (err: any) {
+      console.error("[internal-links] Failed to load stats:", err);
+      return res.status(500).json({ message: err?.message || "Failed to load internal link stats" });
+    }
+  });
+
+  // CHANGED: Restore per-website Internal Links rebuild route.
+  app.post("/api/websites/:websiteId/internal-links/rebuild", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      res.json({
+        success: true,
+        queued: true,
+        websiteId,
+        message: "Internal link rebuild started",
+      });
+
+      setImmediate(async () => {
+        try {
+          console.log(`[internal-links] Started rebuild for ${website.domain} (${websiteId})`);
+          const { buildInternalLinks } = await import("./services/internal-links");
+          const pages = await storage.getPages(websiteId, { status: "published", limit: 100000, offset: 0 });
+          const links = buildInternalLinks(websiteId, pages as any);
+
+          await storage.clearInternalLinks(websiteId);
+          const saved = await storage.saveInternalLinks(links as any);
+
+          console.log(`[internal-links] Rebuilt ${saved} link(s) for ${website.domain}`);
+        } catch (backgroundErr) {
+          console.error(`[internal-links] Failed rebuild for ${website.domain}:`, backgroundErr);
+        }
+      });
+
+      return;
+    } catch (err: any) {
+      console.error("[internal-links] Failed to start rebuild:", err);
+      return res.status(500).json({ message: err?.message || "Failed to start internal link rebuild" });
+    }
+  });
+
+  // CHANGED: Restore all-websites Internal Links rebuild route.
+  app.post("/api/internal-links/rebuild-all", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websites = await storage.getWebsites();
+      const activeWebsites = (websites as any[]).filter((w: any) => w?.id);
+
+      res.json({
+        success: true,
+        queued: true,
+        count: activeWebsites.length,
+        message: "Internal link rebuild started for all websites",
+      });
+
+      setImmediate(async () => {
+        const { buildInternalLinks } = await import("./services/internal-links");
+
+        for (const website of activeWebsites) {
+          try {
+            console.log(`[internal-links] Started rebuild for ${website.domain} (${website.id})`);
+            const pages = await storage.getPages(website.id, { status: "published", limit: 100000, offset: 0 });
+            const links = buildInternalLinks(website.id, pages as any);
+
+            await storage.clearInternalLinks(website.id);
+            const saved = await storage.saveInternalLinks(links as any);
+
+            console.log(`[internal-links] Rebuilt ${saved} link(s) for ${website.domain}`);
+          } catch (websiteErr) {
+            console.error(`[internal-links] Failed rebuild for ${website.domain}:`, websiteErr);
+          }
+        }
+      });
+
+      return;
+    } catch (err: any) {
+      console.error("[internal-links] Failed to start rebuild-all:", err);
+      return res.status(500).json({ message: err?.message || "Failed to start internal link rebuild for all websites" });
+    }
+  });
+
   // CHANGED: Restore Sitemap Manager list route for generated sitemap chunks.
   app.get("/api/websites/:websiteId/sitemaps", requireAuth, async (req: Request, res: Response) => {
     try {
