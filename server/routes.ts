@@ -964,6 +964,57 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
     }
   });
 
+  // CHANGED: Restore Internal Links AI Strategy route with deterministic JSON response.
+  app.post("/api/websites/:websiteId/internal-links/ai-strategy", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const stats = await storage.getInternalLinkStats(websiteId);
+      const totalPublished = Number(stats.totalPublished || 0);
+      const pagesWithLinks = Number(stats.pagesWithLinks || 0);
+      const totalLinks = Number(stats.totalLinks || 0);
+      const orphanedPages = Math.max(totalPublished - pagesWithLinks, 0);
+      const coverage = totalPublished > 0 ? Math.round((pagesWithLinks / totalPublished) * 100) : 0;
+
+      const recommendations = [];
+
+      if (coverage < 50) {
+        recommendations.push({
+          title: "Expand link coverage across orphaned pages",
+          description: `${orphanedPages.toLocaleString()} published page(s) do not currently have outbound internal links. Run a full rebuild and prioritize page types that are not receiving links from the current builder rules.`,
+          impact: "high",
+        });
+      }
+
+      if (totalLinks > 0 && pagesWithLinks > 0) {
+        recommendations.push({
+          title: "Balance inbound authority across hub targets",
+          description: `The site has ${totalLinks.toLocaleString()} internal link record(s). Review top-linked pages to confirm authority is flowing to the most important service, state, and city hubs.`,
+          impact: coverage >= 70 ? "medium" : "high",
+        });
+      }
+
+      recommendations.push({
+        title: "Use relevant fallback links for uncovered page types",
+        description: "Where same-city or same-service targets are unavailable, add safe fallback links to state hubs, city hubs, or closely related service pages instead of leaving pages disconnected.",
+        impact: coverage >= 90 ? "low" : "medium",
+      });
+
+      return res.json({
+        summary: `Internal link coverage is ${coverage}% for ${website.domain}. ${pagesWithLinks.toLocaleString()} of ${totalPublished.toLocaleString()} published pages currently have outbound internal links.`,
+        recommendations,
+      });
+    } catch (err: any) {
+      console.error("[internal-links] Failed to build AI strategy:", err);
+      return res.status(500).json({ message: err?.message || "Failed to build internal link strategy" });
+    }
+  });
+
   // CHANGED: Restore per-website Internal Links rebuild route.
   app.post("/api/websites/:websiteId/internal-links/rebuild", requireAuth, async (req: Request, res: Response) => {
     try {
