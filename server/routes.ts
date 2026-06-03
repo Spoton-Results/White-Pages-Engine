@@ -927,6 +927,25 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
   // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
   // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
+  // CHANGED: Load all published pages for Internal Links rebuild without the old 100,000-page cap.
+  async function loadAllPublishedPagesForInternalLinks(websiteId: string) {
+    const allPages: any[] = [];
+    const limit = 50000;
+    let offset = 0;
+
+    while (true) {
+      const pageChunk = await storage.getPages(websiteId, { status: "published", limit, offset });
+      allPages.push(...pageChunk);
+
+      console.log(`[internal-links] Loaded ${allPages.length} published page(s) for ${websiteId}`);
+
+      if (pageChunk.length < limit) break;
+      offset += limit;
+    }
+
+    return allPages;
+  }
+
   // CHANGED: Restore Internal Links stats route used by Internal Links page.
   app.get("/api/websites/:websiteId/internal-links/stats", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -966,7 +985,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
         try {
           console.log(`[internal-links] Started rebuild for ${website.domain} (${websiteId})`);
           const { buildInternalLinks } = await import("./services/internal-links");
-          const pages = await storage.getPages(websiteId, { status: "published", limit: 100000, offset: 0 });
+          const pages = await loadAllPublishedPagesForInternalLinks(websiteId);
           const links = buildInternalLinks(websiteId, pages as any);
 
           await storage.clearInternalLinks(websiteId);
@@ -1004,7 +1023,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
         for (const website of activeWebsites) {
           try {
             console.log(`[internal-links] Started rebuild for ${website.domain} (${website.id})`);
-            const pages = await storage.getPages(website.id, { status: "published", limit: 100000, offset: 0 });
+            const pages = await loadAllPublishedPagesForInternalLinks(website.id);
             const links = buildInternalLinks(website.id, pages as any);
 
             await storage.clearInternalLinks(website.id);
