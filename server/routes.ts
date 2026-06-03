@@ -925,6 +925,86 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 // contract in index.ts without registering any duplicate routes.
 // ✅ CHANGED: added missing export that index.ts requires
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
+  // CHANGED: Restore website-scoped locations route used by Hub Pages state/city bulk generation.
+  app.get("/api/websites/:websiteId/locations", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const websiteId = req.params.websiteId;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const { pool } = await import("./db");
+
+      const directLocations = await pool.query(`
+        SELECT
+          id::text,
+          name,
+          COALESCE(location_type, type) AS type,
+          state,
+          state_code AS "stateCode",
+          population,
+          city_tier AS "cityTier"
+        FROM locations
+        WHERE website_id::text = $1::text
+        ORDER BY
+          CASE COALESCE(location_type, type) WHEN 'state' THEN 0 WHEN 'city' THEN 1 ELSE 2 END,
+          name ASC
+      `, [websiteId]);
+
+      if (directLocations.rows.length > 0) {
+        return res.json(directLocations.rows);
+      }
+
+      const pageDerived = await pool.query(`
+        WITH page_states AS (
+          SELECT DISTINCT
+            NULL::text AS id,
+            COALESCE(
+              NULLIF(regexp_replace(slug, '^.*-in-', ''), ''),
+              NULLIF(regexp_replace(title, '^.* in ', ''), '')
+            ) AS name,
+            'state'::text AS type,
+            NULL::text AS state,
+            NULL::text AS "stateCode",
+            NULL::int AS population,
+            NULL::int AS "cityTier"
+          FROM pages
+          WHERE website_id::text = $1::text
+            AND status = 'published'
+            AND page_type = 'state_hub'
+        ),
+        page_cities AS (
+          SELECT DISTINCT
+            NULL::text AS id,
+            COALESCE(
+              NULLIF(regexp_replace(slug, '^.*-in-', ''), ''),
+              NULLIF(regexp_replace(title, '^.* in ', ''), '')
+            ) AS name,
+            'city'::text AS type,
+            NULL::text AS state,
+            NULL::text AS "stateCode",
+            NULL::int AS population,
+            NULL::int AS "cityTier"
+          FROM pages
+          WHERE website_id::text = $1::text
+            AND status = 'published'
+            AND page_type IN ('service_city', 'industry_city', 'city_hub')
+        )
+        SELECT * FROM page_states WHERE name IS NOT NULL
+        UNION
+        SELECT * FROM page_cities WHERE name IS NOT NULL
+        ORDER BY type DESC, name ASC
+      `, [websiteId]);
+
+      return res.json(pageDerived.rows);
+    } catch (err: any) {
+      console.error("[hub-pages] Failed to load website locations:", err);
+      return res.status(500).json({ message: err?.message || "Failed to load website locations" });
+    }
+  });
+
   // CHANGED: Restore Sitemap Manager JSON route for manual sitemap generation.
   // UNTOUCHED: Existing sitemap generation service, storage schema, and public sitemap serving remain unchanged.
   // CHANGED: Load all published pages for Internal Links rebuild without the old 100,000-page cap.
