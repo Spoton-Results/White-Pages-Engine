@@ -479,9 +479,7 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
     if (cityTopN !== null && cityTopN !== "all") result = result.slice(0, cityTopN as number);
     return result;
   })();
-  const cities: string[] = (cityTopN !== null || cityTierFilter !== null)
-    ? filteredCityLocs.map((l: any) => l.name)
-    : allCityLocs.map((l: any) => l.name).sort();
+  const cities: string[] = filteredCityLocs.map((l: any) => l.name);
   const items = hubType === "service" ? services : hubType === "state" ? states : cities;
 
   const toggleAll = () => {
@@ -551,7 +549,12 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
                   <label style={{ display: "block", fontWeight: 600, marginBottom: 6, fontSize: ".85rem", color: "#374151" }}>Hub Type</label>
                   <div style={{ display: "flex", gap: 8 }}>
                     {(["service", "state", "city"] as const).map(t => (
-                      <button key={t} onClick={() => { setHubType(t); setSelected(new Set()); setCityTopN(null); setCityTierFilter(null); }} style={btnStyle(hubType === t)}>
+                      <button key={t} onClick={() => {
+                        setHubType(t);
+                        setSelected(new Set());
+                        setCityTierFilter(null);
+                        setCityTopN(t === "city" ? 100 : null);
+                      }} style={btnStyle(hubType === t)}>
                         {t === "service" ? "Service Hub" : t === "state" ? "State Hub" : "City Hub"}
                       </button>
                     ))}
