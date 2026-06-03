@@ -30,6 +30,8 @@ import { randomBytes } from "crypto";
 // ✅ CHANGED: Hub Pages bulk job status cache for existing frontend polling
 const hubBulkJobs = new Map<string, {
   status: "done" | "error";
+  done: number;
+  total: number;
   created: number;
   failed: number;
   error?: string;
@@ -964,6 +966,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
       const jobId = randomBytes(8).toString("hex");
       let created = 0;
       let failed = 0;
+      let firstError: string | undefined;
 
       for (const rawName of names) {
         try {
@@ -991,11 +994,19 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
           created++;
         } catch (err: any) {
           failed++;
+          firstError ||= err?.message ?? String(err);
           console.error("[hub-pages] bulk create failed:", err?.message ?? err);
         }
       }
 
-      hubBulkJobs.set(jobId, { status: "done", created, failed });
+      hubBulkJobs.set(jobId, {
+        status: failed > 0 && created === 0 ? "error" : "done",
+        done: names.length,
+        total: names.length,
+        created,
+        failed,
+        error: firstError,
+      });
 
       return res.json({ jobId });
     } catch (err: any) {
@@ -1011,6 +1022,8 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
     if (!job) {
       return res.status(404).json({
         status: "error",
+        done: 0,
+        total: 0,
         created: 0,
         failed: 0,
         error: "Hub bulk job not found",
