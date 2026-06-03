@@ -941,17 +941,17 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
         SELECT
           id::text,
           name,
-          COALESCE(location_type, type) AS type,
-          state,
+          type,
+          state_name AS state,
           state_code AS "stateCode",
           population,
           city_tier AS "cityTier"
         FROM locations
-        WHERE website_id::text = $1::text
+        WHERE account_id::text = $1::text
         ORDER BY
-          CASE COALESCE(location_type, type) WHEN 'state' THEN 0 WHEN 'city' THEN 1 ELSE 2 END,
+          CASE type WHEN 'state' THEN 0 WHEN 'city' THEN 1 ELSE 2 END,
           name ASC
-      `, [websiteId]);
+      `, [website.accountId]);
 
       if (directLocations.rows.length > 0) {
         return res.json(directLocations.rows);
