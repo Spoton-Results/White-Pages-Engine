@@ -944,17 +944,30 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
         : "";
       const canonicalBase = `https://${domain}${normalizedProxyPath}`;
 
-      const sitemapSlugs = await generateSitemapsForWebsite(website.id, domain, canonicalBase);
-
-      invalidateSitemapCache(website.id);
-      await warmSitemapCache(website.id).catch(() => {});
-
-      return res.json({
+      res.json({
         success: true,
+        queued: true,
         websiteId: website.id,
-        count: sitemapSlugs.length,
-        sitemaps: sitemapSlugs,
+        message: "Sitemap generation started",
       });
+
+      setImmediate(async () => {
+        try {
+          console.log(`[sitemaps] Started generation for ${website.domain} (${website.id})`);
+          const sitemapSlugs = await generateSitemapsForWebsite(website.id, domain, canonicalBase);
+
+          invalidateSitemapCache(website.id);
+          await warmSitemapCache(website.id).catch((warmErr) => {
+            console.error(`[sitemaps] Warm cache failed for ${website.domain}:`, warmErr);
+          });
+
+          console.log(`[sitemaps] Generated ${sitemapSlugs.length} sitemap(s) for ${website.domain}`);
+        } catch (backgroundErr) {
+          console.error(`[sitemaps] Failed to generate sitemaps for ${website.domain}:`, backgroundErr);
+        }
+      });
+
+      return;
     } catch (err: any) {
       console.error("[sitemaps] Failed to generate sitemaps:", err);
       return res.status(500).json({
