@@ -469,8 +469,9 @@ function BulkGenerateHubDialog({ websiteId, accountId, onDone }: { websiteId: st
   }, [isDone, jobId]);
 
   const services: string[] = (servicesQ.data || []).map((s: any) => s.name);
-  const states: string[] = [...new Set((locationsQ.data || []).filter((l: any) => l.type === "state").map((l: any) => l.name as string))].sort();
-  const allCityLocs: any[] = (locationsQ.data || []).filter((l: any) => l.type === "city");
+  const locationRows: any[] = Array.isArray(locationsQ.data) ? locationsQ.data : [];
+  const states: string[] = [...new Set(locationRows.filter((l: any) => l.type === "state").map((l: any) => l.name as string))].sort();
+  const allCityLocs: any[] = locationRows.filter((l: any) => l.type === "city");
   const filteredCityLocs: any[] = (() => {
     let result = [...allCityLocs];
     if (cityTierFilter !== null) result = result.filter((l: any) => l.cityTier === cityTierFilter);
