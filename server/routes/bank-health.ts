@@ -122,8 +122,6 @@ function sectionKey(sectionName: unknown): string | null {
   return null;
 }
 
-// FIX: read SEO expansion columns from the DB row instead of hardcoding false.
-// The variation_bank_completeness table stores all 14 flags — we must read them.
 function baseMapBankRow(row: any) {
   return {
     id: row.id,
@@ -139,7 +137,6 @@ function baseMapBankRow(row: any) {
     hasProofTrust: row.has_proof_trust,
     hasPainPoint: row.has_pain_point,
     hasLocalStat: row.has_local_stat,
-    // SEO expansion — read from DB row (was incorrectly hardcoded to false)
     hasComparison: row.has_comparison ?? false,
     hasPricingFactors: row.has_pricing_factors ?? false,
     hasBestFit: row.has_best_fit ?? false,
@@ -177,9 +174,6 @@ function camelExpansion(flags: Record<string, boolean>) {
   };
 }
 
-// ── Helper: build brand context for a website ─────────────────────────────────
-// NOTE: brand_profiles does NOT have a website_id column — it has account_id.
-// We join via websites.account_id → brand_profiles.account_id.
 async function getBrandCtx(websiteId: string): Promise<{ ctx: BrandContext; accountId: string }> {
   const websiteResult = await pool.query(
     `SELECT id, account_id, name, domain FROM websites WHERE id = $1 LIMIT 1`,
@@ -251,9 +245,6 @@ router.get("/api/websites/:websiteId/bank-completeness", async (req, res, next) 
   }
 });
 
-// FIX: recompute now writes all 14 section flags including SEO expansion (4).
-// Previously only 10 columns were written — comparison/pricing_factors/best_fit/
-// software_integration were omitted, so those 4 were always null/false after recompute.
 router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -357,12 +348,6 @@ router.post("/api/websites/:websiteId/bank-completeness/recompute", async (req, 
   }
 });
 
-// ── POST /api/websites/:websiteId/variation-banks/fill-missing ────────────────
-// Called by the per-service card "Fill Missing" button.
-// Body: { service: string }
-//
-// Runs fillMissingSectionsForService in a setImmediate background task so the
-// HTTP response returns immediately with a jobId. Client polls GET /api/jobs/:jobId.
 router.post(
   "/api/websites/:websiteId/variation-banks/fill-missing",
   requireAuth,
@@ -373,10 +358,8 @@ router.post(
       if (!serviceName) return res.status(400).json({ error: "service is required" });
 
       const { ctx, accountId } = await getBrandCtx(websiteId);
-
       const jobId = `fill-missing-${websiteId}-${Date.now()}`;
 
-      // Persist job row into generation_jobs (schema-safe columns only: no type, no updated_at)
       try {
         await pool.query(
           `INSERT INTO generation_jobs (
@@ -390,7 +373,6 @@ router.post(
         console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
       }
 
-      // Track active job for restore-on-refresh (best-effort; table may not exist)
       try {
         await pool.query(
           `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
@@ -401,7 +383,6 @@ router.post(
         );
       } catch { /* non-fatal */ }
 
-      // Run fill in background — HTTP response returns immediately
       setImmediate(async () => {
         try {
           await fillMissingSectionsForService(serviceName, accountId, websiteId, ctx);
@@ -411,12 +392,13 @@ router.post(
           ).catch(() => {});
         } catch (err: any) {
           console.error(`[bank-health] fill-missing failed for "${serviceName}":`, err?.message || err);
+          // ✅ CHANGED: mark the job failed and processed so the job list does not
+          // classify the item as skipped/completed. The exact error remains in Railway logs.
           await pool.query(
-            `UPDATE generation_jobs SET status = 'failed' WHERE id = $1`,
+            `UPDATE generation_jobs SET status = 'failed', processed_pages = 1 WHERE id = $1`,
             [jobId],
           ).catch(() => {});
         }
-        // Clean up active job tracker
         await pool.query(
           `DELETE FROM active_jobs WHERE website_id = $1 AND job_type = 'fill_missing'`,
           [websiteId],
@@ -432,10 +414,6 @@ router.post(
   },
 );
 
-// ── POST /api/websites/:websiteId/variation-banks/fill-missing-all-job ────────
-// Called by the "Fill Missing All" bulk button.
-// Body: { services: string[] }
-// Returns a jobId immediately; fills all services in the background.
 router.post(
   "/api/websites/:websiteId/variation-banks/fill-missing-all-job",
   requireAuth,
@@ -453,7 +431,6 @@ router.post(
       const { ctx, accountId } = await getBrandCtx(websiteId);
       const jobId = `fill-missing-${websiteId}-${Date.now()}`;
 
-      // Persist job row (schema-safe columns only: no type, no updated_at)
       try {
         await pool.query(
           `INSERT INTO generation_jobs (
@@ -467,7 +444,6 @@ router.post(
         console.warn("[bank-health] Could not insert generation_jobs row (non-fatal):", e?.message);
       }
 
-      // Track active job for restore-on-refresh (best-effort; table may not exist)
       try {
         await pool.query(
           `INSERT INTO active_jobs (website_id, job_type, job_id, created_at)
@@ -478,13 +454,14 @@ router.post(
         );
       } catch { /* non-fatal */ }
 
-      // Run fill in background — HTTP response returns immediately
       setImmediate(async () => {
         let processed = 0;
+        let failed = 0;
         for (const svc of services) {
           try {
             await fillMissingSectionsForService(svc, accountId, websiteId, ctx);
           } catch (err: any) {
+            failed++;
             console.error(`[bank-health] fill-missing-all failed for "${svc}":`, err?.message || err);
           }
           processed++;
@@ -495,14 +472,12 @@ router.post(
             );
           } catch { /* non-fatal */ }
         }
-        // Mark completed
         try {
           await pool.query(
-            `UPDATE generation_jobs SET status = 'completed' WHERE id = $1`,
-            [jobId],
+            `UPDATE generation_jobs SET status = $1 WHERE id = $2`,
+            [failed > 0 ? "failed" : "completed", jobId],
           );
         } catch { /* non-fatal */ }
-        // Clean up active job tracker
         try {
           await pool.query(
             `DELETE FROM active_jobs WHERE website_id = $1 AND job_type = 'fill_missing'`,
@@ -520,9 +495,6 @@ router.post(
   },
 );
 
-// ── GET /api/jobs/:jobId ──────────────────────────────────────────────────────
-// Polls progress of a fill-missing background job.
-// NOTE: generation_jobs has no updated_at column — use created_at + completed_at instead.
 router.get(
   "/api/jobs/:jobId",
   requireAuth,
@@ -550,8 +522,6 @@ router.get(
   },
 );
 
-// ── GET /api/websites/:websiteId/fill-missing-job ─────────────────────────────
-// Restores the active fill-missing job ID after a page refresh.
 router.get(
   "/api/websites/:websiteId/fill-missing-job",
   requireAuth,
@@ -566,7 +536,6 @@ router.get(
       if (!result.rows.length) return res.json({ jobId: null });
       return res.json({ jobId: result.rows[0].job_id });
     } catch {
-      // active_jobs table may not exist in all envs — safe fallback
       return res.json({ jobId: null });
     }
   },
