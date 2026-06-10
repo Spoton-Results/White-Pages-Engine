@@ -137,6 +137,9 @@ export default function WebsitesPage() {
         demoBannerHeading: s.demoBannerHeading || "",
         demoBannerSubtext: s.demoBannerSubtext || "",
         demoBannerButtonLabel: s.demoBannerButtonLabel || "",
+        testimonialQuote: s.testimonialQuote || "",
+        testimonialName: s.testimonialName || "",
+        testimonialTitle: s.testimonialTitle || "",
       });
       setEditDefaultBlueprintId(s.defaultBlueprintId || "");
     }
@@ -371,7 +374,7 @@ export default function WebsitesPage() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
           <form onSubmit={handleEdit(d => {
-            const { mainWebsiteUrl, phone, ctaHeading, ctaText, ctaButtonLabel, demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, ...rest } = d;
+            const { mainWebsiteUrl, phone, ctaHeading, ctaText, ctaButtonLabel, demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, testimonialQuote, testimonialName, testimonialTitle, ...rest } = d;
             const existingSettings = editWebsite?.settings || {};
             update.mutate({
               id: editWebsite.id,
@@ -388,6 +391,9 @@ export default function WebsitesPage() {
                   demoBannerHeading: demoBannerHeading || "",
                   demoBannerSubtext: demoBannerSubtext || "",
                   demoBannerButtonLabel: demoBannerButtonLabel || "",
+                  testimonialQuote: testimonialQuote || "",
+                  testimonialName: testimonialName || "",
+                  testimonialTitle: testimonialTitle || "",
                   defaultBlueprintId: editDefaultBlueprintId || null,
                 },
               },
@@ -482,7 +488,39 @@ export default function WebsitesPage() {
               </div>
             </div>
 
-            {/* Content Tools */}
+            {/* ✅ CHANGED: Testimonial */}
+            <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+              <p className="text-sm font-semibold">
+                Testimonial
+                <span className="text-muted-foreground font-normal"> (optional social proof)</span>
+              </p>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Quote</Label>
+                <Input
+                  {...regEdit("testimonialQuote")}
+                  placeholder="This service made a measurable difference for our business."
+                  data-testid="input-testimonial-quote"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Customer Name</Label>
+                <Input
+                  {...regEdit("testimonialName")}
+                  placeholder="Jane Smith"
+                  data-testid="input-testimonial-name"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Customer Title or Company</Label>
+                <Input
+                  {...regEdit("testimonialTitle")}
+                  placeholder="Owner, Smith Plumbing"
+                  data-testid="input-testimonial-title"
+                />
+              </div>
+            </div>
+
+            {/* 🔒 UNTOUCHED: Content Tools */}
             <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
               <p className="text-sm font-semibold">Content Tools <span className="text-muted-foreground font-normal">(find &amp; replace text in all page content)</span></p>
               <div className="flex gap-2">
