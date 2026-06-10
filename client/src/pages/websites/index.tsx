@@ -68,7 +68,7 @@ export default function WebsitesPage() {
   });
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => api.patch(`/api/websites/${id}`, data),
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/api/websites/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/websites"] });
       setEditWebsite(null);
