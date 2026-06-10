@@ -320,9 +320,23 @@ export async function fillMissingSectionsForService(
   );
 
   const writeResult = await writeBankPayload(payload, missing, serviceName, accountId, websiteId);
+  const errors = Object.entries(writeResult.errors).map(([section, message]) => `${section}: ${message}`);
+
+  // ✅ CHANGED: a fill-missing job must not report success unless every requested
+  // missing section was actually written. This exposes the underlying AI/storage
+  // failure instead of returning a false completed status.
+  if (writeResult.written.length !== missing.length) {
+    const failedSections = missing.filter(section => !writeResult.written.includes(section));
+    const detail = errors.length > 0 ? errors.join("; ") : "No write error details were returned";
+    throw new Error(
+      `Fill missing failed for "${serviceName}". Requested ${missing.length} section(s), wrote ${writeResult.written.length}. Failed: ${failedSections.join(", ")}. ${detail}`,
+    );
+  }
+
+  // 🔒 UNTOUCHED: successful return shape remains unchanged.
   return {
     filled: writeResult.written,
     skipped: skipped as string[],
-    errors: Object.entries(writeResult.errors).map(([section, message]) => `${section}: ${message}`),
+    errors,
   };
 }
