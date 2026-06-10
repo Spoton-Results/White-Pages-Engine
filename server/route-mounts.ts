@@ -65,12 +65,13 @@ export function mountSubRouters(app: Express) {
   app.use("/", bulkGenerateJobFastRouter);
   app.use("/", publishedPagesSearchRouter);
   app.use("/", legacyPublicUrlRedirectRouter);
-  app.use("/", sitePreviewRouter);
 
-  // Public pages.* host renderer. This must run before older public/static/R2
-  // fallbacks so https://pages.clientdomain.com/{slug} uses the same enhanced
-  // HTML shell that works in /sites/:domain/:slug admin preview.
+  // ✅ CHANGED: public pages.* host renderer must run before the /sites/:domain/:slug
+  // preview route so rewritten live-domain requests cannot be intercepted first.
   app.use("/", pagesSubdomainPublicRouter);
+
+  // 🔒 UNTOUCHED: admin preview still handles requests that the pages.* host router skips.
+  app.use("/", sitePreviewRouter);
 
   app.use("/", spotonPagesRouter);
   app.use("/", onboardingLiveRouter);
