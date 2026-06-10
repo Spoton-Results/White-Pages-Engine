@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ExternalLink, Settings, RefreshCw, Trash, Globe, MoreHorizontal, Pencil } from "lucide-react";
+import { Plus, Search, ExternalLink, Settings, RefreshCw, Trash, Globe, MoreHorizontal, Pencil, Sparkles } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +35,12 @@ export default function WebsitesPage() {
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
+  const [testimonials, setTestimonials] = useState<Array<{
+    quote: string;
+    name: string;
+    title: string;
+    source?: "manual" | "ai-draft";
+  }>>(Array.from({ length: 5 }, () => ({ quote: "", name: "", title: "", source: "manual" })));
   const { register, handleSubmit, reset, setValue } = useForm<any>();
   const { register: regEdit, handleSubmit: handleEdit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<any>();
 
@@ -120,6 +126,33 @@ export default function WebsitesPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  // ✅ CHANGED: fill only empty testimonial slots with editable AI draft content
+  const generateTestimonials = useMutation({
+    mutationFn: () =>
+      api.post<{ testimonials: Array<{ quote: string; name: string; title: string; source: "ai-draft" }> }>(
+        `/api/websites/${editWebsite.id}/generate-testimonials`,
+        {
+          websiteName: watchEdit("name") || editWebsite?.name || "",
+          existingTestimonials: testimonials,
+        },
+      ),
+    onSuccess: (data) => {
+      let generatedIndex = 0;
+      const merged = testimonials.map((testimonial) => {
+        const isEmpty = !testimonial.quote.trim() && !testimonial.name.trim() && !testimonial.title.trim();
+        if (!isEmpty || !data.testimonials[generatedIndex]) return testimonial;
+        return data.testimonials[generatedIndex++];
+      });
+      setTestimonials(merged);
+      toast({
+        title: "AI testimonial drafts added",
+        description: "Only empty slots were filled. Review and edit them before publishing.",
+      });
+    },
+    onError: (err: any) =>
+      toast({ title: "AI generation failed", description: err.message, variant: "destructive" }),
+  });
+
   // Pre-fill edit form when a website is selected for editing
   useEffect(() => {
     if (editWebsite) {
@@ -137,10 +170,36 @@ export default function WebsitesPage() {
         demoBannerHeading: s.demoBannerHeading || "",
         demoBannerSubtext: s.demoBannerSubtext || "",
         demoBannerButtonLabel: s.demoBannerButtonLabel || "",
-        testimonialQuote: s.testimonialQuote || "",
-        testimonialName: s.testimonialName || "",
-        testimonialTitle: s.testimonialTitle || "",
       });
+
+      // ✅ CHANGED: load five testimonials and migrate the legacy single testimonial into slot 1
+      const savedTestimonials = Array.isArray(s.testimonials)
+        ? s.testimonials.slice(0, 5)
+        : [];
+
+      const legacyTestimonial =
+        s.testimonialQuote || s.testimonialName || s.testimonialTitle
+          ? [{
+              quote: s.testimonialQuote || "",
+              name: s.testimonialName || "",
+              title: s.testimonialTitle || "",
+              source: "manual" as const,
+            }]
+          : [];
+
+      const loadedTestimonials = (savedTestimonials.length ? savedTestimonials : legacyTestimonial)
+        .map((testimonial: any) => ({
+          quote: testimonial?.quote || "",
+          name: testimonial?.name || "",
+          title: testimonial?.title || "",
+          source: testimonial?.source === "ai-draft" ? "ai-draft" as const : "manual" as const,
+        }));
+
+      while (loadedTestimonials.length < 5) {
+        loadedTestimonials.push({ quote: "", name: "", title: "", source: "manual" });
+      }
+
+      setTestimonials(loadedTestimonials.slice(0, 5));
       setEditDefaultBlueprintId(s.defaultBlueprintId || "");
     }
   }, [editWebsite, resetEdit]);
@@ -374,7 +433,7 @@ export default function WebsitesPage() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
           <form onSubmit={handleEdit(d => {
-            const { mainWebsiteUrl, phone, ctaHeading, ctaText, ctaButtonLabel, demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, testimonialQuote, testimonialName, testimonialTitle, ...rest } = d;
+            const { mainWebsiteUrl, phone, ctaHeading, ctaText, ctaButtonLabel, demoBannerUrl, demoBannerHeading, demoBannerSubtext, demoBannerButtonLabel, ...rest } = d;
             const existingSettings = editWebsite?.settings || {};
             update.mutate({
               id: editWebsite.id,
@@ -391,9 +450,12 @@ export default function WebsitesPage() {
                   demoBannerHeading: demoBannerHeading || "",
                   demoBannerSubtext: demoBannerSubtext || "",
                   demoBannerButtonLabel: demoBannerButtonLabel || "",
-                  testimonialQuote: testimonialQuote || "",
-                  testimonialName: testimonialName || "",
-                  testimonialTitle: testimonialTitle || "",
+                  testimonials: testimonials.map((testimonial) => ({
+                    quote: testimonial.quote.trim(),
+                    name: testimonial.name.trim(),
+                    title: testimonial.title.trim(),
+                    source: testimonial.source === "ai-draft" ? "ai-draft" : "manual",
+                  })),
                   defaultBlueprintId: editDefaultBlueprintId || null,
                 },
               },
@@ -488,36 +550,103 @@ export default function WebsitesPage() {
               </div>
             </div>
 
-            {/* ✅ CHANGED: Testimonial */}
+            {/* ✅ CHANGED: Five testimonial slots */}
             <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
-              <p className="text-sm font-semibold">
-                Testimonial
-                <span className="text-muted-foreground font-normal"> (optional social proof)</span>
-              </p>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Quote</Label>
-                <Input
-                  {...regEdit("testimonialQuote")}
-                  placeholder="This service made a measurable difference for our business."
-                  data-testid="input-testimonial-quote"
-                />
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">
+                    Testimonials
+                    <span className="text-muted-foreground font-normal"> (up to 5)</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    AI-generated entries are editable drafts and must be reviewed before publishing.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2 shrink-0"
+                  disabled={
+                    generateTestimonials.isPending ||
+                    !testimonials.some((testimonial) =>
+                      !testimonial.quote.trim() &&
+                      !testimonial.name.trim() &&
+                      !testimonial.title.trim()
+                    )
+                  }
+                  onClick={() => generateTestimonials.mutate()}
+                  data-testid="button-generate-testimonials"
+                >
+                  <Sparkles className="size-4" />
+                  {generateTestimonials.isPending ? "Generating…" : "Fill Empty with AI"}
+                </Button>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Customer Name</Label>
-                <Input
-                  {...regEdit("testimonialName")}
-                  placeholder="Jane Smith"
-                  data-testid="input-testimonial-name"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Customer Title or Company</Label>
-                <Input
-                  {...regEdit("testimonialTitle")}
-                  placeholder="Owner, Smith Plumbing"
-                  data-testid="input-testimonial-title"
-                />
-              </div>
+
+              {testimonials.map((testimonial, index) => (
+                <div key={index} className="border rounded-md p-3 space-y-2 bg-background">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold">Testimonial {index + 1}</p>
+                    {testimonial.source === "ai-draft" && (
+                      <Badge variant="outline" className="text-[10px]">AI Draft</Badge>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Quote</Label>
+                    <Input
+                      value={testimonial.quote}
+                      onChange={(event) => {
+                        const next = [...testimonials];
+                        next[index] = {
+                          ...next[index],
+                          quote: event.target.value,
+                          source: "manual",
+                        };
+                        setTestimonials(next);
+                      }}
+                      placeholder="Customer testimonial quote"
+                      data-testid={`input-testimonial-${index + 1}-quote`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Customer Name</Label>
+                    <Input
+                      value={testimonial.name}
+                      onChange={(event) => {
+                        const next = [...testimonials];
+                        next[index] = {
+                          ...next[index],
+                          name: event.target.value,
+                          source: "manual",
+                        };
+                        setTestimonials(next);
+                      }}
+                      placeholder="Customer name"
+                      data-testid={`input-testimonial-${index + 1}-name`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Customer Title or Company</Label>
+                    <Input
+                      value={testimonial.title}
+                      onChange={(event) => {
+                        const next = [...testimonials];
+                        next[index] = {
+                          ...next[index],
+                          title: event.target.value,
+                          source: "manual",
+                        };
+                        setTestimonials(next);
+                      }}
+                      placeholder="Title or company"
+                      data-testid={`input-testimonial-${index + 1}-title`}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* 🔒 UNTOUCHED: Content Tools */}

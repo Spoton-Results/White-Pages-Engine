@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireSuperAdmin } from "../auth";
 import * as storage from "../storage";
 import { pool } from "../db";
+import { callAI } from "../services/ai-provider";
 import {
   insertAgencySchema,
   insertAccountSchema,
@@ -154,6 +155,104 @@ router.put("/api/websites/:id", requireAuth, async (req: Request, res: Response)
   const website = await storage.updateWebsite(req.params.id, req.body);
   if (!website) return res.status(404).json({ message: "Website not found" });
   return res.json(website);
+});
+
+// ✅ CHANGED: generate editable draft testimonials for empty website slots only
+router.post("/api/websites/:id/generate-testimonials", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ message: "Website not found" });
+
+    const existingTestimonials = Array.isArray(req.body?.existingTestimonials)
+      ? req.body.existingTestimonials.slice(0, 5)
+      : [];
+
+    const emptyCount = Math.max(
+      0,
+      5 - existingTestimonials.filter((testimonial: any) =>
+        String(testimonial?.quote || "").trim() ||
+        String(testimonial?.name || "").trim() ||
+        String(testimonial?.title || "").trim()
+      ).length,
+    );
+
+    if (emptyCount === 0) {
+      return res.json({ testimonials: [] });
+    }
+
+    const settings = (website as any).settings || {};
+    const websiteName =
+      String(req.body?.websiteName || website.name || settings.brandName || settings.businessName || "").trim();
+
+    const prompt = `Create exactly ${emptyCount} short SAMPLE testimonial drafts for a website named "${websiteName || "this business"}".
+
+These are placeholders for editorial review, not verified customer endorsements.
+
+Rules:
+- Return JSON only.
+- Return an array of exactly ${emptyCount} objects.
+- Each object must have: "quote", "name", "title".
+- Keep each quote between 12 and 28 words.
+- Do not invent revenue, percentages, rankings, dates, certifications, awards, or measurable results.
+- Do not claim an actual transaction or real customer experience.
+- Use clearly generic placeholder identities such as "Sample Customer" and role labels such as "Local Business Owner".
+- Make each quote distinct and natural.
+- Do not use markdown fences.
+
+Required format:
+[
+  {
+    "quote": "Example editable draft.",
+    "name": "Sample Customer",
+    "title": "Local Business Owner"
+  }
+]`;
+
+    const ai = await callAI({
+      prompt,
+      maxTokens: 1200,
+      temperature: 0.7,
+    });
+
+    const cleaned = ai.text
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+
+    if (start === -1 || end === -1 || end <= start) {
+      return res.status(502).json({ message: "AI returned an invalid testimonial response" });
+    }
+
+    const parsed = JSON.parse(cleaned.slice(start, end + 1));
+
+    if (!Array.isArray(parsed)) {
+      return res.status(502).json({ message: "AI returned an invalid testimonial list" });
+    }
+
+    const testimonials = parsed
+      .slice(0, emptyCount)
+      .map((testimonial: any) => ({
+        quote: String(testimonial?.quote || "").trim(),
+        name: String(testimonial?.name || "Sample Customer").trim(),
+        title: String(testimonial?.title || "Customer").trim(),
+        source: "ai-draft" as const,
+      }))
+      .filter((testimonial: any) => testimonial.quote);
+
+    if (testimonials.length !== emptyCount) {
+      return res.status(502).json({ message: "AI did not return all requested testimonial drafts" });
+    }
+
+    return res.json({ testimonials });
+  } catch (error: any) {
+    console.error("[websites/generate-testimonials]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to generate testimonial drafts",
+    });
+  }
 });
 
 router.delete("/api/websites/:id", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
