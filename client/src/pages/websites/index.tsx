@@ -260,6 +260,7 @@ export default function WebsitesPage() {
                 <TableHead>Sub-Domain</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Testimonials</TableHead>
                 <TableHead className="text-right">Published</TableHead>
                 <TableHead className="w-[60px]"></TableHead>
               </TableRow>
@@ -268,14 +269,14 @@ export default function WebsitesPage() {
               {isLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 5 }).map((_, j) => (
+                    {Array.from({ length: 6 }).map((_, j) => (
                       <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                     ))}
                   </TableRow>
                 ))
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                     {accountIdFilter ? `No websites found for this account.` : "No websites found."}
                   </TableCell>
                 </TableRow>
@@ -299,6 +300,18 @@ export default function WebsitesPage() {
                     }>
                       {w.status === "syncing" && <RefreshCw className="mr-1 size-3 animate-spin" />}
                       {w.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {Array.isArray(w.settings?.testimonials)
+                        ? w.settings.testimonials.filter((testimonial: any) =>
+                            String(testimonial?.quote || "").trim() ||
+                            String(testimonial?.name || "").trim() ||
+                            String(testimonial?.title || "").trim()
+                          ).length
+                        : (w.settings?.testimonialQuote || w.settings?.testimonialName || w.settings?.testimonialTitle ? 1 : 0)
+                      }/5
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">{w.publishedPages?.toLocaleString() || 0}</TableCell>

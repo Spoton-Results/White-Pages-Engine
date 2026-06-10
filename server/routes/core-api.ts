@@ -154,6 +154,23 @@ router.post("/api/websites", requireAuth, async (req: Request, res: Response) =>
 router.put("/api/websites/:id", requireAuth, async (req: Request, res: Response) => {
   const website = await storage.updateWebsite(req.params.id, req.body);
   if (!website) return res.status(404).json({ message: "Website not found" });
+
+  // ✅ CHANGED: clear stale rendered artifacts so updated website settings appear live
+  if (req.body?.settings) {
+    await pool.query(
+      `UPDATE pages
+       SET r2_key = NULL,
+           content_hash = NULL,
+           rendered_at = NULL,
+           updated_at = NOW()
+       WHERE website_id::text = $1::text
+         AND status = 'published'`,
+      [req.params.id],
+    ).catch((error) => {
+      console.error("[websites/update] failed to invalidate rendered pages", error);
+    });
+  }
+
   return res.json(website);
 });
 

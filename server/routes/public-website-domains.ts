@@ -188,6 +188,30 @@ function renderHtml(ctx: any, page: any, version: any, host: string) {
   const demoBannerHeading = settings.demoBannerHeading || settings.demo_banner_heading || "See This Platform in Action";
   const demoBannerSubtext = settings.demoBannerSubtext || settings.demo_banner_subtext || "See how this page was built and how the system works.";
   const demoBannerButtonLabel = settings.demoBannerButtonLabel || settings.demoBannerButton || settings.demo_banner_button || "Watch the Live Demo →";
+
+  // ✅ CHANGED: load up to five complete saved testimonials
+  const testimonials = (Array.isArray(settings.testimonials)
+    ? settings.testimonials
+    : (settings.testimonialQuote || settings.testimonialName || settings.testimonialTitle)
+      ? [{
+          quote: settings.testimonialQuote || "",
+          name: settings.testimonialName || "",
+          title: settings.testimonialTitle || "",
+        }]
+      : []
+  )
+    .slice(0, 5)
+    .map((testimonial: any) => ({
+      quote: String(testimonial?.quote || "").trim(),
+      name: String(testimonial?.name || "").trim(),
+      title: String(testimonial?.title || "").trim(),
+    }))
+    .filter((testimonial: any) => testimonial.quote);
+
+  const testimonialSection = testimonials.length
+    ? `<section class="testimonials"><h2>What Customers Say</h2><div class="testimonial-grid">${testimonials.map((testimonial: any) => `<blockquote class="testimonial-card"><p>“${escapeHtml(testimonial.quote)}”</p>${testimonial.name || testimonial.title ? `<footer><strong>${escapeHtml(testimonial.name)}</strong>${testimonial.title ? `<span>${escapeHtml(testimonial.title)}</span>` : ""}</footer>` : ""}</blockquote>`).join("")}</div></section>`
+    : "";
+
   const title = page.title || page.h1 || brandName;
   const description = page.meta_description || page.metaDescription || "";
   const contentHtml = version?.content_html || version?.contentHtml || "";
@@ -212,14 +236,14 @@ function renderHtml(ctx: any, page: any, version: any, host: string) {
     .wrap,main,.footer-inner{max-width:1100px;margin:0 auto}.demo{background:linear-gradient(135deg,#0f172a,var(--brand));color:white}.demo .wrap{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 20px}.demo h2{font-size:clamp(22px,3vw,34px);line-height:1.15;margin:0 0 4px}.demo p{margin:0;opacity:.92}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;color:#bfdbfe;margin:0 0 8px}
     header{background:linear-gradient(135deg,var(--brand),#0f172a);color:white;padding:54px 20px 42px}.brand{font-weight:800;letter-spacing:.02em;margin-bottom:20px}h1{font-size:clamp(34px,5vw,58px);line-height:1.05;margin:0 0 16px}.lead{font-size:20px;max-width:760px;opacity:.92}
     main{padding:42px 20px}.content{background:var(--card);border:1px solid #e2e8f0;border-radius:24px;box-shadow:0 18px 45px rgba(15,23,42,.08);padding:clamp(24px,4vw,48px)}
-    h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}p{margin:0 0 16px}a{color:var(--brand)}ul,ol{padding-left:24px}.cta{margin-top:34px;padding:24px;border-radius:18px;background:#f1f5f9;border:1px solid #e2e8f0}.btn{display:inline-block;margin-top:12px;background:var(--brand);color:white!important;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:700}.btn.light{background:white;color:#0f172a!important;border:1px solid white}
+    h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}p{margin:0 0 16px}a{color:var(--brand)}ul,ol{padding-left:24px}.testimonials{margin-top:38px}.testimonial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.testimonial-card{margin:0;padding:22px;border-radius:18px;background:#f8fafc;border:1px solid #e2e8f0}.testimonial-card p{font-size:17px;line-height:1.65;margin:0 0 16px}.testimonial-card footer{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:14px}.testimonial-card footer strong{color:var(--ink)}.cta{margin-top:34px;padding:24px;border-radius:18px;background:#f1f5f9;border:1px solid #e2e8f0}.btn{display:inline-block;margin-top:12px;background:var(--brand);color:white!important;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:700}.btn.light{background:white;color:#0f172a!important;border:1px solid white}
     footer{padding:30px 20px;color:var(--muted)}@media(max-width:760px){.demo .wrap{align-items:flex-start;flex-direction:column}.btn{width:100%;text-align:center}}
   </style>
 </head>
 <body>
   ${demoBanner}
   <header><div class="wrap"><div class="brand">${escapeHtml(brandName)}</div><h1>${escapeHtml(page.h1 || title)}</h1>${description ? `<p class="lead">${escapeHtml(description)}</p>` : ""}</div></header>
-  <main><article class="content">${contentHtml}<section class="cta"><h2>${escapeHtml(ctaHeading)}</h2><p>${escapeHtml(ctaText)}</p>${mainWebsiteUrl ? `<a class="btn" href="${escapeHtml(mainWebsiteUrl)}">${escapeHtml(ctaButtonLabel)}</a>` : ""}${phone ? `<p>Call: <a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a></p>` : ""}${email ? `<p>Email: <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>` : ""}</section></article></main>
+  <main><article class="content">${contentHtml}${testimonialSection}<section class="cta"><h2>${escapeHtml(ctaHeading)}</h2><p>${escapeHtml(ctaText)}</p>${mainWebsiteUrl ? `<a class="btn" href="${escapeHtml(mainWebsiteUrl)}">${escapeHtml(ctaButtonLabel)}</a>` : ""}${phone ? `<p>Call: <a href="tel:${escapeHtml(telHref(phone))}">${escapeHtml(phone)}</a></p>` : ""}${email ? `<p>Email: <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>` : ""}</section></article></main>
   <footer><div class="footer-inner">&copy; ${new Date().getFullYear()} ${escapeHtml(brandName)}</div></footer>
 </body>
 </html>`;
