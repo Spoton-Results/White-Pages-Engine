@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { pool } from "../db";
 import { requireAuth } from "../auth";
 import { resolveCname, resolve4 } from "node:dns/promises";
-import { getPageHtml } from "../services/r2"; // ✅ CHANGED
+import { buildEnhancedPublicPageHtml, getPublicInternalLinks } from "../services/public-page-enhancements";
 
 const router = Router();
 
@@ -132,41 +132,6 @@ function shouldIgnorePublicResolver(req: Request) {
   return false;
 }
 
-function renderClientPageHtml(ctx: any, page: any, version: any, host: string) {
-  const brandName = ctx.brand_name || ctx.website_name || ctx.website_domain || host;
-  const primaryColor = ctx.primary_color || "#2563eb";
-  const title = page.title || page.h1 || brandName;
-  const description = page.meta_description || page.metaDescription || "";
-  const contentHtml = version?.content_html || version?.contentHtml || "";
-  const canonicalUrl = `https://${host}/${page.slug}`;
-  const noindex = page.noindex === true || page.tier === 3 || page.status !== "published";
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <meta name="description" content="${escapeHtml(description)}" />
-  <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
-  ${noindex ? `<meta name="robots" content="noindex,follow" />` : `<meta name="robots" content="index,follow" />`}
-  <style>
-    :root{--brand:${primaryColor};--ink:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#ffffff;}
-    *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
-    header{background:linear-gradient(135deg,var(--brand),#0f172a);color:white;padding:54px 20px 42px}header .wrap,main,.footer-inner{max-width:1100px;margin:0 auto} .brand{font-weight:800;letter-spacing:.02em;margin-bottom:20px}h1{font-size:clamp(34px,5vw,58px);line-height:1.05;margin:0 0 16px} .lead{font-size:20px;max-width:760px;opacity:.92}
-    main{padding:42px 20px}.content{background:var(--card);border:1px solid #e2e8f0;border-radius:24px;box-shadow:0 18px 45px rgba(15,23,42,.08);padding:clamp(24px,4vw,48px)}
-    h2{font-size:30px;line-height:1.2;margin:34px 0 12px}h3{font-size:22px;margin:28px 0 10px}p{margin:0 0 16px}a{color:var(--brand)}ul,ol{padding-left:24px}.cta{margin-top:34px;padding:24px;border-radius:18px;background:#f1f5f9;border:1px solid #e2e8f0}.btn{display:inline-block;margin-top:12px;background:var(--brand);color:white;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:700}
-    footer{padding:30px 20px;color:var(--muted)}
-  </style>
-</head>
-<body>
-  <header><div class="wrap"><div class="brand">${escapeHtml(brandName)}</div><h1>${escapeHtml(page.h1 || title)}</h1>${description ? `<p class="lead">${escapeHtml(description)}</p>` : ""}</div></header>
-  <main><article class="content">${contentHtml}<section class="cta"><strong>${escapeHtml(brandName)}</strong>${ctx.phone ? `<p>Call us: <a href="tel:${escapeHtml(ctx.phone)}">${escapeHtml(ctx.phone)}</a></p>` : ""}${ctx.email ? `<p>Email: <a href="mailto:${escapeHtml(ctx.email)}">${escapeHtml(ctx.email)}</a></p>` : ""}</section></article></main>
-  <footer><div class="footer-inner">&copy; ${new Date().getFullYear()} ${escapeHtml(brandName)}</div></footer>
-</body>
-</html>`;
-}
-
 async function serveRobots(ctx: any, host: string, res: Response) {
   const customRobots = ctx.robots_txt || ctx.robotsTxt;
   const body = customRobots && String(customRobots).trim().length
@@ -229,20 +194,6 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
     return res.status(404).type("text/html").send(notFoundHtml("No published Nexus page exists for this URL yet. The request was logged for promotion review."));
   }
 
-  // ✅ CHANGED: Prefer fully-rendered R2 artifact before legacy shell renderer.
-  // 🔒 UNTOUCHED: Existing page lookup, version lookup, and fallback renderer remain unchanged.
-  if (page.r2_key) {
-    try {
-      const html = await getPageHtml(page.r2_key);
-      if (html) {
-        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
-        return res.type("text/html").send(html);
-      }
-    } catch (error) {
-      console.error("[CLIENT_DOMAIN_R2_READ_FAILED]", { pageId: page.id, slug, r2Key: page.r2_key, error });
-    }
-  }
-
   const versionResult = await pool.query(
     `SELECT * FROM page_versions WHERE page_id::text = $1::text AND is_active = true ORDER BY version DESC LIMIT 1`,
     [page.id],
@@ -250,8 +201,38 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
   const version = versionResult.rows[0];
   if (!version) return res.status(404).type("text/html").send(notFoundHtml("This page is published but does not have an active page version yet."));
 
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=60");
-  res.type("text/html").send(renderClientPageHtml(ctx, page, version, host));
+  const contentHtml = version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "";
+  const links = await getPublicInternalLinks(page.id, ctx.website_id);
+  const canonicalUrl = `https://${host}/${page.slug}`;
+  const settings = ctx.website_settings || {};
+  const website = {
+    id: ctx.website_id,
+    accountId: ctx.account_id,
+    account_id: ctx.account_id,
+    domain: host,
+    name: settings.brandName || settings.siteName || settings.businessName || ctx.brand_name || ctx.website_name || ctx.website_domain || host,
+    brandName: settings.brandName || ctx.brand_name || ctx.website_name || ctx.website_domain || host,
+    websiteName: settings.siteName || settings.brandName || ctx.website_name || ctx.website_domain || host,
+    phone: settings.phone || ctx.phone,
+    email: settings.email || ctx.email,
+    primaryColor: settings.primaryColor || ctx.primary_color,
+    settings: {
+      ...(ctx.custom_fields || {}),
+      ...settings,
+      brandName: settings.brandName || ctx.brand_name || ctx.website_name || ctx.website_domain || host,
+      siteName: settings.siteName || settings.brandName || ctx.brand_name || ctx.website_name || ctx.website_domain || host,
+      businessName: settings.businessName || settings.brandName || ctx.brand_name || ctx.website_name || ctx.website_domain || host,
+      phone: settings.phone || ctx.phone,
+      email: settings.email || ctx.email,
+    },
+  };
+
+  const html = buildEnhancedPublicPageHtml({ page, website, contentHtml, canonicalUrl, links });
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("X-Nexus-Public-Renderer", "client-domain-enhanced-v1");
+  return res.type("text/html").send(
+    html.replace("</head>", `<meta name="x-nexus-public-renderer" content="client-domain-enhanced-v1"/></head>`),
+  );
 }
 
 async function serveHealth(ctx: any, host: string, res: Response) {
