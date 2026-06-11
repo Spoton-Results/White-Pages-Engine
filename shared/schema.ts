@@ -15,7 +15,16 @@ export const websiteStatusEnum = pgEnum("website_status", ["live", "syncing", "e
 export const pageStatusEnum = pgEnum("page_status", ["draft", "review", "approved", "published", "pruned"]);
 export const jobStatusEnum = pgEnum("job_status", ["pending", "running", "completed", "failed", "cancelled"]);
 export const pageTypeEnum = pgEnum("page_type", [
-  "state_hub", "city_hub", "service_city", "industry_city", "problem_intent"
+  "state_hub",
+  "city_hub",
+  "service_city",
+  "industry_city",
+  "problem_intent",
+  "state_service",
+  "industry_state",
+  "service_problem",
+  "city_service_problem",
+  "comparison",
 ]);
 export const locationTypeEnum = pgEnum("location_type", ["state", "city", "neighborhood", "county"]);
 

@@ -408,7 +408,12 @@ export async function generateBlueprint(opts: {
     state_hub: "State Hub (e.g. 'Merchant Services in Texas')",
     city_hub: "City Hub (e.g. 'Business Services in Houston')",
     industry_city: "Industry + City (e.g. 'Restaurant Payment Solutions in Chicago')",
+    state_service: "State + Service (e.g. 'Payment Processing in Texas')",
+    industry_state: "Industry + State (e.g. 'Restaurant Payment Solutions in Texas')",
     problem_intent: "Problem Intent (e.g. 'How to Accept Credit Cards for Small Business')",
+    service_problem: "Service + Problem (e.g. 'Payment Processing for Chargeback Problems')",
+    city_service_problem: "City + Service + Problem (e.g. 'Houston Payment Processing for Chargeback Problems')",
+    comparison: "X vs Y Comparison (e.g. 'Stripe vs Square for Small Businesses')",
   };
 
   const prompt = `You are an expert SEO strategist generating a page blueprint for a white-pages publishing platform.
@@ -426,6 +431,26 @@ TEMPLATE VARIABLES AVAILABLE:
 - {state} — state name (e.g. "Texas")
 - {brand} — business name
 - {industry} — industry name
+- {comparison_x} — the primary product, service, platform, or approach being compared
+- {comparison_y} — the approved alternative being compared against
+- {audience} — the intended customer, industry, or use case
+
+${pageType === "comparison" ? `COMPARISON PAGE REQUIREMENTS:
+- Use {comparison_x}, {comparison_y}, and {audience} in the title, H1, slug, and metadata.
+- Treat X and Y neutrally. Do not invent performance, pricing, market-share, legal, compliance, or outcome claims.
+- The user will provide the approved comparison pair in Extra Context.
+- Include sections for:
+  1. Quick Verdict
+  2. Side-by-Side Overview
+  3. Best Fit for {comparison_x}
+  4. Best Fit for {comparison_y}
+  5. Features and Capabilities
+  6. Pricing Considerations
+  7. Pros and Cons
+  8. Final Recommendation
+  9. Frequently Asked Questions
+- Use promptFamily "comparison".
+` : ""}
 
 Generate a complete SEO-optimized blueprint for this page type.
 
@@ -440,7 +465,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "requiredWordCount": <700-1200 integer>,
   "minPublishScore": "<0.60-0.75 as string>",
   "faqEnabled": true,
-  "promptFamily": "local_service",
+  "promptFamily": "${pageType === "comparison" ? "comparison" : "local_service"}",
   "sections": [
     { "name": "<section name>", "description": "<1-2 sentences>" }
   ]

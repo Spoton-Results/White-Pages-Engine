@@ -25,6 +25,7 @@ const PAGE_TYPES = [
   { value: "problem_intent", label: "Problem Intent", example: '"How to Accept Credit Cards for Small Business"' },
   { value: "service_problem", label: "Service + Problem", example: '"Payment Processing for Chargeback Problems"' },
   { value: "city_service_problem", label: "City + Service + Problem", example: '"Houston Payment Processing for Chargeback Problems"' },
+  { value: "comparison", label: "X vs Y", example: '"Stripe vs Square for Small Businesses"' },
 ];
 
 const pageTypeColors: Record<string, string> = {
@@ -37,6 +38,7 @@ const pageTypeColors: Record<string, string> = {
   problem_intent: "bg-red-500/10 text-red-700",
   service_problem: "bg-pink-500/10 text-pink-700",
   city_service_problem: "bg-purple-500/10 text-purple-700",
+  comparison: "bg-cyan-500/10 text-cyan-700",
 };
 
 export default function BlueprintsPage() {
