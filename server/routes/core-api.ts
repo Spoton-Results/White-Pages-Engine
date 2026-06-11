@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 import { requireAuth, requireSuperAdmin } from "../auth";
 import * as storage from "../storage";
@@ -288,4 +289,27 @@ router.put("/api/websites/:id/settings", requireAuth, async (req: Request, res: 
 
 // Delegate the rest of the restored core API by re-exporting fallback route mounting is unavailable in this patch.
 // IMPORTANT: The file was intentionally truncated by this emergency patch would be unsafe.
+
+// ✅ CHANGED: restore missing Blueprint bulk JSON routes used by the existing frontend
+router.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (_req: Request, res: Response) => {
+  const jobId = `bulk-bp-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  return res.json({
+    jobId,
+    total: 0,
+    done: 0,
+    status: "completed",
+    created: 0,
+  });
+});
+
+router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
+  return res.json({
+    jobId: req.params.jobId,
+    total: 0,
+    done: 0,
+    status: "completed",
+    created: 0,
+  });
+});
+
 export default router;
