@@ -305,20 +305,43 @@ router.post("/api/intent-build/run-governance-action", requireWebsiteParam, asyn
 
     let linksUpdated = 0;
     if (affectedIds.length > 0) {
-      const linkResult = await client.query(
-        `UPDATE internal_links
-         SET to_page_id = $3
-         WHERE website_id::text = $1::text AND to_page_id = ANY($2::uuid[]) AND to_page_id::text <> $3::text`,
-        [page.website_id, affectedIds, page.id],
-      ).catch(() => ({ rowCount: 0 }));
-      linksUpdated = linkResult.rowCount || 0;
+      // ✅ CHANGED: isolate the optional internal-link update so a schema/type mismatch
+      // cannot poison the entire governance transaction.
+      await client.query("SAVEPOINT intent_links_update");
+      try {
+        const linkResult = await client.query(
+          `UPDATE internal_links
+           SET to_page_id = $3
+           WHERE website_id::text = $1::text
+             AND to_page_id = ANY($2::uuid[])
+             AND to_page_id::text <> $3::text`,
+          [page.website_id, affectedIds, page.id],
+        );
+        linksUpdated = linkResult.rowCount || 0;
+        await client.query("RELEASE SAVEPOINT intent_links_update");
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT intent_links_update");
+        await client.query("RELEASE SAVEPOINT intent_links_update");
+        console.error("[intent-governance/internal-links]", error);
+        linksUpdated = 0;
+      }
 
-      await client.query(
-        `UPDATE pages
-         SET intent_governance_status = $3, updated_at = NOW()
-         WHERE website_id::text = $1::text AND id = ANY($2::uuid[])`,
-        [page.website_id, affectedIds, action === "merge" ? "merge_reviewed" : "consolidation_reviewed"],
-      ).catch(() => undefined);
+      // ✅ CHANGED: isolate the optional governance-status update for the same reason.
+      await client.query("SAVEPOINT intent_pages_update");
+      try {
+        await client.query(
+          `UPDATE pages
+           SET intent_governance_status = $3, updated_at = NOW()
+           WHERE website_id::text = $1::text
+             AND id = ANY($2::uuid[])`,
+          [page.website_id, affectedIds, action === "merge" ? "merge_reviewed" : "consolidation_reviewed"],
+        );
+        await client.query("RELEASE SAVEPOINT intent_pages_update");
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT intent_pages_update");
+        await client.query("RELEASE SAVEPOINT intent_pages_update");
+        console.error("[intent-governance/pages]", error);
+      }
     }
 
     const jobId = await queueJob(client, page, action === "merge" ? "Intent Governance: approved merge action" : "Intent Governance: approved consolidation action", {
