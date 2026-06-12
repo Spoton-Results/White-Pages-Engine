@@ -528,4 +528,146 @@ router.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res:
   }
 });
 
+
+// ✅ CHANGED: restore Automation settings route
+router.get("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const {
+      getAutomationSettings,
+      DEFAULT_AUTOMATION_SETTINGS,
+    } = await import("../services/automation");
+
+    return res.json({
+      settings: getAutomationSettings(website),
+      defaults: DEFAULT_AUTOMATION_SETTINGS,
+    });
+  } catch (error: any) {
+    console.error("[automation/settings/get]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to load automation settings",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation settings save route
+router.put("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const current = (website.settings as any) || {};
+    const merged = {
+      ...current,
+      automation: {
+        ...(current.automation || {}),
+        ...req.body,
+      },
+    };
+
+    const updated = await storage.updateWebsite(req.params.id, {
+      settings: merged,
+    } as any);
+
+    const { getAutomationSettings } = await import("../services/automation");
+
+    return res.json({
+      ok: true,
+      settings: getAutomationSettings(updated || { settings: merged }),
+    });
+  } catch (error: any) {
+    console.error("[automation/settings/put]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to save automation settings",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation notifications route
+router.get("/api/websites/:id/notifications", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const unreadOnly = req.query.unreadOnly === "true";
+    const limit = Math.min(parseInt(String(req.query.limit || "50"), 10), 200);
+
+    const notifications = await storage.getAdminNotifications(
+      req.params.id,
+      limit,
+      unreadOnly,
+    );
+    const unreadCount = await storage.getUnreadNotificationCount(req.params.id);
+
+    return res.json({ notifications, unreadCount });
+  } catch (error: any) {
+    console.error("[automation/notifications/get]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to load notifications",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation notification read route
+router.post("/api/notifications/:id/read", requireAuth, async (req: Request, res: Response) => {
+  try {
+    await storage.markNotificationRead(req.params.id);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("[automation/notifications/read]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to mark notification as read",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation promotion queue route
+router.get("/api/websites/:id/promotion-queue", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { getAutomationSettings } = await import("../services/automation");
+    const autoSettings = getAutomationSettings(website);
+
+    const queue = await storage.getPromotionQueue(
+      req.params.id,
+      autoSettings.fallbackHitThreshold,
+    );
+
+    return res.json({ queue });
+  } catch (error: any) {
+    console.error("[automation/promotion-queue/get]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to load promotion queue",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation promotion queue dismiss route
+router.post("/api/websites/:id/promotion-queue/:logId/dismiss", requireAuth, async (req: Request, res: Response) => {
+  try {
+    await storage.markFallbackPromoted(req.params.logId);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("[automation/promotion-queue/dismiss]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to dismiss promotion queue item",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Automation demotion logs route
+router.get("/api/websites/:id/demotion-logs", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(String(req.query.limit || "50"), 10), 200);
+    const logs = await storage.getDemotionLogs(req.params.id, limit);
+    return res.json({ logs });
+  } catch (error: any) {
+    console.error("[automation/demotion-logs/get]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to load demotion logs",
+    });
+  }
+});
+
 export default router;
