@@ -796,4 +796,271 @@ router.get("/api/websites/:id/demotion-logs", requireAuth, async (req: Request, 
   }
 });
 
+
+// ✅ CHANGED: restore SEO Control score-unscored route
+router.post("/api/websites/:id/score-pages", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const websiteId = req.params.id;
+    const website = await storage.getWebsite(websiteId);
+
+    if (!website) {
+      return res.status(404).json({ error: "Website not found" });
+    }
+
+    res.json({ ok: true, message: "Scoring job started" });
+
+    setImmediate(async () => {
+      try {
+        const { scorePageContent } = await import("../services/scoring");
+        const blueprint = (website.settings as any)?.defaultBlueprintId
+          ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+          : null;
+        const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+
+        let processed = 0;
+        const batchSize = 500;
+
+        while (true) {
+          const unscored = await storage.getUnscoredPages(websiteId, batchSize);
+          if (unscored.length === 0) break;
+
+          for (const page of unscored) {
+            try {
+              const version = await storage.getActivePageVersion(page.id);
+              const banks = await storage.getVariationBanks(
+                websiteId,
+                page.title.split(" in ")[0] || "",
+              );
+
+              const result = scorePageContent(
+                version?.contentHtml || "",
+                page.metaDescription || "",
+                page.title,
+                page.wordCount || 0,
+                banks,
+                minScoreForTier1,
+              );
+
+              await storage.updatePageScore(
+                page.id,
+                result.total,
+                result as any,
+                result.recommendedTier,
+              );
+
+              processed += 1;
+            } catch (error) {
+              console.error("[score-pages/page]", page.id, error);
+            }
+          }
+
+          if (unscored.length < batchSize) break;
+        }
+
+        console.log(
+          `[score-pages] Done: scored ${processed} pages for website ${websiteId}`,
+        );
+      } catch (error) {
+        console.error("[score-pages]", error);
+      }
+    });
+
+    return;
+  } catch (error: any) {
+    console.error("[score-pages/start]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to start scoring",
+    });
+  }
+});
+
+// ✅ CHANGED: restore SEO Control combined score-and-promote route
+router.post("/api/websites/:id/score-and-promote", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const websiteId = req.params.id;
+    const website = await storage.getWebsite(websiteId);
+
+    if (!website) {
+      return res.status(404).json({ error: "Website not found" });
+    }
+
+    const parsed = z.object({
+      tier1Threshold: z.number().min(0).max(100).default(80),
+      tier3Threshold: z.number().min(0).max(100).default(55),
+      applyTier3: z.boolean().default(false),
+    }).safeParse(req.body || {});
+
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.message });
+    }
+
+    const {
+      tier1Threshold,
+      tier3Threshold,
+      applyTier3,
+    } = parsed.data;
+
+    res.json({
+      ok: true,
+      message: "Score & Promote job started. Refresh stats in ~30s.",
+    });
+
+    setImmediate(async () => {
+      try {
+        const { scorePageContent } = await import("../services/scoring");
+        const blueprint = (website.settings as any)?.defaultBlueprintId
+          ? await storage.getBlueprint((website.settings as any).defaultBlueprintId)
+          : null;
+        const minScoreForTier1 = (blueprint as any)?.minScoreForTier1 ?? 80;
+
+        let scored = 0;
+
+        while (true) {
+          const unscored = await storage.getUnscoredPages(websiteId, 500);
+          if (unscored.length === 0) break;
+
+          for (const page of unscored) {
+            try {
+              const version = await storage.getActivePageVersion(page.id);
+              const banks = await storage.getVariationBanks(
+                websiteId,
+                page.title.split(" in ")[0] || "",
+              );
+
+              const result = scorePageContent(
+                version?.contentHtml || "",
+                page.metaDescription || "",
+                page.title,
+                page.wordCount || 0,
+                banks,
+                minScoreForTier1,
+              );
+
+              await storage.updatePageScore(
+                page.id,
+                result.total,
+                result as any,
+                result.recommendedTier,
+              );
+
+              scored += 1;
+            } catch (error) {
+              console.error("[score-and-promote/page]", page.id, error);
+            }
+          }
+
+          if (unscored.length < 500) break;
+        }
+
+        const { promoted } = await storage.bulkUpdatePageTiers(
+          websiteId,
+          tier1Threshold,
+        );
+
+        let demoted = 0;
+
+        if (applyTier3) {
+          const result = await storage.bulkSetTier3(
+            websiteId,
+            tier3Threshold,
+          );
+          demoted = result.demoted;
+        }
+
+        console.log(
+          `[score-and-promote] Done — scored:${scored} promoted:${promoted} demoted:${demoted}`,
+        );
+      } catch (error) {
+        console.error("[score-and-promote]", error);
+      }
+    });
+
+    return;
+  } catch (error: any) {
+    console.error("[score-and-promote/start]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to start score and promote",
+    });
+  }
+});
+
+// ✅ CHANGED: restore SEO Control apply-tiers route
+router.post("/api/websites/:id/apply-tiers", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const parsed = z.object({
+      tier1Threshold: z.number().min(0).max(100).default(80),
+      tier3Threshold: z.number().min(0).max(100).default(55),
+      applyTier3: z.boolean().default(false),
+    }).safeParse(req.body || {});
+
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.message });
+    }
+
+    const websiteId = req.params.id;
+    const website = await storage.getWebsite(websiteId);
+
+    if (!website) {
+      return res.status(404).json({ error: "Website not found" });
+    }
+
+    const { promoted } = await storage.bulkUpdatePageTiers(
+      websiteId,
+      parsed.data.tier1Threshold,
+    );
+
+    let demoted = 0;
+
+    if (parsed.data.applyTier3) {
+      const result = await storage.bulkSetTier3(
+        websiteId,
+        parsed.data.tier3Threshold,
+      );
+      demoted = result.demoted;
+    }
+
+    return res.json({
+      ok: true,
+      promoted,
+      demoted,
+    });
+  } catch (error: any) {
+    console.error("[apply-tiers]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to apply tiers",
+    });
+  }
+});
+
+// ✅ CHANGED: restore SEO Control fallback promotion route
+router.post("/api/websites/:id/fallback-hits/promote", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const parsed = z.object({
+      slug: z.string().trim().min(1, "Slug is required"),
+    }).safeParse(req.body || {});
+
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.message });
+    }
+
+    const website = await storage.getWebsite(req.params.id);
+
+    if (!website) {
+      return res.status(404).json({ error: "Website not found" });
+    }
+
+    await storage.promoteFallbackSlug(
+      req.params.id,
+      parsed.data.slug,
+    );
+
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("[fallback-hits/promote]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to promote fallback slug",
+    });
+  }
+});
+
 export default router;
