@@ -317,6 +317,38 @@ router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, a
 // ✅ CHANGED: restore missing single Blueprint AI route used by the existing frontend
 
 // ✅ CHANGED: restore missing account-scoped Blueprint save route
+
+// ✅ CHANGED: restore missing individual Blueprint delete route
+router.delete("/api/blueprints/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    await storage.deleteBlueprint(req.params.id);
+    return res.json({ message: "Blueprint deleted" });
+  } catch (error: any) {
+    console.error("[blueprints/delete]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to delete blueprint",
+    });
+  }
+});
+
+// ✅ CHANGED: restore missing account-scoped Delete All Blueprints route
+router.delete("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const blueprints = await storage.getBlueprints(req.params.accountId);
+
+    for (const blueprint of blueprints) {
+      await storage.deleteBlueprint(blueprint.id);
+    }
+
+    return res.json({ count: blueprints.length });
+  } catch (error: any) {
+    console.error("[accounts/blueprints/delete-all]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to delete blueprints",
+    });
+  }
+});
+
 router.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
   const parsed = insertBlueprintSchema.safeParse({
     ...req.body,
