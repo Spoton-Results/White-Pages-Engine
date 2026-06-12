@@ -134,7 +134,25 @@ export default function JobsPage() {
   }, [locations.length]);
 
   const createJob = useMutation({
-    mutationFn: (data: any) => api.post("/api/jobs", data),
+    mutationFn: (data: any) => {
+      const selectedServices = services.filter((s: any) => data.serviceIds.includes(s.id));
+      const selectedLocations = locations.filter((l: any) => data.locationIds.includes(l.id));
+      const selectedCities = selectedLocations.filter((l: any) => l.type === "city");
+      const selectedStates = selectedLocations.filter((l: any) => l.type === "state");
+
+      const payload = {
+        services: selectedServices.map((s: any) => s.name),
+        blueprintId: data.blueprintId || undefined,
+        mode: selectedCities.length > 0 ? "specific_cities" : "specific_states",
+        states: selectedStates.map((l: any) => l.stateCode || l.state_code || l.slug || l.name),
+        cities: selectedCities.map((l: any) => ({
+          name: l.name,
+          stateAbbr: l.stateCode || l.state_code,
+        })),
+      };
+
+      return api.post(`/api/websites/${data.websiteId}/bulk-generate-job`, payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/jobs"] });
       setShowCreate(false);
