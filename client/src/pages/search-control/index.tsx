@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { api } from "@/lib/api";
@@ -137,6 +137,13 @@ export default function SearchControlPage() {
     queryKey: ["/api/websites"],
     queryFn: () => apiRequest("/api/websites"),
   });
+
+  // ✅ CHANGED: select the first website after the list loads on a hard refresh
+  useEffect(() => {
+    if (!websiteId && websites.length > 0) {
+      setWebsiteId(websites[0].id);
+    }
+  }, [websites, websiteId]);
 
   const { data: tierStats, isLoading: statsLoading } = useQuery<TierStats>({
     queryKey: ["/api/websites", websiteId, "tier-stats"],
