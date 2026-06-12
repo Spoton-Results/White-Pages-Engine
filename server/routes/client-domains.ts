@@ -164,20 +164,34 @@ async function serveSitemap(ctx: any, host: string, slug: string, res: Response)
   }
 
   if (!xml && sitemapSlug === "sitemap.xml") {
-    const latest = await pool.query(
-      `SELECT slug, xml_content, r2_key
+    // CHANGED: build the public sitemap index from all child sitemap rows.
+    const children = await pool.query(
+      `SELECT slug, last_generated, created_at
        FROM sitemaps
        WHERE website_id::text = $1::text
-       ORDER BY last_generated DESC NULLS LAST, created_at DESC
-       LIMIT 1`,
+         AND slug <> 'sitemap.xml'
+         AND slug <> 'sitemap-index'
+       ORDER BY created_at ASC, slug ASC`,
       [ctx.website_id],
     );
 
-    row = latest.rows[0];
-    xml = row?.xml_content;
+    if (children.rows.length > 0) {
+      const items = children.rows.map((child: any) => {
+        const childSlug = String(child.slug || "").replace(/\.xml$/i, "");
+        const dateValue = child.last_generated || child.created_at;
+        const lastmod = dateValue
+          ? `\n    <lastmod>${new Date(dateValue).toISOString().split("T")[0]}</lastmod>`
+          : "";
 
-    if (!xml && row?.r2_key) {
-      xml = await getObject(row.r2_key);
+        return `  <sitemap>
+    <loc>https://${host}/${childSlug}.xml</loc>${lastmod}
+  </sitemap>`;
+      }).join("\n");
+
+      xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${items}
+</sitemapindex>`;
     }
   }
 
