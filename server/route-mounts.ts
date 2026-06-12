@@ -37,8 +37,8 @@ import actionReviewActiveRouter from "./routes/action-review-active";
 import autonomousControlPlaneRouter from "./routes/autonomous-control-plane";
 import bankHealthRouter from "./routes/bank-health";
 import clientDomainHomepageRouter from "./routes/client-domain-homepage";
-import intentGovernanceRouter from "./routes/intent-governance";
-import intentGovernanceRunRouter from "./routes/intent-governance-run";
+// 🔒 UNTOUCHED: intentActionsRouter is the sole owner of
+// POST /api/intent-build/run-governance-action.
 import jobsRouter from "./routes/jobs";
 import publicPagesEnhancedRouter from "./routes/public-pages-enhanced";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
@@ -80,8 +80,8 @@ export function mountSubRouters(app: Express) {
   app.use("/", autonomousControlPlaneRouter);
   app.use("/", bankHealthRouter);
   app.use("/", clientDomainHomepageRouter);
-  app.use("/", intentGovernanceRouter);
-  app.use("/", intentGovernanceRunRouter);
+  // ✅ CHANGED: do not mount duplicate governance routers.
+  // intentActionsRouter already owns the governance action endpoint.
   app.use("/", jobsRouter);
   app.use("/", publicPagesEnhancedRouter);
   app.use("/", publicWebsiteDomainsRouter);
