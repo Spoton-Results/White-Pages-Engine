@@ -66,6 +66,21 @@ function shouldNamespaceBlueprintSlug(settings: any): boolean {
   );
 }
 
+function forceTargetSlugDimensions(slug: string, target: { locationName: string; locationType: string; stateAbbr: string; stateName: string }): string {
+  let next = slugifySegment(slug);
+  const location = slugifySegment(target.locationName);
+  const state = slugifySegment(target.stateName);
+  const abbr = slugifySegment(target.stateAbbr);
+  if (target.locationType === "city") {
+    const cityState = slugifySegment(`${target.locationName}-${target.stateAbbr}`);
+    if (location && !next.includes(location)) next = `${next}--${cityState}`;
+    else if (abbr && !next.includes(`-${abbr}`) && !next.endsWith(abbr)) next = `${next}--${abbr}`;
+  } else if (target.locationType === "state") {
+    if (state && !next.includes(state) && abbr && !next.includes(abbr)) next = `${next}--${state}`;
+  }
+  return next.replace(/-{3,}/g, "--").replace(/^-|-$/g, "");
+}
+
 function namespaceSlugWithBlueprint(slug: string, blueprint: any, settings: any): string {
   if (!slug || !blueprint || !shouldNamespaceBlueprintSlug(settings)) return slug;
 
@@ -90,6 +105,19 @@ async function bulkGetWebsite(id: string) {
 async function bulkGetBrandProfile(id: string) {
   const [row] = await bulkDb.select().from(schema.brandProfiles).where(eq(schema.brandProfiles.id, id));
   return row ?? null;
+}
+
+// CHANGED: load active brand media for page generation
+async function bulkGetBrandMedia(brandProfileId: string, websiteId: string) {
+  return bulkDb
+    .select()
+    .from(schema.brandMedia)
+    .where(
+      and(
+        eq(schema.brandMedia.brandProfileId, brandProfileId),
+        eq(schema.brandMedia.active, true)
+      )
+    );
 }
 async function bulkGetBlueprint(id: string) {
   const [row] = await bulkDb.select().from(schema.blueprints).where(eq(schema.blueprints.id, id));
@@ -281,6 +309,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
 
   const brand = await bulkGetBrandProfile(website.brandProfileId as string);
   const brandName = brand?.name || website.name || website.domain;
+  // CHANGED: fetch saved brand media once per bulk job
+  const brandMedia = website.brandProfileId
+    ? await bulkGetBrandMedia(website.brandProfileId as string, job.websiteId)
+    : [];
 
   // ✅ CHANGED: build brandContext from job settings, then Website Edit settings, then brand defaults.
   // 🔒 UNTOUCHED: Page targeting, blueprint selection, services, locations, and job progress logic remain unchanged.
@@ -328,6 +360,14 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       websiteSettings.demoBannerButton ||
       websiteSettings.demoBannerButtonLabel ||
       "",
+    // CHANGED: pass active brand media into variation engine
+    brandMedia: brandMedia.map((media: any) => ({
+      publicUrl: media.publicUrl || media.public_url,
+      r2Key: media.r2Key || media.r2_key,
+      altText: media.altText || media.alt_text || `${brandName} brand image`,
+      category: media.category || "business_general",
+      sortOrder: media.sortOrder || media.sort_order || 0,
+    })),
   };
 
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
@@ -484,6 +524,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           const bpOverride = applyBlueprintTemplates(blueprintTemplate, { service: svc, location: t.locationName, state: t.stateName, stateAbbr: t.stateAbbr, brand: brandName, cluster: svcCluster?.primaryKeyword ?? "" });
           let finalSlug = bpOverride?.slug || result.slug;
           finalSlug = namespaceSlugWithBlueprint(finalSlug, blueprint, settings as any);
+          finalSlug = forceTargetSlugDimensions(finalSlug, t);
           const finalTitle = bpOverride?.title || result.title;
           const finalH1 = bpOverride?.h1 || result.h1;
           const finalMeta = bpOverride?.metaDescription || result.metaDescription;

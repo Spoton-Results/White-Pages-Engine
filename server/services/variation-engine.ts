@@ -21,6 +21,14 @@ export interface BrandContext {
   demoBannerHeading?: string;
   demoBannerSubtext?: string;
   demoBannerButton?: string;
+  // CHANGED: optional brand media for generated page image blocks
+  brandMedia?: Array<{
+    publicUrl?: string;
+    r2Key?: string;
+    altText?: string;
+    category?: string;
+    sortOrder?: number;
+  }>;
 }
 
 function pick<T>(arr: T[]): T {
@@ -147,6 +155,25 @@ export function buildVariationPage(
   const h2Style = `style="font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20"`;
   const section = (heading: string, body: string) => body ? `<h2 ${h2Style}>${sanitizeGeoText(heading, geoTarget)}</h2>\n${body}` : "";
 
+  // CHANGED: render one saved brand image when available
+  const selectedBrandMedia = (brandContext?.brandMedia || [])
+    .filter((media) => media.publicUrl || media.r2Key)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))[0];
+
+  const brandImageUrl = selectedBrandMedia
+    ? selectedBrandMedia.publicUrl && /^https?:\/\//i.test(selectedBrandMedia.publicUrl)
+      ? selectedBrandMedia.publicUrl
+      : selectedBrandMedia.r2Key
+        ? `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${selectedBrandMedia.r2Key}`
+        : ""
+    : "";
+
+  const brandImageBlock = brandImageUrl
+    ? `<figure style="margin:1.75rem 0 2rem;border-radius:.9rem;overflow:hidden;border:1px solid #e5e7eb;background:#f9fafb">` +
+      `<img src="${brandImageUrl}" alt="${selectedBrandMedia?.altText || `${brandName} ${serviceName}`}" loading="lazy" style="display:block;width:100%;height:auto;max-height:420px;object-fit:cover" />` +
+      `</figure>`
+    : "";
+
   // ✅ CHANGED: demo banner rendered at top of every page when demoBannerUrl is provided; empty string = hidden
   const demoBanner = brandContext?.demoBannerUrl
     ? `<div style="background:#1e40af;color:#fff;padding:.75rem 1.5rem;border-radius:.5rem;margin-bottom:1.5rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">` +
@@ -200,6 +227,7 @@ export function buildVariationPage(
   const contentHtml = [
     demoBanner, // ✅ CHANGED: demo banner at top; empty string when not configured
     intro,
+    brandImageBlock, // CHANGED: brand media image after intro
     section(`${serviceName} Market Context in ${displayLocation}`, localContext),
     section(`Common ${serviceName} Problems in ${displayLocation}`, painPoint),
     section(`How ${serviceName} Works in ${displayLocation}`, howItWorks),
