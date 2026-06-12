@@ -40,10 +40,30 @@ export default function PageIntelligencePage() {
   const websites = websitesQ.data || [];
   const selectedWebsite = websiteId || websites[0]?.id || "";
 
-  const graphQ = useQuery({ queryKey: ["page-intelligence", selectedWebsite, "graph"], queryFn: () => api.get<{ pages: GraphPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/graph`), enabled: !!selectedWebsite });
-  const orphanQ = useQuery({ queryKey: ["page-intelligence", selectedWebsite, "orphans"], queryFn: () => api.get<{ orphanCount: number; pages: OrphanPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/orphans`), enabled: !!selectedWebsite });
-  const depthQ = useQuery({ queryKey: ["page-intelligence", selectedWebsite, "crawl-depth"], queryFn: () => api.get<{ buckets: Record<string, number>; pages: DepthPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/crawl-depth`), enabled: !!selectedWebsite });
-  const conversionQ = useQuery({ queryKey: ["page-intelligence", selectedWebsite, "conversion"], queryFn: () => api.get<{ events: ConversionEvent[]; totalForms: number; topPages: Array<{ page: string; events: number }> }>(`/api/websites/${selectedWebsite}/conversion-analytics`), enabled: !!selectedWebsite });
+  // CHANGED: load expensive Page Intelligence queries sequentially.
+  const graphQ = useQuery({
+    queryKey: ["page-intelligence", selectedWebsite, "graph"],
+    queryFn: () => api.get<{ pages: GraphPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/graph`),
+    enabled: !!selectedWebsite,
+  });
+
+  const orphanQ = useQuery({
+    queryKey: ["page-intelligence", selectedWebsite, "orphans"],
+    queryFn: () => api.get<{ orphanCount: number; pages: OrphanPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/orphans`),
+    enabled: !!selectedWebsite && graphQ.isSuccess,
+  });
+
+  const depthQ = useQuery({
+    queryKey: ["page-intelligence", selectedWebsite, "crawl-depth"],
+    queryFn: () => api.get<{ buckets: Record<string, number>; pages: DepthPage[] }>(`/api/websites/${selectedWebsite}/page-intelligence/crawl-depth`),
+    enabled: !!selectedWebsite && orphanQ.isSuccess,
+  });
+
+  const conversionQ = useQuery({
+    queryKey: ["page-intelligence", selectedWebsite, "conversion"],
+    queryFn: () => api.get<{ events: ConversionEvent[]; totalForms: number; topPages: Array<{ page: string; events: number }> }>(`/api/websites/${selectedWebsite}/conversion-analytics`),
+    enabled: !!selectedWebsite && depthQ.isSuccess,
+  });
 
   const repair = useMutation({
     mutationFn: () => api.post<{ linksCreated: number }>(`/api/websites/${selectedWebsite}/page-intelligence/repair-orphans`, {}),
