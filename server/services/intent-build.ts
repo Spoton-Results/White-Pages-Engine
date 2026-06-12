@@ -184,7 +184,8 @@ async function analyseWebsite(websiteId: string): Promise<IntentReport> {
     mediumOwners: mediumCount,
     weakOwners: weakCount,
     missingCanonicalOwners: missingCount,
-    topCanonicalOwners,
+    // CHANGED: limit the rendered owner table for very large websites.
+    topCanonicalOwners: topCanonicalOwners.slice(0, 100),
   };
 }
 
