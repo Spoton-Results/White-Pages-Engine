@@ -3,6 +3,7 @@ import { pool } from "../db";
 import { requireAuth } from "../auth";
 import { resolveCname, resolve4 } from "node:dns/promises";
 import { buildEnhancedPublicPageHtml, getPublicInternalLinks } from "../services/public-page-enhancements";
+import { getObject } from "../services/r2";
 
 const router = Router();
 
@@ -142,21 +143,52 @@ async function serveRobots(ctx: any, host: string, res: Response) {
 
 async function serveSitemap(ctx: any, host: string, slug: string, res: Response) {
   const sitemapSlug = slug || "sitemap.xml";
+  const storedSlug = sitemapSlug.replace(/\.xml$/i, "");
+
+  // CHANGED: child sitemap XML may be stored in R2 instead of xml_content.
   const result = await pool.query(
-    `SELECT slug, xml_content FROM sitemaps WHERE website_id::text = $1::text AND slug = $2 LIMIT 1`,
-    [ctx.website_id, sitemapSlug],
+    `SELECT slug, xml_content, r2_key
+     FROM sitemaps
+     WHERE website_id::text = $1::text
+       AND (slug = $2 OR slug = $3)
+     ORDER BY CASE WHEN slug = $2 THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [ctx.website_id, sitemapSlug, storedSlug],
   );
-  let xml = result.rows[0]?.xml_content;
+
+  let row = result.rows[0];
+  let xml = row?.xml_content;
+
+  if (!xml && row?.r2_key) {
+    xml = await getObject(row.r2_key);
+  }
+
   if (!xml && sitemapSlug === "sitemap.xml") {
     const latest = await pool.query(
-      `SELECT slug, xml_content FROM sitemaps WHERE website_id::text = $1::text ORDER BY last_generated DESC NULLS LAST, created_at DESC LIMIT 1`,
+      `SELECT slug, xml_content, r2_key
+       FROM sitemaps
+       WHERE website_id::text = $1::text
+       ORDER BY last_generated DESC NULLS LAST, created_at DESC
+       LIMIT 1`,
       [ctx.website_id],
     );
-    xml = latest.rows[0]?.xml_content;
+
+    row = latest.rows[0];
+    xml = row?.xml_content;
+
+    if (!xml && row?.r2_key) {
+      xml = await getObject(row.r2_key);
+    }
   }
-  if (!xml) return res.status(404).type("text/html").send(notFoundHtml("Sitemap not found for this custom domain."));
+
+  if (!xml) {
+    return res.status(404).type("text/html").send(
+      notFoundHtml("Sitemap not found for this custom domain."),
+    );
+  }
+
   xml = String(xml).replaceAll(`https://${ctx.website_domain}`, `https://${host}`);
-  res.type("application/xml").send(xml);
+  return res.type("application/xml").send(xml);
 }
 
 async function resolveHomepageSlug(ctx: any) {
