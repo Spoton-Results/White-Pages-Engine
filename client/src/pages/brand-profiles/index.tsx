@@ -179,7 +179,11 @@ export default function BrandProfilesPage() {
                         {(brandMediaByProfile as any)[brand.id].map((media: any) => (
                           <div key={media.id} className="rounded-md border overflow-hidden bg-muted/30">
                             <img
-                              src={media.publicUrl || media.public_url}
+                              src={
+                                (media.publicUrl || media.public_url)?.startsWith("http")
+                                  ? (media.publicUrl || media.public_url)
+                                  : `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${media.r2Key || media.r2_key}`
+                              }
                               alt={media.altText || media.alt_text || "Brand media"}
                               className="h-24 w-full object-cover"
                             />
