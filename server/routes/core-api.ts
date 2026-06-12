@@ -315,6 +315,31 @@ router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, a
 
 
 // ✅ CHANGED: restore missing single Blueprint AI route used by the existing frontend
+
+// ✅ CHANGED: restore missing account-scoped Blueprint save route
+router.post("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertBlueprintSchema.safeParse({
+    ...req.body,
+    accountId: req.params.accountId,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: parsed.error.message,
+    });
+  }
+
+  try {
+    const blueprint = await storage.createBlueprint(parsed.data);
+    return res.status(201).json(blueprint);
+  } catch (error: any) {
+    console.error("[accounts/blueprints/create]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to save blueprint",
+    });
+  }
+});
+
 router.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res: Response) => {
   const parsed = z.object({
     businessName: z.string().trim().min(1, "Business name is required"),
