@@ -15,6 +15,7 @@ import { writeVariationsForService, fillMissingSectionsForService, BrandContext 
 import { generateSitemapsForWebsite, generateRobotsTxt, URLS_PER_SITEMAP } from "./services/sitemap";
 import { processOnboardingSubmission, calculateReadinessScore } from "./services/onboarding";
 import { isR2Configured } from "./services/r2";
+import { batchRescoreEEAT } from "./services/automation";
 import {
   insertAccountSchema, insertUserSchema, insertBrandProfileSchema,
   insertWebsiteSchema, insertLocationSchema, insertServiceSchema,
@@ -936,6 +937,45 @@ function renderPageHtml(page: any, version: any, website: any, brand: any, navDa
 // contract in index.ts without registering any duplicate routes.
 // ✅ CHANGED: added missing export that index.ts requires
 export async function registerRoutes(server: Server, app: Express): Promise<Server> {
+  // ✅ CHANGED: restore Published Pages E-E-A-T batch rescore route.
+  app.post("/api/websites/:websiteId/eeat-rescore", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { websiteId } = req.params;
+      const website = await storage.getWebsite(websiteId);
+
+      if (!website) {
+        return res.status(404).json({ message: "Website not found" });
+      }
+
+      const requestedBatchSize = Number(req.body?.batchSize ?? 200);
+      const batchSize = Number.isFinite(requestedBatchSize)
+        ? Math.max(1, Math.min(500, Math.floor(requestedBatchSize)))
+        : 200;
+
+      const result = await batchRescoreEEAT(
+        websiteId,
+        {
+          id: website.id,
+          domain: website.domain,
+          settings: website.settings,
+        },
+        batchSize,
+      );
+
+      return res.json({
+        success: true,
+        rescored: result.rescored,
+        batchSize,
+      });
+    } catch (error: any) {
+      console.error("[eeat-rescore] Route failed:", error);
+      return res.status(500).json({
+        message: error?.message || "Failed to rescore E-E-A-T",
+      });
+    }
+  });
+
+
   // CHANGED: Restore website-scoped locations route used by Hub Pages state/city bulk generation.
 
   // ✅ CHANGED: Restore missing Hub Pages bulk-generate route used by client/src/pages/hub-pages/index.tsx
