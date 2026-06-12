@@ -148,6 +148,13 @@ export default function BlueprintsPage() {
   const bulkBpJob = bulkBpJobQ.data as any;
   const bulkBpDone = bulkBpJob?.status === "completed" || bulkBpJob?.status === "failed";
 
+  useEffect(() => {
+    if (bulkBpJob?.status === "completed") {
+      qc.invalidateQueries({ queryKey: ["/api/blueprints"] });
+      qc.invalidateQueries({ queryKey: ["/api/blueprints", selectedAccount] });
+    }
+  }, [bulkBpJob?.status, qc, selectedAccount]);
+
   const submitBulkBp = async () => {
     if (!selectedAccount) {
       toast({ title: "No account selected", variant: "destructive" });
@@ -578,14 +585,40 @@ export default function BlueprintsPage() {
               <div>
                 <Label className="mb-2 block">Page Types (select one or more)</Label>
                 <div className="flex flex-col gap-1.5 border rounded-lg p-3 max-h-48 overflow-auto">
-                  {PAGE_TYPES.map(pt => (
-                    <label key={pt.value} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
-                      <input type="checkbox" checked={bulkPageTypes.has(pt.value)}
-                        onChange={() => { const n = new Set(bulkPageTypes); if (n.has(pt.value)) n.delete(pt.value); else n.add(pt.value); setBulkPageTypes(n); }} />
-                      <span className="text-sm font-medium">{pt.label}</span>
-                      <span className="text-xs text-muted-foreground ml-1">{pt.example}</span>
-                    </label>
-                  ))}
+                  {PAGE_TYPES.map(pt => {
+                    const isComparison = pt.value === "comparison";
+
+                    return (
+                      <label
+                        key={pt.value}
+                        className={`flex items-center gap-2 rounded px-1 py-0.5 ${
+                          isComparison
+                            ? "cursor-not-allowed opacity-60"
+                            : "cursor-pointer hover:bg-muted/50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={bulkPageTypes.has(pt.value)}
+                          disabled={isComparison}
+                          onChange={() => {
+                            if (isComparison) return;
+                            const n = new Set(bulkPageTypes);
+                            if (n.has(pt.value)) n.delete(pt.value);
+                            else n.add(pt.value);
+                            setBulkPageTypes(n);
+                          }}
+                        />
+                        <span className="text-sm font-medium">{pt.label}</span>
+                        <span className="text-xs text-muted-foreground ml-1">{pt.example}</span>
+                        {isComparison && (
+                          <span className="text-xs text-amber-700 ml-auto">
+                            Use Generate with AI
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
               <div>

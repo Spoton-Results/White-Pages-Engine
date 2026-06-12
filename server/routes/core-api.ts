@@ -21,6 +21,20 @@ import {
 
 const router = Router();
 
+type BlueprintBulkJob = {
+  jobId: string;
+  accountId: string;
+  total: number;
+  done: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  status: "pending" | "running" | "completed" | "failed";
+  errors: Array<{ pageType: string; serviceName: string; message: string }>;
+};
+
+const blueprintBulkJobs = new Map<string, BlueprintBulkJob>();
+
 const copySettingKeys = [
   "mainWebsiteUrl",
   "websiteUrl",
@@ -291,26 +305,144 @@ router.put("/api/websites/:id/settings", requireAuth, async (req: Request, res: 
 // Delegate the rest of the restored core API by re-exporting fallback route mounting is unavailable in this patch.
 // IMPORTANT: The file was intentionally truncated by this emergency patch would be unsafe.
 
-// ✅ CHANGED: restore missing Blueprint bulk JSON routes used by the existing frontend
-router.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (_req: Request, res: Response) => {
+// ✅ CHANGED: real Bulk Blueprint generation for non-comparison page types
+router.post("/api/accounts/:accountId/blueprints/bulk-generate", requireAuth, async (req: Request, res: Response) => {
+  const parsed = z.object({
+    pageTypes: z.array(z.string().trim().min(1)).min(1, "Select at least one page type"),
+    services: z.array(z.string()).min(1),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  const pageTypes = [...new Set(parsed.data.pageTypes)];
+  const services = [...new Set(parsed.data.services.map((service) => service.trim()))];
+
+  if (pageTypes.includes("comparison")) {
+    return res.status(400).json({
+      message: "X vs Y comparisons require approved X, Y, and audience values. Use Generate with AI for comparison Blueprints.",
+    });
+  }
+
+  const websiteList = await storage.getWebsites(req.params.accountId);
+  const websiteId = websiteList[0]?.id;
+
+  if (!websiteId) {
+    return res.status(400).json({
+      message: "This account needs a website before Blueprints can be generated.",
+    });
+  }
+
+  const account = await storage.getAccount(req.params.accountId);
+  const businessName = String(account?.name || "Business").trim();
+  const industry = String((account as any)?.industry || "Business services").trim();
+
+  const combinations = pageTypes.flatMap((pageType) =>
+    services.map((serviceName) => ({ pageType, serviceName })),
+  );
+
   const jobId = `bulk-bp-${Date.now()}-${randomBytes(4).toString("hex")}`;
-  return res.json({
+  const job: BlueprintBulkJob = {
     jobId,
-    total: 0,
+    accountId: req.params.accountId,
+    total: combinations.length,
     done: 0,
-    status: "completed",
     created: 0,
+    skipped: 0,
+    failed: 0,
+    status: "pending",
+    errors: [],
+  };
+
+  blueprintBulkJobs.set(jobId, job);
+
+  setImmediate(async () => {
+    job.status = "running";
+
+    try {
+      const existing = await storage.getBlueprints(req.params.accountId);
+      const existingKeys = new Set(
+        existing.map((blueprint: any) =>
+          `${String(blueprint.pageType || "").trim().toLowerCase()}::${String(
+            blueprint.name || "",
+          ).trim().toLowerCase()}`,
+        ),
+      );
+
+      for (const combination of combinations) {
+        try {
+          const generated = await generateBlueprint({
+            businessName,
+            industry,
+            serviceName: combination.serviceName || undefined,
+            pageType: combination.pageType,
+          });
+
+          const duplicateKey = `${combination.pageType.toLowerCase()}::${String(
+            generated.name || "",
+          ).trim().toLowerCase()}`;
+
+          if (existingKeys.has(duplicateKey)) {
+            job.skipped += 1;
+            continue;
+          }
+
+          const validated = insertBlueprintSchema.safeParse({
+            ...generated,
+            accountId: req.params.accountId,
+            websiteId,
+          });
+
+          if (!validated.success) {
+            throw new Error(validated.error.message);
+          }
+
+          await storage.createBlueprint(validated.data);
+          existingKeys.add(duplicateKey);
+          job.created += 1;
+        } catch (error: any) {
+          job.failed += 1;
+          job.errors.push({
+            pageType: combination.pageType,
+            serviceName: combination.serviceName,
+            message: error?.message || "Generation failed",
+          });
+        } finally {
+          job.done += 1;
+        }
+      }
+
+      job.status = job.failed === job.total ? "failed" : "completed";
+    } catch (error: any) {
+      job.status = "failed";
+      job.errors.push({
+        pageType: "",
+        serviceName: "",
+        message: error?.message || "Bulk Blueprint generation failed",
+      });
+    }
+  });
+
+  return res.status(202).json({
+    jobId,
+    total: job.total,
+    done: job.done,
+    status: job.status,
+    created: job.created,
+    skipped: job.skipped,
+    failed: job.failed,
   });
 });
 
 router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, async (req: Request, res: Response) => {
-  return res.json({
-    jobId: req.params.jobId,
-    total: 0,
-    done: 0,
-    status: "completed",
-    created: 0,
-  });
+  const job = blueprintBulkJobs.get(req.params.jobId);
+
+  if (!job || job.accountId !== req.params.accountId) {
+    return res.status(404).json({ message: "Bulk Blueprint job not found" });
+  }
+
+  return res.json(job);
 });
 
 
