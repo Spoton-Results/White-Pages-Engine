@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { randomBytes } from "crypto";
 import { z } from "zod";
-import { requireAuth, requireSuperAdmin } from "../auth";
+import { hashPassword, requireAuth, requireSuperAdmin } from "../auth";
 import * as storage from "../storage";
 import { pool } from "../db";
 import { callAI } from "../services/ai-provider";
@@ -1059,6 +1059,122 @@ router.post("/api/websites/:id/fallback-hits/promote", requireAuth, async (req: 
     console.error("[fallback-hits/promote]", error);
     return res.status(500).json({
       error: error?.message || "Failed to promote fallback slug",
+    });
+  }
+});
+
+
+// ✅ CHANGED: restore Users & Roles list route
+router.get("/api/users", requireAuth, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const accounts = await storage.getAccounts();
+    const accountNameById = new Map(
+      accounts.map((account: any) => [account.id, account.name]),
+    );
+
+    const usersByAccount = await Promise.all(
+      accounts.map((account: any) => storage.getUsersByAccount(account.id)),
+    );
+
+    const superAdmins = await storage.getSuperAdminUsers();
+    const combined = [...superAdmins, ...usersByAccount.flat()];
+
+    const seen = new Set<string>();
+    const users = combined
+      .filter((user: any) => {
+        if (seen.has(user.id)) return false;
+        seen.add(user.id);
+        return true;
+      })
+      .map((user: any) => {
+        const { password, ...safeUser } = user;
+        return {
+          ...safeUser,
+          accountName: user.accountId
+            ? accountNameById.get(user.accountId) || null
+            : null,
+        };
+      });
+
+    return res.json(users);
+  } catch (error: any) {
+    console.error("[users/list]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to load users",
+    });
+  }
+});
+
+// ✅ CHANGED: restore Users & Roles create route
+router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const parsed = z.object({
+    username: z.string().trim().min(1, "Username is required"),
+    email: z.string().trim().email("Valid email is required"),
+    password: z.string().min(1).default("changeme"),
+    role: z.enum(["super_admin", "account_admin", "editor", "viewer"]),
+    accountId: z.string().trim().min(1).optional(),
+    isSuperAdmin: z.boolean().default(false),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: parsed.error.message,
+    });
+  }
+
+  const data = parsed.data;
+
+  if (!data.isSuperAdmin && !data.accountId) {
+    return res.status(400).json({
+      message: "Account is required for non-super-admin users",
+    });
+  }
+
+  try {
+    const [existingUsername, existingEmail] = await Promise.all([
+      storage.getUserByUsername(data.username),
+      storage.getUserByEmail(data.email),
+    ]);
+
+    if (existingUsername) {
+      return res.status(409).json({
+        message: "Username already exists",
+      });
+    }
+
+    if (existingEmail) {
+      return res.status(409).json({
+        message: "Email already exists",
+      });
+    }
+
+    if (!data.isSuperAdmin && data.accountId) {
+      const account = await storage.getAccount(data.accountId);
+      if (!account) {
+        return res.status(404).json({
+          message: "Account not found",
+        });
+      }
+    }
+
+    const password = await hashPassword(data.password);
+
+    const user = await storage.createUser({
+      username: data.username,
+      email: data.email,
+      password,
+      role: data.isSuperAdmin ? "super_admin" : data.role,
+      accountId: data.isSuperAdmin ? null : data.accountId,
+      isSuperAdmin: data.isSuperAdmin,
+    });
+
+    const { password: _password, ...safeUser } = user;
+
+    return res.status(201).json(safeUser);
+  } catch (error: any) {
+    console.error("[users/create]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to create user",
     });
   }
 });
