@@ -294,8 +294,10 @@ router.post("/api/intent-build/run-governance-action", requireWebsiteParam, asyn
   try {
     const action = String(req.body?.action || "consolidate");
     if (!["consolidate", "merge"].includes(action)) return res.status(400).json({ message: "action must be consolidate or merge" });
-    await client.query("BEGIN");
+    // ✅ CHANGED: ensure governance schema before opening the business transaction
+    // so any DDL error is returned directly and cannot poison the transaction.
     await ensureGovernanceLogsTable(client);
+    await client.query("BEGIN");
     const page = await findPage(client, req.body || {});
     if (!page) { await client.query("ROLLBACK"); return res.status(404).json({ message: "Canonical winner page not found" }); }
     if (String(page.website_id) !== String(req.body.websiteId)) { await client.query("ROLLBACK"); return res.status(403).json({ message: "Forbidden: Page is outside selected website" }); }
