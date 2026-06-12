@@ -530,6 +530,132 @@ router.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res:
 
 
 // ✅ CHANGED: restore Automation settings route
+
+// ✅ CHANGED: restore Automation AI Suggest Settings route
+router.post("/api/websites/:id/automation/ai-suggest", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const website = await storage.getWebsite(req.params.id);
+    if (!website) return res.status(404).json({ error: "Website not found" });
+
+    const { getAutomationSettings } = await import("../services/automation");
+    const current = getAutomationSettings(website);
+
+    const prompt = `You are configuring automation thresholds for a white-label SEO publishing platform.
+
+Website:
+- Name: ${website.name || "Unknown"}
+- Domain: ${website.domain || "Unknown"}
+
+Current settings:
+${JSON.stringify(current, null, 2)}
+
+Return JSON only with exactly these fields:
+{
+  "tier1Threshold": number,
+  "tier2Threshold": number,
+  "fallbackHitThreshold": number,
+  "fallbackHitWindowDays": number,
+  "autodemoteZeroImpressionDays": number,
+  "thinBankThreshold": number,
+  "reasoning": string
+}
+
+Rules:
+- tier1Threshold: integer from 60 to 95
+- tier2Threshold: integer from 30 to 79
+- tier2Threshold must be lower than tier1Threshold
+- fallbackHitThreshold: integer from 3 to 100
+- fallbackHitWindowDays: integer from 7 to 90
+- autodemoteZeroImpressionDays: integer from 30 to 180
+- thinBankThreshold: integer from 40 to 90
+- reasoning: one short paragraph explaining the recommendations
+- Do not include markdown fences
+- Do not include extra keys`;
+
+    const ai = await callAI({
+      prompt,
+      maxTokens: 800,
+      temperature: 0.2,
+    });
+
+    const cleaned = String(ai.text || "")
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+
+    if (start === -1 || end === -1 || end <= start) {
+      return res.status(502).json({ error: "AI returned an invalid recommendation" });
+    }
+
+    const parsed = JSON.parse(cleaned.slice(start, end + 1));
+
+    const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(max, Math.max(min, Math.round(n)));
+    };
+
+    let tier1Threshold = clampInt(
+      parsed.tier1Threshold,
+      60,
+      95,
+      current.tier1Threshold,
+    );
+
+    let tier2Threshold = clampInt(
+      parsed.tier2Threshold,
+      30,
+      79,
+      current.tier2Threshold,
+    );
+
+    if (tier2Threshold >= tier1Threshold) {
+      tier2Threshold = Math.max(30, tier1Threshold - 10);
+    }
+
+    return res.json({
+      tier1Threshold,
+      tier2Threshold,
+      fallbackHitThreshold: clampInt(
+        parsed.fallbackHitThreshold,
+        3,
+        100,
+        current.fallbackHitThreshold,
+      ),
+      fallbackHitWindowDays: clampInt(
+        parsed.fallbackHitWindowDays,
+        7,
+        90,
+        current.fallbackHitWindowDays,
+      ),
+      autodemoteZeroImpressionDays: clampInt(
+        parsed.autodemoteZeroImpressionDays,
+        30,
+        180,
+        current.autodemoteZeroImpressionDays,
+      ),
+      thinBankThreshold: clampInt(
+        parsed.thinBankThreshold,
+        40,
+        90,
+        current.thinBankThreshold,
+      ),
+      reasoning: String(
+        parsed.reasoning ||
+        "These recommendations balance page quality, promotion speed, and conservative demotion safeguards."
+      ).trim(),
+    });
+  } catch (error: any) {
+    console.error("[automation/ai-suggest]", error);
+    return res.status(500).json({
+      error: error?.message || "Failed to generate automation recommendations",
+    });
+  }
+});
+
 router.get("/api/websites/:id/automation-settings", requireAuth, async (req: Request, res: Response) => {
   try {
     const website = await storage.getWebsite(req.params.id);
