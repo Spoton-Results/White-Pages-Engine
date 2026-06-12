@@ -5,6 +5,7 @@ import { requireAuth, requireSuperAdmin } from "../auth";
 import * as storage from "../storage";
 import { pool } from "../db";
 import { callAI } from "../services/ai-provider";
+import { generateBlueprint } from "../services/claude";
 import {
   insertAgencySchema,
   insertAccountSchema,
@@ -310,6 +311,32 @@ router.get("/api/accounts/:accountId/blueprints/bulk-job/:jobId", requireAuth, a
     status: "completed",
     created: 0,
   });
+});
+
+
+// ✅ CHANGED: restore missing single Blueprint AI route used by the existing frontend
+router.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res: Response) => {
+  const parsed = z.object({
+    businessName: z.string().trim().min(1, "Business name is required"),
+    industry: z.string().trim().min(1, "Industry is required"),
+    serviceName: z.string().optional(),
+    pageType: z.string().trim().min(1, "Page type is required"),
+    extraContext: z.string().optional(),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const blueprint = await generateBlueprint(parsed.data);
+    return res.json(blueprint);
+  } catch (error: any) {
+    console.error("[ai/generate-blueprint]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to generate blueprint",
+    });
+  }
 });
 
 export default router;
