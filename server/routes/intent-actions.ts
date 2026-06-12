@@ -267,7 +267,8 @@ router.post("/api/action-review/:jobId/decision", async (req, res, next) => {
     const website = await assertWebsiteAccess(req, res, job.website_id); if (!website) return;
     const notes = Array.isArray(job.error_log) ? job.error_log : [];
     notes.push({ decision, note: req.body?.note || null, decidedAt: new Date().toISOString(), decidedBy: req.session.userId });
-    await pool.query(`UPDATE generation_jobs SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{reviewDecision}', $2::jsonb, true), error_log = $3::jsonb, updated_at = NOW() WHERE id::text = $1::text`, [req.params.jobId, JSON.stringify(decision), JSON.stringify(notes)]);
+    // CHANGED: generation_jobs has no updated_at column in the deployed schema.
+    await pool.query(`UPDATE generation_jobs SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{reviewDecision}', $2::jsonb, true), error_log = $3::jsonb WHERE id::text = $1::text`, [req.params.jobId, JSON.stringify(decision), JSON.stringify(notes)]);
     res.json({ ok: true, jobId: req.params.jobId, decision });
   } catch (err) { next(err); }
 });
