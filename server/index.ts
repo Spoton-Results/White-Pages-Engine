@@ -101,6 +101,30 @@ async function runBackgroundStartup() {
     const { sql } = await import("drizzle-orm");
     const exec = (stmt: string) => pgPool.query(stmt).catch(() => {});
     await Promise.all([
+      exec(`CREATE TABLE IF NOT EXISTS brand_media (
+              id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+              brand_profile_id VARCHAR NOT NULL REFERENCES brand_profiles(id) ON DELETE CASCADE,
+              website_id VARCHAR REFERENCES websites(id) ON DELETE CASCADE,
+              r2_key TEXT NOT NULL,
+              public_url TEXT NOT NULL,
+              prompt TEXT,
+              category TEXT NOT NULL DEFAULT 'business_general',
+              alt_text TEXT,
+              active BOOLEAN NOT NULL DEFAULT true,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMP NOT NULL DEFAULT now(),
+              updated_at TIMESTAMP NOT NULL DEFAULT now(),
+              CONSTRAINT brand_media_category_check CHECK (category IN (
+                'hero',
+                'service',
+                'trust_team',
+                'business_general',
+                'proof_testimonial'
+              ))
+            )`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_brand_media_brand_profile_id ON brand_media(brand_profile_id)`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_brand_media_website_id ON brand_media(website_id)`),
+      exec(`CREATE INDEX IF NOT EXISTS idx_brand_media_category ON brand_media(category)`),
       exec(`ALTER TABLE sitemaps ADD COLUMN IF NOT EXISTS xml_content TEXT`),
       exec(`ALTER TABLE pages
               ADD COLUMN IF NOT EXISTS gsc_submitted_at TIMESTAMP,

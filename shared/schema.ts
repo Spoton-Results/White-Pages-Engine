@@ -105,6 +105,28 @@ export const brandProfiles = pgTable("brand_profiles", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+
+// Brand Profiles - AI Picture Library Phase 1A storage foundation
+export const brandMedia = pgTable("brand_media", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  brandProfileId: varchar("brand_profile_id").notNull().references(() => brandProfiles.id, { onDelete: "cascade" }),
+  websiteId: varchar("website_id").references(() => websites.id, { onDelete: "cascade" }),
+  r2Key: text("r2_key").notNull(),
+  publicUrl: text("public_url").notNull(),
+  prompt: text("prompt"),
+  category: text("category").notNull().default("business_general"),
+  altText: text("alt_text"),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("idx_brand_media_brand_profile_id").on(t.brandProfileId),
+  index("idx_brand_media_website_id").on(t.websiteId),
+  index("idx_brand_media_category").on(t.category),
+]);
+
+// Existing Website schema remains unchanged
 export const websites = pgTable("websites", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
@@ -532,6 +554,7 @@ export const hubPages = pgTable("hub_pages", {
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertBrandProfileSchema = createInsertSchema(brandProfiles).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBrandMediaSchema = createInsertSchema(brandMedia).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertWebsiteSchema = createInsertSchema(websites).omit({ id: true, createdAt: true, updatedAt: true, publishedPages: true });
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true, createdAt: true });
 export const insertServiceSchema = createInsertSchema(services).omit({ id: true, createdAt: true });
@@ -550,6 +573,8 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertBrandProfile = z.infer<typeof insertBrandProfileSchema>;
 export type BrandProfile = typeof brandProfiles.$inferSelect;
+export type InsertBrandMedia = z.infer<typeof insertBrandMediaSchema>;
+export type BrandMedia = typeof brandMedia.$inferSelect;
 export type InsertWebsite = z.infer<typeof insertWebsiteSchema>;
 export type Website = typeof websites.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;

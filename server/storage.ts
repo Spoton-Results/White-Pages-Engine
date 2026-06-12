@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { eq, and, desc, asc, ilike, sql, count, inArray, or, gte, isNull, lt, lte } from "drizzle-orm";
 import {
   agencies, accounts, users, brandProfiles, websites, locations, services, industries,
+  brandMedia,
   queryClusters, blueprints, pages, pageVersions, internalLinks,
   generationJobs, sitemaps, pageMetrics, contentVariationBanks, stateData, leads,
   fallbackHitLogs, variationBankCompleteness, hubPages,
@@ -11,6 +12,7 @@ import {
   type Account, type InsertAccount,
   type User, type InsertUser,
   type BrandProfile, type InsertBrandProfile,
+  type BrandMedia, type InsertBrandMedia,
   type Website, type InsertWebsite,
   type Location, type InsertLocation,
   type Service, type InsertService,
@@ -234,6 +236,56 @@ export async function deleteBrandProfile(id: string): Promise<void> {
   if (deleted) brandProfilesCache.delete(deleted.accountId);
 }
 
+
+// Brand Profiles - AI Picture Library Phase 1A storage helpers
+function mapBrandMediaRow(r: any): BrandMedia {
+  return {
+    ...r,
+    brandProfileId: r.brand_profile_id,
+    websiteId: r.website_id,
+    r2Key: r.r2_key,
+    publicUrl: r.public_url,
+    altText: r.alt_text,
+    sortOrder: r.sort_order,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  } as BrandMedia;
+}
+
+export async function getBrandMedia(brandProfileId: string, websiteId?: string): Promise<BrandMedia[]> {
+  const params: any[] = [brandProfileId];
+  let query = `
+    SELECT *
+    FROM brand_media
+    WHERE brand_profile_id = $1
+  `;
+
+  if (websiteId) {
+    params.push(websiteId);
+    query += ` AND (website_id = $${params.length} OR website_id IS NULL)`;
+  }
+
+  query += ` ORDER BY sort_order ASC, created_at DESC`;
+
+  const res = await pool.query(query, params);
+  return res.rows.map(mapBrandMediaRow);
+}
+
+export async function createBrandMedia(data: InsertBrandMedia): Promise<BrandMedia> {
+  const [row] = await db.insert(brandMedia).values(data).returning();
+  return row;
+}
+
+export async function updateBrandMedia(id: string, data: Partial<InsertBrandMedia>): Promise<BrandMedia | undefined> {
+  const [row] = await db.update(brandMedia).set({ ...data, updatedAt: new Date() }).where(eq(brandMedia.id, id)).returning();
+  return row;
+}
+
+export async function deleteBrandMedia(id: string): Promise<void> {
+  await db.delete(brandMedia).where(eq(brandMedia.id, id));
+}
+
+// Existing Website storage behavior remains unchanged
 // ─── Websites ─────────────────────────────────────────────────────────────────
 
 // Helper to map raw DB snake_case rows to Website camelCase type
