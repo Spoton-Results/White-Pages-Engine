@@ -95,7 +95,7 @@ export default function PageIntelligencePage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
           <StatCard title="Graph Score" value={avgGraph || "—"} sub="Average link authority" icon={<Network className="size-5" />} />
-          <StatCard title="Orphans" value={orphans.length} sub="Zero inbound links" icon={<ShieldAlert className="size-5" />} />
+          <StatCard title="Orphans" value={orphans.length >= 500 ? "500+" : orphans.length} sub="Zero inbound links" icon={<ShieldAlert className="size-5" />} />
           <StatCard title="Weak Pages" value={weakPages} sub="Graph score under 55" icon={<Activity className="size-5" />} />
           <StatCard title="Forms" value={conversionQ.data?.totalForms ?? "—"} sub="Last 30 days" icon={<MousePointerClick className="size-5" />} />
           <StatCard title="Tracked Events" value={events.reduce((s, e) => s + Number(e.count || 0), 0)} sub="Last 30 days" icon={<BarChart3 className="size-5" />} />

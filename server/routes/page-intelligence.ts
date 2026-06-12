@@ -84,38 +84,21 @@ router.get("/api/websites/:websiteId/page-intelligence/graph", requireAuth, asyn
 router.get("/api/websites/:websiteId/page-intelligence/orphans", requireAuth, async (req: Request, res: Response) => {
   try {
     const { websiteId } = req.params;
-    // CHANGED: count every orphan, but return only the first 500 rows for display.
-    const [countResult, result] = await Promise.all([
-      pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM pages p
-         WHERE p.website_id::text = $1::text
-           AND p.status = 'published'
-           AND COALESCE(p.noindex,false)=false
-           AND NOT EXISTS (
-             SELECT 1
-             FROM internal_links il
-             WHERE il.to_page_id::text = p.id::text
-           )`,
-        [websiteId]
-      ),
-      pool.query(
-        `SELECT p.id, p.slug, p.title, p.page_type, p.tier, p.quality_score, p.published_at
-         FROM pages p
-         WHERE p.website_id::text = $1::text
-           AND p.status = 'published'
-           AND COALESCE(p.noindex,false)=false
-           AND NOT EXISTS (
-             SELECT 1
-             FROM internal_links il
-             WHERE il.to_page_id::text = p.id::text
-           )
-         ORDER BY p.tier ASC NULLS LAST, p.quality_score DESC NULLS LAST, p.published_at DESC NULLS LAST
-         LIMIT 500`,
-        [websiteId]
-      )
-    ]);
-    return res.json({ orphanCount: countResult.rows[0]?.count || 0, pages: result.rows });
+    // CHANGED: keep orphan loading capped so large websites do not time out.
+    const result = await pool.query(
+      `SELECT p.id, p.slug, p.title, p.page_type, p.tier, p.quality_score, p.published_at
+       FROM pages p
+       LEFT JOIN internal_links il ON il.to_page_id::text = p.id::text
+       WHERE p.website_id::text = $1::text
+         AND p.status = 'published'
+         AND COALESCE(p.noindex,false)=false
+       GROUP BY p.id
+       HAVING COUNT(il.id) = 0
+       ORDER BY p.tier ASC NULLS LAST, p.quality_score DESC NULLS LAST, p.published_at DESC NULLS LAST
+       LIMIT 500`,
+      [websiteId]
+    );
+    return res.json({ orphanCount: result.rowCount, pages: result.rows });
   } catch (error) {
     console.error("orphan report failed", error);
     return res.status(500).json({ error: "Failed to load orphan pages" });
