@@ -93,8 +93,8 @@ export default function PublishedPagesPage() {
       if (!selectedWebsite) return Promise.resolve({ pages: [], total: 0 });
       // ✅ CHANGED: use /pages/search (raw SQL route) instead of /pages (broken Drizzle route)
       const url = showDrafts
-        ? `/api/websites/${selectedWebsite}/pages/search?includeDrafts=true&limit=200`
-        : `/api/websites/${selectedWebsite}/pages/search?status=published&limit=200`;
+        ? `/api/websites/${selectedWebsite}/pages/search?includeDrafts=true&limit=200&sort=slug`
+        : `/api/websites/${selectedWebsite}/pages/search?status=published&limit=200&sort=slug`;
       return api.get<any>(url);
     },
     enabled: !!selectedWebsite,
