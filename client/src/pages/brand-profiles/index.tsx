@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Briefcase, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
+import { Plus, Briefcase, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2, ImageIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -32,6 +32,21 @@ export default function BrandProfilesPage() {
     queryKey: ["/api/brand-profiles", selectedAccount],
     queryFn: () => selectedAccount ? api.get<any[]>(`/api/accounts/${selectedAccount}/brand-profiles`) : Promise.resolve([]),
     enabled: !!selectedAccount,
+  });
+
+  // CHANGED: fetch saved media for displayed brand profiles
+  const { data: brandMediaByProfile = {} } = useQuery({
+    queryKey: ["/api/brand-profiles/media", selectedAccount, (brands as any[]).map((b: any) => b.id).join(",")],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        (brands as any[]).map(async (brand: any) => {
+          const media = await api.get<any[]>(`/api/brand-profiles/${brand.id}/media`);
+          return [brand.id, media];
+        })
+      );
+      return Object.fromEntries(entries);
+    },
+    enabled: !!selectedAccount && (brands as any[]).length > 0,
   });
 
   const create = useMutation({
@@ -150,6 +165,27 @@ export default function BrandProfilesPage() {
                   {brand.voiceAndTone && (
                     <div className="bg-muted/50 rounded px-2 py-1.5 text-xs text-muted-foreground">
                       <span className="font-medium">Voice: </span>{brand.voiceAndTone.substring(0, 100)}...
+                    </div>
+                  )}
+
+                  {/* CHANGED: display saved brand media only */}
+                  {Array.isArray((brandMediaByProfile as any)[brand.id]) && (brandMediaByProfile as any)[brand.id].length > 0 && (
+                    <div className="pt-2 border-t">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+                        <ImageIcon className="size-3.5" />
+                        Brand Media
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(brandMediaByProfile as any)[brand.id].map((media: any) => (
+                          <div key={media.id} className="rounded-md border overflow-hidden bg-muted/30">
+                            <img
+                              src={media.publicUrl || media.public_url}
+                              alt={media.altText || media.alt_text || "Brand media"}
+                              className="h-24 w-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </CardContent>
