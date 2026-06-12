@@ -297,13 +297,25 @@ router.post("/api/intent-build/run-governance-action", requireWebsiteParam, asyn
     // ✅ CHANGED: ensure governance schema before opening the business transaction
     // so any DDL error is returned directly and cannot poison the transaction.
     await ensureGovernanceLogsTable(client);
-    await client.query("BEGIN");
+
+    // ✅ CHANGED: perform all read-only governance preparation before BEGIN.
+    // A caught preview query error cannot leave the write transaction aborted.
     const page = await findPage(client, req.body || {});
-    if (!page) { await client.query("ROLLBACK"); return res.status(404).json({ message: "Canonical winner page not found" }); }
-    if (String(page.website_id) !== String(req.body.websiteId)) { await client.query("ROLLBACK"); return res.status(403).json({ message: "Forbidden: Page is outside selected website" }); }
+    if (!page) return res.status(404).json({ message: "Canonical winner page not found" });
+    if (String(page.website_id) !== String(req.body.websiteId)) {
+      return res.status(403).json({ message: "Forbidden: Page is outside selected website" });
+    }
+
     const accountId = await websiteAccountId(client, page.website_id);
-    const preview = await buildGovernancePreview(client, page, req.body || {}, action as "consolidate" | "merge");
+    const preview = await buildGovernancePreview(
+      client,
+      page,
+      req.body || {},
+      action as "consolidate" | "merge",
+    );
     const affectedIds = preview.affectedPages.map((p: any) => p.id);
+
+    await client.query("BEGIN");
 
     let linksUpdated = 0;
     if (affectedIds.length > 0) {
