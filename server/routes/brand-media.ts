@@ -33,6 +33,26 @@ function buildSafeBrandMediaPrompt(brand: any): string {
   ].filter(Boolean).join(" ");
 }
 
+
+router.get("/api/brand-profiles/:id/media", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const brandProfileId = req.params.id;
+    const brand = await storage.getBrandProfile(brandProfileId);
+
+    if (!brand) {
+      return res.status(404).json({ message: "Brand profile not found" });
+    }
+
+    const media = await storage.getBrandMedia(brandProfileId);
+    return res.json(media);
+  } catch (error: any) {
+    console.error("[brand-media/list]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to load brand media",
+    });
+  }
+});
+
 router.post("/api/brand-profiles/:id/media/generate", requireAuth, async (req: Request, res: Response) => {
   try {
     const brandProfileId = req.params.id;
