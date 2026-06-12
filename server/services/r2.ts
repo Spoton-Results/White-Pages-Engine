@@ -55,7 +55,7 @@ function sanitizePageHtmlCopy(value: string): string {
     .replace(/\s{2,}/g, " ");
 }
 
-export async function putObject(key: string, body: string, contentType = "application/json"): Promise<void> {
+export async function putObject(key: string, body: string | Buffer | Uint8Array, contentType = "application/json"): Promise<void> {
   await getClient().send(
     new PutObjectCommand({
       Bucket: getBucket(),
@@ -123,6 +123,31 @@ export function getPublicUrl(key: string): string {
   if (!base) return key;
   return `${base.replace(/\/$/, "")}/${key}`;
 }
+
+export async function saveBrandMediaImage(
+  brandProfileId: string,
+  filename: string,
+  bytes: Buffer | Uint8Array,
+  mimeType = "image/png",
+): Promise<{ key: string; publicUrl: string }> {
+  const safeFilename = filename
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!safeFilename) {
+    throw new Error("Brand media filename is required");
+  }
+
+  const key = `brand-media/${brandProfileId}/${safeFilename}`;
+  await putObject(key, bytes, mimeType);
+
+  return {
+    key,
+    publicUrl: getPublicUrl(key),
+  };
+}
+
 
 // ── Page HTML offload ─────────────────────────────────────────────────────────
 // Stores the fully-rendered page HTML in R2 and returns the storage key.
