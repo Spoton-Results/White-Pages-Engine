@@ -44,6 +44,7 @@ import publicPagesEnhancedRouter from "./routes/public-pages-enhanced";
 import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import websiteDomainEditRouter from "./routes/website-domain-edit";
 import brandR2RepairRouter from "./routes/brand-r2-repair";
+import brandMediaRouter from "./routes/brand-media";
 
 export function mountSubRouters(app: Express) {
   app.use("/", authLiveRouter);
@@ -52,6 +53,7 @@ export function mountSubRouters(app: Express) {
   app.use("/", coreApiRouter);
   app.use("/", locationsApiRouter);
   app.use("/", brandR2RepairRouter);
+  app.use("/", brandMediaRouter);
   app.use("/", agencyRoiDashboardRouter);
   app.use("/", agencyDashboardRouter);
   app.use("/", agencyMonthlyReportRouter);
