@@ -657,7 +657,7 @@ export default function JobsPage() {
               ) : (
                 <Select value={form.blueprintId} onValueChange={v => setForm(p => ({ ...p, blueprintId: v }))} disabled={!selectedAccountId}>
                   <SelectTrigger data-testid="select-blueprint"><SelectValue placeholder={selectedAccountId ? "Select blueprint" : "Select account first"} /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-72 overflow-y-auto">
                     {blueprints.map((b: any) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
