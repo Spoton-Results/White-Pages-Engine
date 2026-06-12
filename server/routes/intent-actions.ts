@@ -344,6 +344,13 @@ router.post("/api/intent-build/run-governance-action", requireWebsiteParam, asyn
       }
     }
 
+    console.log("[intent-governance] queueJob:start", {
+      websiteId: page.website_id,
+      pageId: page.id,
+      action,
+      affectedCount: affectedIds.length,
+    });
+
     const jobId = await queueJob(client, page, action === "merge" ? "Intent Governance: approved merge action" : "Intent Governance: approved consolidation action", {
       type: "intent_governance_execute",
       accountId,
@@ -358,13 +365,27 @@ router.post("/api/intent-build/run-governance-action", requireWebsiteParam, asyn
       approvedAt: new Date().toISOString(),
     });
 
+    console.log("[intent-governance] queueJob:success", { jobId });
+
+    console.log("[intent-governance] auditInsert:start", {
+      websiteId: page.website_id,
+      pageId: page.id,
+      action,
+    });
+
     const log = await client.query(
       `INSERT INTO intent_governance_actions (website_id, account_id, action, status, winner_page_id, winner_slug, affected_page_ids, internal_links_updated, pages_updated, preview, executed_by, executed_at)
        VALUES ($1, $2, $3, 'executed', $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10, NOW()) RETURNING id`,
       [page.website_id, accountId, action, page.id, page.slug, JSON.stringify(affectedIds), linksUpdated, affectedIds.length, JSON.stringify(preview), actorFromReq(req)],
     );
 
+    console.log("[intent-governance] auditInsert:success", {
+      governanceActionId: log.rows[0]?.id,
+    });
+
+    console.log("[intent-governance] commit:start");
     await client.query("COMMIT");
+    console.log("[intent-governance] commit:success");
     res.json({ ok: true, action, governanceActionId: log.rows[0]?.id, jobId, winnerPageId: page.id, winnerSlug: page.slug, affectedPages: affectedIds.length, internalLinksUpdated: linksUpdated, preview });
   } catch (err) { await client.query("ROLLBACK").catch(() => {}); next(err); } finally { client.release(); }
 });
