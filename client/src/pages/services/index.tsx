@@ -114,13 +114,13 @@ export default function ServicesPage() {
     mutationFn: ({ service }: { service: string }) =>
       api.post<any>(`/api/websites/${bankWebsiteId}/variation-banks/write`, { service }),
     onSuccess: (data: any, { service }) => {
-      const ctx = data?.context;
-      const desc = ctx?.brand || ctx?.industry
-        ? `Written using ${[ctx.brand, ctx.industry].filter(Boolean).join(" · ")} context`
-        : `Bank ready for "${service}"`;
-      toast({ title: `Bank written for "${service}"`, description: desc });
-      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "bank-services"] });
-      qc.invalidateQueries({ queryKey: ["/api/websites", bankWebsiteId, "variation-services"] });
+      // ✅ CHANGED: the single-service write now starts in the background.
+      // 🔒 UNTOUCHED: completion is still detected by the existing job poller.
+      bankWriteJobQ.refetch();
+      toast({
+        title: `Writing bank for "${service}"`,
+        description: "The bank is being written in the background. You can keep using the app.",
+      });
     },
     onError: (err: any) => toast({
       title: "Write failed — please try again",

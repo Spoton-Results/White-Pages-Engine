@@ -122,9 +122,21 @@ router.post("/api/websites/:websiteId/variation-banks/write", requireAuth, async
   try {
     const service = String(req.body?.service || "").trim();
     if (!service) return res.status(400).json({ message: "service is required" });
+
     const { accountId, ctx } = await getContext(req.params.websiteId);
-    await writeVariationsForService(service, accountId, req.params.websiteId, ctx);
-    return res.json({ ok: true, service, context: { brand: ctx.brandName, industry: ctx.industryName } });
+
+    // ✅ CHANGED: reuse the existing background job runner so the HTTP request
+    // returns immediately instead of waiting for the Claude write to finish.
+    // 🔒 UNTOUCHED: variation writer, prompts, storage, and bank schema.
+    const jobId = startWriteJob(req.params.websiteId, accountId, ctx, [service]);
+
+    return res.json({
+      started: true,
+      jobId,
+      total: 1,
+      service,
+      context: { brand: ctx.brandName, industry: ctx.industryName },
+    });
   } catch (error: any) {
     if (error?.status === 404) return res.status(404).json({ message: error.message });
     next(error);
