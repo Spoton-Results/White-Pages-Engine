@@ -45,6 +45,7 @@ import publicWebsiteDomainsRouter from "./routes/public-website-domains";
 import websiteDomainEditRouter from "./routes/website-domain-edit";
 import brandR2RepairRouter from "./routes/brand-r2-repair";
 import brandMediaRouter from "./routes/brand-media";
+import onboardingTestRouter from "./routes/onboarding-test";
 
 export function mountSubRouters(app: Express) {
   app.use("/", authLiveRouter);
@@ -77,6 +78,7 @@ export function mountSubRouters(app: Express) {
 
   app.use("/", spotonPagesRouter);
   app.use("/", onboardingLiveRouter);
+  app.use("/", onboardingTestRouter);
   app.use("/", nexusStripeRouter);
   app.use("/", actionReviewActiveRouter);
   app.use("/", autonomousControlPlaneRouter);
