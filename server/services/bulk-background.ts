@@ -367,11 +367,13 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       "",
     // CHANGED: pass active brand media into variation engine
     brandMedia: brandMedia.map((media: any) => ({
+      id: media.id, // ✅ CHANGED
       publicUrl: media.publicUrl || media.public_url,
       r2Key: media.r2Key || media.r2_key,
       altText: media.altText || media.alt_text || `${brandName} brand image`,
       category: media.category || "business_general",
       sortOrder: media.sortOrder || media.sort_order || 0,
+      active: media.active, // ✅ CHANGED
     })),
   };
 
