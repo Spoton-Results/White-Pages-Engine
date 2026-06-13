@@ -131,6 +131,27 @@ export default function BrandProfilesPage() {
     },
   });
 
+  // ✅ CHANGED: one-click categorized image set generation.
+  // 🔒 UNTOUCHED: existing single-image generation button.
+  const generateBrandImageSet = useMutation({
+    mutationFn: ({ brandId, preset }: { brandId: string; preset: string }) =>
+      api.post<any>(`/api/brand-profiles/${brandId}/media/generate-set`, { preset }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles/media"] });
+      toast({
+        title: "Brand image set generated",
+        description: `Created ${data?.created || 0} image(s). Failed ${data?.failed || 0}.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Image set generation failed",
+        description: err?.message || "Unable to generate image set",
+        variant: "destructive",
+      });
+    },
+  });
+
   async function handleAiSuggest() {
     if (!selectedAccount) {
       toast({ title: "Select an account first", variant: "destructive" });
@@ -293,15 +314,33 @@ export default function BrandProfilesPage() {
                       {brand.tagline && <p className="text-xs text-muted-foreground italic mt-0.5">"{brand.tagline}"</p>}
                     </div>
                     <div className="flex items-center gap-1">
+                      <select
+                        className="h-7 rounded-md border bg-background px-2 text-xs"
+                        disabled={generateBrandImageSet.isPending}
+                        defaultValue=""
+                        onChange={(e) => {
+                          const preset = e.target.value;
+                          e.currentTarget.value = "";
+                          if (preset && confirm(`Generate ${preset} image set for this brand profile?`)) {
+                            generateBrandImageSet.mutate({ brandId: brand.id, preset });
+                          }
+                        }}
+                        data-testid={`select-generate-brand-image-set-${brand.id}`}
+                      >
+                        <option value="">Generate Set</option>
+                        <option value="small">Small · 14</option>
+                        <option value="standard">Standard · 23</option>
+                        <option value="large">Large · 36</option>
+                      </select>
                       <Button
                         variant="outline"
                         size="sm"
                         className="h-7 gap-1.5 text-xs"
                         onClick={() => generateBrandImage.mutate(brand.id)}
-                        disabled={generateBrandImage.isPending}
+                        disabled={generateBrandImage.isPending || generateBrandImageSet.isPending}
                         data-testid={`button-generate-brand-image-${brand.id}`}
                       >
-                        {generateBrandImage.isPending && generateBrandImage.variables === brand.id
+                        {(generateBrandImage.isPending && generateBrandImage.variables === brand.id) || generateBrandImageSet.isPending
                           ? <Loader2 className="size-3 animate-spin" />
                           : <Sparkles className="size-3" />}
                         {generateBrandImage.isPending && generateBrandImage.variables === brand.id
