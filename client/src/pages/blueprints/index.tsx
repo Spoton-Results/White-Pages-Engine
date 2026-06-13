@@ -67,9 +67,11 @@ export default function BlueprintsPage() {
         serviceName: saved.serviceName || "",
         pageType: saved.pageType || "service_city",
         extraContext: saved.extraContext || "",
+        comparisonY: saved.comparisonY || "auto",
+        customComparisonY: saved.customComparisonY || "",
       };
     } catch {
-      return { businessName: "", industry: "", serviceName: "", pageType: "service_city", extraContext: "" };
+      return { businessName: "", industry: "", serviceName: "", pageType: "service_city", extraContext: "", comparisonY: "auto", customComparisonY: "" };
     }
   });
 
@@ -436,6 +438,38 @@ export default function BlueprintsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+
+            {aiForm.pageType === "comparison" && (
+              <div className="space-y-1.5">
+                <Label>Comparison Competitor</Label>
+                <Select
+                  value={aiForm.comparisonY || "auto"}
+                  onValueChange={v => setAiForm(p => ({ ...p, comparisonY: v }))}
+                >
+                  <SelectTrigger data-testid="select-comparison-y"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto — AI choose top competitor</SelectItem>
+                    <SelectItem value="Buildertrend">Buildertrend</SelectItem>
+                    <SelectItem value="Procore">Procore</SelectItem>
+                    <SelectItem value="Jobber">Jobber</SelectItem>
+                    <SelectItem value="ServiceTitan">ServiceTitan</SelectItem>
+                    <SelectItem value="Housecall Pro">Housecall Pro</SelectItem>
+                    <SelectItem value="other">Other...</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {aiForm.comparisonY === "other" && (
+                  <Input
+                    className="mt-2"
+                    placeholder="Enter competitor name"
+                    value={aiForm.customComparisonY || ""}
+                    onChange={e => setAiForm(p => ({ ...p, customComparisonY: e.target.value }))}
+                    data-testid="input-custom-comparison-y"
+                  />
+                )}
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label>Extra Instructions <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>

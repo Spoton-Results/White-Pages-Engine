@@ -511,6 +511,8 @@ router.post("/api/ai/generate-blueprint", requireAuth, async (req: Request, res:
     serviceName: z.string().optional(),
     pageType: z.string().trim().min(1, "Page type is required"),
     extraContext: z.string().optional(),
+    comparisonY: z.string().optional(),
+    customComparisonY: z.string().optional(),
   }).safeParse(req.body);
 
   if (!parsed.success) {

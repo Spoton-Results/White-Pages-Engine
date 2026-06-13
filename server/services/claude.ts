@@ -400,8 +400,16 @@ export async function generateBlueprint(opts: {
   serviceName?: string;
   pageType: string;
   extraContext?: string;
+  comparisonY?: string;
+  customComparisonY?: string;
 }): Promise<GeneratedBlueprint> {
-  const { businessName, industry, serviceName, pageType, extraContext } = opts;
+  const { businessName, industry, serviceName, pageType, extraContext, comparisonY, customComparisonY } = opts;
+  const approvedComparisonY =
+    comparisonY === "other"
+      ? (customComparisonY || "").trim()
+      : comparisonY && comparisonY !== "auto"
+        ? comparisonY.trim()
+        : "";
 
   const pageTypeLabels: Record<string, string> = {
     service_city: "Service + City (e.g. 'Credit Card Processing in Austin, TX')",
@@ -424,6 +432,8 @@ BUSINESS DETAILS:
 ${serviceName ? `- Specific Service: ${serviceName}` : ""}
 - Page Type: ${pageTypeLabels[pageType] || pageType}
 ${extraContext ? `- Extra Context: ${extraContext}` : ""}
+${pageType === "comparison" ? `- Comparison X: ${businessName}` : ""}
+${pageType === "comparison" && approvedComparisonY ? `- Approved Comparison Y: ${approvedComparisonY}` : ""}
 
 TEMPLATE VARIABLES AVAILABLE:
 - {service} — the service name (e.g. "Credit Card Processing")
@@ -438,7 +448,9 @@ TEMPLATE VARIABLES AVAILABLE:
 ${pageType === "comparison" ? `COMPARISON PAGE REQUIREMENTS:
 - Use {comparison_x}, {comparison_y}, and {audience} in the title, H1, slug, and metadata.
 - Treat X and Y neutrally. Do not invent performance, pricing, market-share, legal, compliance, or outcome claims.
-- The user will provide the approved comparison pair in Extra Context.
+- comparison_x is the business name: ${businessName}.
+${approvedComparisonY ? `- comparison_y is the approved competitor: ${approvedComparisonY}.` : `- If no approved comparison_y is supplied, choose one of the top 3 most relevant competitors for the industry and service. Do not choose the business itself.`}
+- Use the chosen comparison_y consistently throughout the blueprint.
 - Include sections for:
   1. Quick Verdict
   2. Side-by-Side Overview
