@@ -69,6 +69,27 @@ export default function BrandProfilesPage() {
     },
   });
 
+  // ✅ CHANGED: expose the existing backend image-generation route in the Brand Profile UI.
+  // 🔒 UNTOUCHED: prompt construction, OpenAI call, R2 upload, storage, and page injection.
+  const generateBrandImage = useMutation({
+    mutationFn: (brandId: string) =>
+      api.post<any>(`/api/brand-profiles/${brandId}/media/generate`, {}),
+    onSuccess: (_data: any, brandId: string) => {
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles/media"] });
+      toast({
+        title: "Brand image generated",
+        description: "The new image was saved to this Brand Profile.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Image generation failed",
+        description: err?.message || "Unable to generate brand image",
+        variant: "destructive",
+      });
+    },
+  });
+
   async function handleAiSuggest() {
     if (!selectedAccount) {
       toast({ title: "Select an account first", variant: "destructive" });
@@ -152,10 +173,27 @@ export default function BrandProfilesPage() {
                       <CardTitle className="text-base">{brand.name}</CardTitle>
                       {brand.tagline && <p className="text-xs text-muted-foreground italic mt-0.5">"{brand.tagline}"</p>}
                     </div>
-                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => confirm("Delete profile?") && remove.mutate(brand.id)}>
-                      <Trash2 className="size-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs"
+                        onClick={() => generateBrandImage.mutate(brand.id)}
+                        disabled={generateBrandImage.isPending}
+                        data-testid={`button-generate-brand-image-${brand.id}`}
+                      >
+                        {generateBrandImage.isPending && generateBrandImage.variables === brand.id
+                          ? <Loader2 className="size-3 animate-spin" />
+                          : <Sparkles className="size-3" />}
+                        {generateBrandImage.isPending && generateBrandImage.variables === brand.id
+                          ? "Generating..."
+                          : "Generate Image"}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => confirm("Delete profile?") && remove.mutate(brand.id)}>
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
