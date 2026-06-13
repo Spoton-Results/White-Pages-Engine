@@ -450,11 +450,6 @@ export default function BlueprintsPage() {
                   <SelectTrigger data-testid="select-comparison-y"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Auto — AI choose top competitor</SelectItem>
-                    <SelectItem value="Buildertrend">Buildertrend</SelectItem>
-                    <SelectItem value="Procore">Procore</SelectItem>
-                    <SelectItem value="Jobber">Jobber</SelectItem>
-                    <SelectItem value="ServiceTitan">ServiceTitan</SelectItem>
-                    <SelectItem value="Housecall Pro">Housecall Pro</SelectItem>
                     <SelectItem value="other">Other...</SelectItem>
                   </SelectContent>
                 </Select>
