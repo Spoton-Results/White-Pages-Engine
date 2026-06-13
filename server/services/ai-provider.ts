@@ -25,9 +25,9 @@ const PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-chat";
 
 const RETRY_DELAYS = [3000, 6000, 12000];
 
-// 90s per-request timeout. Long enough for large prompts, short enough to avoid
-// freezing the Node.js event loop indefinitely when a provider is unreachable.
-const FETCH_TIMEOUT_MS = 90_000;
+// ✅ CHANGED: allow large 14-section variation-bank responses more time to finish.
+// 🔒 UNTOUCHED: provider order, retries, prompts, models, and fallback behavior.
+const FETCH_TIMEOUT_MS = 180_000;
 
 type ProviderName = "anthropic" | "openai" | "perplexity";
 
