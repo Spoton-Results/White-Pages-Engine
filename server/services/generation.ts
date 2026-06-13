@@ -91,7 +91,18 @@ function replaceTemplateVars(value: string | undefined | null, ctx: AssemblyCont
   const businessCount = population ? Math.max(25, Math.round(population / 80)).toLocaleString() : "local";
   const culture = stateName ? `${stateName} business environment` : "local business environment";
 
+  // ✅ CHANGED: derive comparison variables for comparison blueprints.
+  // 🔒 UNTOUCHED: existing service/location/state/brand replacements.
+  const blueprintName = String(ctx.blueprint?.name || "");
+  const comparisonMatch = blueprintName.match(/^(.+?)\s+vs\s+(.+?)(?:\s+Comparison|\s+—|$)/i);
+  const comparisonX = comparisonMatch?.[1]?.trim() || brandName;
+  const comparisonY = comparisonMatch?.[2]?.trim() || serviceName;
+  const audience = industryName && industryName !== serviceName ? industryName : "local businesses";
+
   return String(value || "")
+    .replace(/\{comparison[-_]x\}/gi, comparisonX)
+    .replace(/\{comparison[-_]y\}/gi, comparisonY)
+    .replace(/\{audience\}/gi, audience)
     .replace(/\{location\}/g, locName)
     .replace(/\{state\}/g, stateName)
     .replace(/\{service\}/g, serviceName)
