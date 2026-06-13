@@ -257,7 +257,14 @@ export async function processOnboardingSubmission(submissionId: string): Promise
   try {
     const level = String(coverage.level || "regional").toLowerCase().replace(/-/g, "_");
     const citySize = String(coverage.city_size || "medium_and_major").toLowerCase();
-    const primaryState = String(business.state || "").toUpperCase();
+    // ✅ CHANGED: normalize full state names from test/live forms to USPS abbreviations.
+    // 🔒 UNTOUCHED: city dataset, population threshold, and location creation logic.
+    const rawPrimaryState = String(business.state || "").trim();
+    const primaryStateUpper = rawPrimaryState.toUpperCase();
+    const primaryState =
+      STATE_ABBR_TO_NAME[primaryStateUpper]
+        ? primaryStateUpper
+        : Object.entries(STATE_ABBR_TO_NAME).find(([, name]) => name.toUpperCase() === primaryStateUpper)?.[0] || primaryStateUpper;
 
     let stateFilter: Set<string>;
     if (level === "national") {
