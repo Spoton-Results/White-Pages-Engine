@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Briefcase, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2, ImageIcon } from "lucide-react";
+import { Plus, Briefcase, Phone, Mail, Trash2, Sparkles, Loader2, CheckCircle2, ImageIcon, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -21,7 +21,9 @@ export default function BrandProfilesPage() {
   const { selectedAccountId, accountsLoading } = useAccountContext();
   const selectedAccount = selectedAccountId;
   const [showCreate, setShowCreate] = useState(false);
+  const [editingBrand, setEditingBrand] = useState<any | null>(null);
   const { register, handleSubmit, reset, setValue, watch } = useForm<any>();
+  const editForm = useForm<any>();
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<{ tagline: string; description: string; voiceAndTone: string } | null>(null);
@@ -74,6 +76,40 @@ export default function BrandProfilesPage() {
       toast({ title: "Brand profile deleted" });
     },
   });
+
+  // ✅ CHANGED: edit existing brand profile fields.
+  // 🔒 UNTOUCHED: create, delete, AI field generation, and media library logic.
+  const updateBrandProfile = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, any> }) =>
+      api.patch<any>(`/api/brand-profiles/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles", selectedAccount] });
+      setEditingBrand(null);
+      editForm.reset();
+      toast({ title: "Brand profile updated" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Update failed",
+        description: err?.message || "Unable to update brand profile",
+        variant: "destructive",
+      });
+    },
+  });
+
+  function openEditBrand(brand: any) {
+    setEditingBrand(brand);
+    editForm.reset({
+      name: brand.name || "",
+      tagline: brand.tagline || "",
+      description: brand.description || "",
+      phone: brand.phone || "",
+      email: brand.email || "",
+      websiteUrl: brand.websiteUrl || brand.website_url || "",
+      industryName: brand.industryName || brand.industry_name || "",
+      voiceAndTone: brand.voiceAndTone || brand.voice_and_tone || "",
+    });
+  }
 
   // ✅ CHANGED: expose the existing backend image-generation route in the Brand Profile UI.
   // 🔒 UNTOUCHED: prompt construction, OpenAI call, R2 upload, storage, and page injection.
@@ -347,6 +383,15 @@ export default function BrandProfilesPage() {
                           ? "Generating..."
                           : "Generate Image"}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground hover:text-primary"
+                        onClick={() => openEditBrand(brand)}
+                        data-testid={`button-edit-brand-${brand.id}`}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
                         onClick={() => confirm("Delete profile?") && remove.mutate(brand.id)}>
                         <Trash2 className="size-3.5" />
@@ -458,6 +503,70 @@ export default function BrandProfilesPage() {
           </>
         )}
       </div>
+
+      <Dialog open={!!editingBrand} onOpenChange={(o) => { if (!o) { setEditingBrand(null); editForm.reset(); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Brand Profile</DialogTitle></DialogHeader>
+          <form
+            onSubmit={editForm.handleSubmit((data) => {
+              if (!editingBrand) return;
+              updateBrandProfile.mutate({ id: editingBrand.id, data });
+            })}
+            className="space-y-4"
+          >
+            <div className="space-y-1.5">
+              <Label>Brand Name</Label>
+              <Input {...editForm.register("name", { required: true })} data-testid="input-edit-brand-name" />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Tagline</Label>
+              <Input {...editForm.register("tagline")} data-testid="input-edit-brand-tagline" />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Description</Label>
+              <Textarea rows={3} {...editForm.register("description")} data-testid="textarea-edit-brand-description" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Phone</Label>
+                <Input {...editForm.register("phone")} data-testid="input-edit-brand-phone" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input type="email" {...editForm.register("email")} data-testid="input-edit-brand-email" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Website URL</Label>
+                <Input {...editForm.register("websiteUrl")} data-testid="input-edit-brand-website-url" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Industry</Label>
+                <Input {...editForm.register("industryName")} data-testid="input-edit-brand-industry" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Voice & Tone</Label>
+              <Textarea rows={3} {...editForm.register("voiceAndTone")} data-testid="textarea-edit-brand-voice" />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { setEditingBrand(null); editForm.reset(); }}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={updateBrandProfile.isPending}>
+                {updateBrandProfile.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showCreate} onOpenChange={(o) => { setShowCreate(o); if (!o) { reset(); setAiResult(null); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">

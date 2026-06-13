@@ -35,6 +35,32 @@ function buildSafeBrandMediaPrompt(brand: any, category = "business_general", in
 }
 
 
+
+// ✅ CHANGED: update brand profile fields from Brand Profiles edit dialog.
+// 🔒 UNTOUCHED: media generation, media library controls, R2, and page injection.
+router.patch("/api/brand-profiles/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const allowed: Record<string, any> = {};
+    for (const key of ["name", "tagline", "description", "phone", "email", "voiceAndTone", "websiteUrl", "industryName"]) {
+      if (key in req.body) allowed[key] = req.body[key] == null ? null : String(req.body[key]).trim();
+    }
+
+    const brand = await storage.updateBrandProfile(req.params.id, allowed as any);
+
+    if (!brand) {
+      return res.status(404).json({ message: "Brand profile not found" });
+    }
+
+    return res.json(brand);
+  } catch (error: any) {
+    console.error("[brand-profile/update]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to update brand profile",
+    });
+  }
+});
+
+
 router.get("/api/brand-profiles/:id/media", requireAuth, async (req: Request, res: Response) => {
   try {
     const brandProfileId = req.params.id;
