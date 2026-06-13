@@ -96,6 +96,41 @@ export default function BrandProfilesPage() {
     },
   });
 
+  // ✅ CHANGED: library controls for active/category/sort metadata.
+  // 🔒 UNTOUCHED: image generation, R2 upload, and page injection.
+  const updateBrandMedia = useMutation({
+    mutationFn: ({ mediaId, data }: { mediaId: string; data: Record<string, any> }) =>
+      api.patch<any>(`/api/brand-media/${mediaId}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles/media"] });
+      toast({ title: "Brand media updated" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Media update failed",
+        description: err?.message || "Unable to update brand media",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // ✅ CHANGED: library delete control.
+  // 🔒 UNTOUCHED: brand profile delete and R2 storage.
+  const deleteBrandMedia = useMutation({
+    mutationFn: (mediaId: string) => api.delete(`/api/brand-media/${mediaId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/brand-profiles/media"] });
+      toast({ title: "Brand media deleted" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Media delete failed",
+        description: err?.message || "Unable to delete brand media",
+        variant: "destructive",
+      });
+    },
+  });
+
   async function handleAiSuggest() {
     if (!selectedAccount) {
       toast({ title: "Select an account first", variant: "destructive" });
@@ -312,6 +347,65 @@ export default function BrandProfilesPage() {
                               alt={media.altText || media.alt_text || "Brand media"}
                               className="h-24 w-full object-cover"
                             />
+
+                            {/* ✅ CHANGED: media library controls. */}
+                            {/* 🔒 UNTOUCHED: image URL rendering and generated media data. */}
+                            <div className="space-y-2 p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <input
+                                    type="checkbox"
+                                    checked={(media.active ?? true) === true}
+                                    disabled={updateBrandMedia.isPending}
+                                    onChange={(e) => updateBrandMedia.mutate({
+                                      mediaId: media.id,
+                                      data: { active: e.target.checked },
+                                    })}
+                                    data-testid={`checkbox-brand-media-active-${media.id}`}
+                                  />
+                                  Active
+                                </label>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-6 text-muted-foreground hover:text-destructive"
+                                  disabled={deleteBrandMedia.isPending}
+                                  onClick={() => confirm("Delete this image from the library?") && deleteBrandMedia.mutate(media.id)}
+                                  data-testid={`button-delete-brand-media-${media.id}`}
+                                >
+                                  <Trash2 className="size-3" />
+                                </Button>
+                              </div>
+
+                              <select
+                                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                                value={media.category || "business_general"}
+                                disabled={updateBrandMedia.isPending}
+                                onChange={(e) => updateBrandMedia.mutate({
+                                  mediaId: media.id,
+                                  data: { category: e.target.value },
+                                })}
+                                data-testid={`select-brand-media-category-${media.id}`}
+                              >
+                                <option value="business_general">Business general</option>
+                                <option value="hero">Hero</option>
+                                <option value="service">Service</option>
+                                <option value="team">Team</option>
+                                <option value="location">Location</option>
+                              </select>
+
+                              <Input
+                                type="number"
+                                className="h-8 text-xs"
+                                defaultValue={media.sortOrder ?? media.sort_order ?? 0}
+                                disabled={updateBrandMedia.isPending}
+                                onBlur={(e) => updateBrandMedia.mutate({
+                                  mediaId: media.id,
+                                  data: { sortOrder: Number(e.target.value) || 0 },
+                                })}
+                                data-testid={`input-brand-media-sort-${media.id}`}
+                              />
+                            </div>
                           </div>
                           ))}
                         </div>

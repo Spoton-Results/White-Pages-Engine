@@ -101,4 +101,44 @@ router.post("/api/brand-profiles/:id/media/generate", requireAuth, async (req: R
   }
 });
 
+// ✅ CHANGED: update existing brand media library metadata.
+// 🔒 UNTOUCHED: image generation, R2 upload, and page injection.
+router.patch("/api/brand-media/:mediaId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const allowed: Record<string, any> = {};
+    if ("active" in req.body) allowed.active = Boolean(req.body.active);
+    if ("category" in req.body) allowed.category = String(req.body.category || "business_general").trim() || "business_general";
+    if ("sortOrder" in req.body) allowed.sortOrder = Number(req.body.sortOrder) || 0;
+    if ("altText" in req.body) allowed.altText = String(req.body.altText || "").trim();
+
+    const media = await storage.updateBrandMedia(req.params.mediaId, allowed as any);
+
+    if (!media) {
+      return res.status(404).json({ message: "Brand media not found" });
+    }
+
+    return res.json(media);
+  } catch (error: any) {
+    console.error("[brand-media/update]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to update brand media",
+    });
+  }
+});
+
+// ✅ CHANGED: delete existing brand media database row.
+// 🔒 UNTOUCHED: R2 object deletion; this only removes the library record.
+router.delete("/api/brand-media/:mediaId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    await storage.deleteBrandMedia(req.params.mediaId);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("[brand-media/delete]", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to delete brand media",
+    });
+  }
+});
+
+
 export default router;
