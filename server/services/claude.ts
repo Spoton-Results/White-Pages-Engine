@@ -449,7 +449,10 @@ ${pageType === "comparison" ? `COMPARISON PAGE REQUIREMENTS:
 - Use {comparison_x}, {comparison_y}, and {audience} in the title, H1, slug, and metadata.
 - Treat X and Y neutrally. Do not invent performance, pricing, market-share, legal, compliance, or outcome claims.
 - comparison_x is the business name: ${businessName}.
-${approvedComparisonY ? `- comparison_y is the approved competitor: ${approvedComparisonY}.` : `- If no approved comparison_y is supplied, choose one of the top 3 most relevant competitors for the industry and service. Do not choose the business itself.`}
+${approvedComparisonY ? `- comparison_y is the approved competitor: ${approvedComparisonY}.` : `- If no approved comparison_y is supplied, choose one of the top 3 most relevant real competitors for the supplied industry and service. Do not choose the business itself.`}
+- When choosing comparison_y automatically, you MUST use a specific real company, software product, payment processor, POS platform, CRM, marketplace, or service competitor.
+- Do NOT use generic placeholders such as "Competitor", "Alternative", "Provider", "Platform", "Solution", "Vendor", "Other Option", or "Comparison Y".
+- The blueprint name, titleTemplate, h1Template, metaDescTemplate, slugTemplate, and section descriptions must reflect the same real comparison_y.
 - Use the chosen comparison_y consistently throughout the blueprint.
 - Include sections for:
   1. Quick Verdict
