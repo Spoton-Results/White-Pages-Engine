@@ -164,24 +164,43 @@ export function buildVariationPage(
   const selectBrandMediaByCategory = (category: string) =>
     activeBrandMedia.find((media) => media.category === category);
 
-  const selectedBrandMedia =
-    selectBrandMediaByCategory("hero") ||
-    selectBrandMediaByCategory("business_general") ||
-    activeBrandMedia[0];
+  const usedBrandMediaIds = new Set<string>();
 
-  const brandImageUrl = selectedBrandMedia
-    ? selectedBrandMedia.publicUrl && /^https?:\/\//i.test(selectedBrandMedia.publicUrl)
-      ? selectedBrandMedia.publicUrl
-      : selectedBrandMedia.r2Key
-        ? `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${selectedBrandMedia.r2Key}`
-        : ""
-    : "";
+  const getBrandMediaUrl = (media: any) =>
+    media?.publicUrl && /^https?:\/\//i.test(media.publicUrl)
+      ? media.publicUrl
+      : media?.r2Key
+        ? `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${media.r2Key}`
+        : "";
 
-  const brandImageBlock = brandImageUrl
-    ? `<figure style="margin:1.75rem 0 2rem;border-radius:.9rem;overflow:hidden;border:1px solid #e5e7eb;background:#f9fafb">` +
-      `<img src="${brandImageUrl}" alt="${selectedBrandMedia?.altText || `${brandName} ${serviceName}`}" loading="lazy" style="display:block;width:100%;height:auto;max-height:420px;object-fit:cover" />` +
-      `</figure>`
-    : "";
+  const selectBrandMediaForSlot = (category: string) => {
+    const candidates = [
+      selectBrandMediaByCategory(category),
+      selectBrandMediaByCategory("business_general"),
+      ...activeBrandMedia,
+    ].filter(Boolean);
+
+    return candidates.find((media: any) => !usedBrandMediaIds.has(media.id)) || candidates[0];
+  };
+
+  const renderBrandImageBlock = (category: string, fallbackAlt: string) => {
+    const media: any = selectBrandMediaForSlot(category);
+    const imageUrl = getBrandMediaUrl(media);
+    if (!media || !imageUrl) return "";
+
+    if (media.id) usedBrandMediaIds.add(media.id);
+
+    return `<figure style="margin:1.75rem 0 2rem;border-radius:.9rem;overflow:hidden;border:1px solid #e5e7eb;background:#f9fafb">` +
+      `<img src="${imageUrl}" alt="${media.altText || fallbackAlt}" loading="lazy" style="display:block;width:100%;height:auto;max-height:420px;object-fit:cover" />` +
+      `</figure>`;
+  };
+
+  // ✅ CHANGED: multiple deterministic brand image placements.
+  // 🔒 UNTOUCHED: section order, section copy, R2 URL format, and page rendering pipeline.
+  const heroImageBlock = renderBrandImageBlock("hero", `${brandName} ${serviceName}`);
+  const serviceImageBlock = renderBrandImageBlock("service", `${serviceName} service image`);
+  const teamImageBlock = renderBrandImageBlock("team", `${brandName} team image`);
+  const locationImageBlock = renderBrandImageBlock("location", `${serviceName} in ${displayLocation}`);
 
   // ✅ CHANGED: demo banner rendered at top of every page when demoBannerUrl is provided; empty string = hidden
   const demoBanner = brandContext?.demoBannerUrl
@@ -236,14 +255,17 @@ export function buildVariationPage(
   const contentHtml = [
     demoBanner, // ✅ CHANGED: demo banner at top; empty string when not configured
     intro,
-    brandImageBlock, // CHANGED: brand media image after intro
+    heroImageBlock, // ✅ CHANGED: hero/category image after intro
     section(`${serviceName} Market Context in ${displayLocation}`, localContext),
     section(`Common ${serviceName} Problems in ${displayLocation}`, painPoint),
     section(`How ${serviceName} Works in ${displayLocation}`, howItWorks),
+    serviceImageBlock, // ✅ CHANGED: service/category image after how-it-works
     section(`Why ${displayLocation} Businesses Choose ${brandName}`, benefits),
     section(`${serviceName} Use Cases in ${displayLocation}`, useCase),
     section(`Trust and Service Confidence`, proofTrust),
+    teamImageBlock, // ✅ CHANGED: team/category image after trust section
     section(`${displayLocation} Market Signals`, localStat),
+    locationImageBlock, // ✅ CHANGED: location/category image after market signals
     section(`${serviceName} Compared With Other Options`, comparison),
     section(`${serviceName} Cost and Pricing Factors`, pricingFactors),
     section(`Who Is the Best Fit for ${serviceName}?`, bestFit),
