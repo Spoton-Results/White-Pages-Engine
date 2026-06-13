@@ -26,6 +26,12 @@ export default function BrandProfilesPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<{ tagline: string; description: string; voiceAndTone: string } | null>(null);
 
+  // ✅ CHANGED: UI-only picture library search/filter state.
+  // 🔒 UNTOUCHED: media API, storage, image generation, R2, and page injection.
+  const [mediaSearch, setMediaSearch] = useState("");
+  const [mediaCategoryFilter, setMediaCategoryFilter] = useState("all");
+  const [mediaActiveFilter, setMediaActiveFilter] = useState("active");
+
   const brandName = watch("name");
 
   const { data: brands = [], isLoading } = useQuery({
@@ -124,6 +130,40 @@ export default function BrandProfilesPage() {
     toast({ title: "Fields filled from AI" });
   }
 
+  // ✅ CHANGED: derive filtered media from already-loaded media.
+  // 🔒 UNTOUCHED: backend filtering/search behavior.
+  function getFilteredBrandMedia(brandId: string) {
+    const mediaItems = Array.isArray((brandMediaByProfile as any)[brandId])
+      ? (brandMediaByProfile as any)[brandId]
+      : [];
+
+    const search = mediaSearch.trim().toLowerCase();
+
+    return mediaItems.filter((media: any) => {
+      const category = String(media.category || "").trim();
+      const active = media.active ?? true;
+
+      if (mediaCategoryFilter !== "all" && category !== mediaCategoryFilter) return false;
+      if (mediaActiveFilter === "active" && active !== true) return false;
+      if (mediaActiveFilter === "inactive" && active !== false) return false;
+
+      if (!search) return true;
+
+      const haystack = [
+        media.altText,
+        media.alt_text,
+        media.category,
+        media.prompt,
+        media.r2Key,
+        media.r2_key,
+        media.publicUrl,
+        media.public_url,
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      return haystack.includes(search);
+    });
+  }
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
@@ -164,7 +204,51 @@ export default function BrandProfilesPage() {
             <Button size="sm" onClick={() => setShowCreate(true)}>Create Profile</Button>
           </div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
+          <>
+            {/* ✅ CHANGED: Picture library search and filters. */}
+            {/* 🔒 UNTOUCHED: Brand profile list, media fetch, and image generation. */}
+            <div className="bg-card border rounded-lg p-3 flex flex-col gap-3 md:flex-row md:items-end">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs">Search Picture Library</Label>
+                <Input
+                  value={mediaSearch}
+                  onChange={(e) => setMediaSearch(e.target.value)}
+                  placeholder="Search alt text, category, prompt, or file key"
+                  data-testid="input-brand-media-search"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Category</Label>
+                <select
+                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                  value={mediaCategoryFilter}
+                  onChange={(e) => setMediaCategoryFilter(e.target.value)}
+                  data-testid="select-brand-media-category"
+                >
+                  <option value="all">All categories</option>
+                  <option value="business_general">Business general</option>
+                  <option value="hero">Hero</option>
+                  <option value="service">Service</option>
+                  <option value="team">Team</option>
+                  <option value="location">Location</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Status</Label>
+                <select
+                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                  value={mediaActiveFilter}
+                  onChange={(e) => setMediaActiveFilter(e.target.value)}
+                  data-testid="select-brand-media-active"
+                >
+                  <option value="active">Active only</option>
+                  <option value="all">All</option>
+                  <option value="inactive">Inactive only</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
             {(brands as any[]).map((brand: any) => (
               <Card key={brand.id} className="hover:border-primary/40 transition-colors">
                 <CardHeader className="pb-2">
@@ -213,8 +297,11 @@ export default function BrandProfilesPage() {
                         <ImageIcon className="size-3.5" />
                         Brand Media
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(brandMediaByProfile as any)[brand.id].map((media: any) => (
+                      {getFilteredBrandMedia(brand.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No images match the current filters.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {getFilteredBrandMedia(brand.id).map((media: any) => (
                           <div key={media.id} className="rounded-md border overflow-hidden bg-muted/30">
                             <img
                               src={
@@ -226,14 +313,16 @@ export default function BrandProfilesPage() {
                               className="h-24 w-full object-cover"
                             />
                           </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
               </Card>
             ))}
-          </div>
+            </div>
+          </>
         )}
       </div>
 
