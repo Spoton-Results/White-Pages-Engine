@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,16 @@ export default function PublishedPagesPage() {
   const [aiSuggestion, setAiSuggestion] = useState<{ tier: number; minScore: number | null; maxScore: number | null; reason: string } | null>(null);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [showDrafts, setShowDrafts] = useState(false);
+  const [sortFilter, setSortFilter] = useState("slug");
+  const [serviceFilter, setServiceFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [pageNumber, setPageNumber] = useState(1);
+  const [savedFilters, setSavedFilters] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem("publishedPageFilters") || "[]"); }
+    catch { return []; }
+  });
+  const [groupBy, setGroupBy] = useState("none");
+  const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(new Set());
 
   // Build the websites query URL — scope by account when one is selected
   const websitesUrl = selectedAccountId
@@ -88,14 +98,23 @@ export default function PublishedPagesPage() {
   const selectedWebsite = overrideWebsite || websitesList[0]?.id || "";
 
   const { data: pagesData, isLoading, isFetching: pagesFetching } = useQuery({
-    queryKey: ["/api/pages/published", selectedWebsite, showDrafts],
+    queryKey: ["/api/pages/published", selectedWebsite, showDrafts, searchText, typeFilter, tierFilter, scoreMinFilter, scoreMaxFilter, sortFilter, serviceFilter, locationFilter, pageNumber],
     queryFn: () => {
       if (!selectedWebsite) return Promise.resolve({ pages: [], total: 0 });
-      // ✅ CHANGED: use /pages/search (raw SQL route) instead of /pages (broken Drizzle route)
-      const url = showDrafts
-        ? `/api/websites/${selectedWebsite}/pages/search?includeDrafts=true&limit=200&sort=slug`
-        : `/api/websites/${selectedWebsite}/pages/search?status=published&limit=200&sort=slug`;
-      return api.get<any>(url);
+      const params = new URLSearchParams();
+      params.set("limit", "200");
+      params.set("page", String(pageNumber));
+      params.set("sort", sortFilter || "slug");
+      if (showDrafts) params.set("includeDrafts", "true");
+      else params.set("status", "published");
+      if (searchText.trim()) params.set("q", searchText.trim());
+      if (typeFilter) params.set("pageType", typeFilter);
+      if (tierFilter) params.set("tier", tierFilter);
+      if (scoreMinFilter) params.set("scoreMin", scoreMinFilter);
+      if (scoreMaxFilter) params.set("scoreMax", scoreMaxFilter);
+      if (serviceFilter.trim()) params.set("service", serviceFilter.trim());
+      if (locationFilter.trim()) params.set("location", locationFilter.trim());
+      return api.get<any>(`/api/websites/${selectedWebsite}/pages/search?${params.toString()}`);
     },
     enabled: !!selectedWebsite,
   });
@@ -263,16 +282,93 @@ export default function PublishedPagesPage() {
     n >= 70 ? "text-emerald-600" :
     n >= 50 ? "text-amber-600" : "text-red-500";
 
-  const activeFilterCount = [typeFilter, scoreMinFilter, scoreMaxFilter, tierFilter].filter(Boolean).length;
-  const pages = (pagesData?.pages || []).filter((p: any) => {
-    if (searchText && !p.title.toLowerCase().includes(searchText.toLowerCase()) && !p.slug.includes(searchText.toLowerCase())) return false;
-    if (typeFilter && p.pageType !== typeFilter) return false;
-    if (tierFilter && String(p.tier ?? "") !== tierFilter) return false;
-    const score = p.qualityScore ?? null;
-    if (scoreMinFilter && (score == null || score < parseFloat(scoreMinFilter))) return false;
-    if (scoreMaxFilter && (score == null || score > parseFloat(scoreMaxFilter))) return false;
-    return true;
-  });
+  const activeFilterCount = [searchText, typeFilter, scoreMinFilter, scoreMaxFilter, tierFilter, serviceFilter, locationFilter].filter(Boolean).length;
+
+  const resetPage = () => setPageNumber(1);
+  const saveCurrentFilter = () => {
+    const name = prompt("Preset name?");
+    if (!name) return;
+    const next = [{ name, searchText, typeFilter, tierFilter, scoreMinFilter, scoreMaxFilter, sortFilter, serviceFilter, locationFilter }, ...savedFilters].slice(0, 10);
+    setSavedFilters(next);
+    localStorage.setItem("publishedPageFilters", JSON.stringify(next));
+    toast({ title: "Filter preset saved" });
+  };
+  const applySavedFilter = (preset: any) => {
+    setSearchText(preset.searchText || "");
+    setTypeFilter(preset.typeFilter || "");
+    setTierFilter(preset.tierFilter || "");
+    setScoreMinFilter(preset.scoreMinFilter || "");
+    setScoreMaxFilter(preset.scoreMaxFilter || "");
+    setSortFilter(preset.sortFilter || "slug");
+    setServiceFilter(preset.serviceFilter || "");
+    setLocationFilter(preset.locationFilter || "");
+    setPageNumber(1);
+  };
+  const pages = pagesData?.pages || [];
+  const selectedPages = pages.filter((page: any) => selectedPageIds.has(page.id));
+  const allLoadedSelected = pages.length > 0 && pages.every((page: any) => selectedPageIds.has(page.id));
+
+  const groupKeyForPage = (page: any) => {
+    if (groupBy === "service") return page.serviceName || "No service";
+    if (groupBy === "location") return page.locationName || page.locationState || "No location";
+    if (groupBy === "pageType") return page.pageType?.replace(/_/g, " ") || "No page type";
+    if (groupBy === "tier") return page.tier ? `Tier ${page.tier}` : "No tier";
+    if (groupBy === "blueprint") return page.blueprintName || "No blueprint";
+    return "";
+  };
+
+  const togglePageSelected = (id: string) => {
+    setSelectedPageIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllLoaded = () => {
+    setSelectedPageIds(prev => {
+      const next = new Set(prev);
+      if (allLoadedSelected) pages.forEach((page: any) => next.delete(page.id));
+      else pages.forEach((page: any) => next.add(page.id));
+      return next;
+    });
+  };
+
+  const exportSelectedCsv = () => {
+    const rows = (selectedPages.length ? selectedPages : pages).map((page: any) => ({
+      title: page.title || "",
+      slug: page.slug || "",
+      pageType: page.pageType || "",
+      tier: page.tier ?? "",
+      qualityScore: page.qualityScore ?? "",
+      wordCount: page.wordCount ?? "",
+      serviceName: page.serviceName || "",
+      locationName: page.locationName || page.locationState || "",
+      blueprintName: page.blueprintName || "",
+      status: page.status || "",
+    }));
+    const header = Object.keys(rows[0] || { title: "", slug: "" });
+    const csv = [
+      header.join(","),
+      ...rows.map((row: any) => header.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "published-pages.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const quickFilter = (kind: string) => {
+    setPageNumber(1);
+    if (kind === "published") { setShowDrafts(false); return; }
+    if (kind === "drafts") { setShowDrafts(true); return; }
+    if (kind.startsWith("tier:")) { setTierFilter(kind.split(":")[1]); return; }
+    if (kind.startsWith("type:")) { setTypeFilter(kind.split(":")[1]); return; }
+    if (kind.startsWith("q:")) { setSearchText(kind.slice(2)); return; }
+  };
 
   const pageTypes = Array.from(new Set((pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean))) as string[];
 
@@ -423,7 +519,7 @@ export default function PublishedPagesPage() {
             </Select>
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search pages..." className="pl-9 h-9" value={searchText} onChange={e => setSearchText(e.target.value)} data-testid="input-search-pages" />
+              <Input placeholder="Search title, slug, H1, meta..." className="pl-9 h-9" value={searchText} onChange={e => { setSearchText(e.target.value); resetPage(); }} data-testid="input-search-pages" />
             </div>
             <Button
               variant={showFilters ? "secondary" : "outline"}
@@ -438,17 +534,68 @@ export default function PublishedPagesPage() {
                 <span className="bg-primary text-primary-foreground rounded-full text-xs w-4 h-4 flex items-center justify-center">{activeFilterCount}</span>
               )}
             </Button>
+            <Button variant="outline" size="sm" className="h-9" onClick={saveCurrentFilter} data-testid="button-save-filter-preset">
+              Save Preset
+            </Button>
+            <Button variant="outline" size="sm" className="h-9" onClick={exportSelectedCsv} data-testid="button-export-pages">
+              Export CSV
+            </Button>
             {activeFilterCount > 0 && (
-              <Button variant="ghost" size="sm" className="h-9 text-muted-foreground" onClick={() => { setTypeFilter(""); setScoreMinFilter(""); setScoreMaxFilter(""); setTierFilter(""); }} data-testid="button-clear-filters">
+              <Button variant="ghost" size="sm" className="h-9 text-muted-foreground" onClick={() => { setSearchText(""); setTypeFilter(""); setScoreMinFilter(""); setScoreMaxFilter(""); setTierFilter(""); setServiceFilter(""); setLocationFilter(""); setPageNumber(1); }} data-testid="button-clear-filters">
                 Clear
               </Button>
             )}
           </div>
+          <div className="border-t px-3 py-2 flex items-center gap-2 flex-wrap bg-muted/20">
+            {[
+              ["Published", "published"],
+              ["Drafts", "drafts"],
+              ["Tier 1", "tier:1"],
+              ["Tier 2", "tier:2"],
+              ["Tier 3", "tier:3"],
+              ["Case Studies", "q:case"],
+              ["Testimonials", "q:testimonial"],
+              ["Screenshots", "q:screenshot"],
+              ["Videos", "q:video"],
+            ].map(([label, value]) => (
+              <Button key={value} variant="outline" size="sm" className="h-7 text-xs" onClick={() => quickFilter(value)}>
+                {label}
+              </Button>
+            ))}
+            {selectedPageIds.size > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {selectedPageIds.size.toLocaleString()} selected
+              </span>
+            )}
+          </div>
           {showFilters && (
             <div className="border-t px-3 pb-3 pt-2.5 flex items-end gap-3 flex-wrap bg-muted/30">
+              {savedFilters.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Saved Presets</Label>
+                  <Select onValueChange={(v) => applySavedFilter(savedFilters[Number(v)])}>
+                    <SelectTrigger className="h-8 text-xs w-44" data-testid="select-saved-filter">
+                      <SelectValue placeholder="Load preset" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {savedFilters.map((preset, idx) => (
+                        <SelectItem key={`${preset.name}-${idx}`} value={String(idx)}>{preset.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Service Contains</Label>
+                <Input className="h-8 text-xs w-52" placeholder="e.g. retainage" value={serviceFilter} onChange={e => { setServiceFilter(e.target.value); resetPage(); }} data-testid="input-filter-service" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Location Contains</Label>
+                <Input className="h-8 text-xs w-52" placeholder="state, city, slug..." value={locationFilter} onChange={e => { setLocationFilter(e.target.value); resetPage(); }} data-testid="input-filter-location" />
+              </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Page Type</Label>
-                <Select value={typeFilter || "all"} onValueChange={v => setTypeFilter(v === "all" ? "" : v)}>
+                <Select value={typeFilter || "all"} onValueChange={v => { setTypeFilter(v === "all" ? "" : v); resetPage(); }}>
                   <SelectTrigger className="h-8 text-xs w-44" data-testid="select-filter-type">
                     <SelectValue placeholder="All types" />
                   </SelectTrigger>
@@ -462,7 +609,7 @@ export default function PublishedPagesPage() {
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Tier</Label>
-                <Select value={tierFilter || "all"} onValueChange={v => setTierFilter(v === "all" ? "" : v)}>
+                <Select value={tierFilter || "all"} onValueChange={v => { setTierFilter(v === "all" ? "" : v); resetPage(); }}>
                   <SelectTrigger className="h-8 text-xs w-28" data-testid="select-filter-tier">
                     <SelectValue placeholder="All tiers" />
                   </SelectTrigger>
@@ -475,15 +622,48 @@ export default function PublishedPagesPage() {
                 </Select>
               </div>
               <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Sort</Label>
+                <Select value={sortFilter} onValueChange={v => { setSortFilter(v); resetPage(); }}>
+                  <SelectTrigger className="h-8 text-xs w-32" data-testid="select-sort-pages">
+                    <SelectValue placeholder="Sort" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="slug">Slug A-Z</SelectItem>
+                    <SelectItem value="updated">Recently updated</SelectItem>
+                    <SelectItem value="score">Score high</SelectItem>
+                    <SelectItem value="score_asc">Score low</SelectItem>
+                    <SelectItem value="words">Words high</SelectItem>
+                    <SelectItem value="words_asc">Words low</SelectItem>
+                    <SelectItem value="tier">Tier</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Group By</Label>
+                <Select value={groupBy} onValueChange={setGroupBy}>
+                  <SelectTrigger className="h-8 text-xs w-36" data-testid="select-group-pages">
+                    <SelectValue placeholder="Group" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No grouping</SelectItem>
+                    <SelectItem value="service">Service</SelectItem>
+                    <SelectItem value="location">Location</SelectItem>
+                    <SelectItem value="pageType">Page Type</SelectItem>
+                    <SelectItem value="tier">Tier</SelectItem>
+                    <SelectItem value="blueprint">Blueprint</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Score Min (%)</Label>
-                <Input className="h-8 text-xs w-24" placeholder="e.g. 70" value={scoreMinFilter} onChange={e => setScoreMinFilter(e.target.value)} type="number" min="0" max="100" data-testid="input-filter-score-min" />
+                <Input className="h-8 text-xs w-24" placeholder="e.g. 70" value={scoreMinFilter} onChange={e => { setScoreMinFilter(e.target.value); resetPage(); }} type="number" min="0" max="100" data-testid="input-filter-score-min" />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Score Max (%)</Label>
-                <Input className="h-8 text-xs w-24" placeholder="e.g. 100" value={scoreMaxFilter} onChange={e => setScoreMaxFilter(e.target.value)} type="number" min="0" max="100" data-testid="input-filter-score-max" />
+                <Input className="h-8 text-xs w-24" placeholder="e.g. 100" value={scoreMaxFilter} onChange={e => { setScoreMaxFilter(e.target.value); resetPage(); }} type="number" min="0" max="100" data-testid="input-filter-score-max" />
               </div>
               <p className="text-xs text-muted-foreground self-end pb-1">
-                Showing {pages.length.toLocaleString()} of {(pagesData?.pages || []).length.toLocaleString()} loaded
+                Showing {pages.length.toLocaleString()} of {(pagesData?.total || 0).toLocaleString()} matching pages
               </p>
             </div>
           )}
@@ -503,6 +683,9 @@ export default function PublishedPagesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <input type="checkbox" checked={allLoadedSelected} onChange={toggleAllLoaded} aria-label="Select loaded pages" />
+                  </TableHead>
                   <TableHead>Title / Slug</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Tier</TableHead>
@@ -516,19 +699,34 @@ export default function PublishedPagesPage() {
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 7 }).map((_, j) => (
+                      {Array.from({ length: 8 }).map((_, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : pages.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       No published pages yet.
                     </TableCell>
                   </TableRow>
-                ) : pages.map((page: any) => (
-                  <TableRow key={page.id} data-testid={`row-page-${page.id}`}>
+                ) : pages.map((page: any, idx: number) => {
+                  const group = groupKeyForPage(page);
+                  const previousGroup = idx > 0 ? groupKeyForPage(pages[idx - 1]) : "";
+                  const showGroup = groupBy !== "none" && group !== previousGroup;
+                  return (
+                  <Fragment key={page.id}>
+                    {showGroup && (
+                      <TableRow>
+                        <TableCell colSpan={8} className="bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {group}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  <TableRow data-testid={`row-page-${page.id}`}>
+                    <TableCell>
+                      <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={() => togglePageSelected(page.id)} aria-label={`Select ${page.title}`} />
+                    </TableCell>
                     <TableCell>
                       <div className="font-medium text-sm truncate max-w-[280px] flex items-center gap-2">
                         <span className="truncate">{page.title}</span>
@@ -623,9 +821,24 @@ export default function PublishedPagesPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
+            <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-sm">
+              <span className="text-muted-foreground">
+                Page {pageNumber.toLocaleString()} of {(pagesData?.totalPages || 1).toLocaleString()}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={pageNumber <= 1 || pagesFetching} onClick={() => setPageNumber(p => Math.max(1, p - 1))}>
+                  Previous
+                </Button>
+                <Button variant="outline" size="sm" disabled={pageNumber >= (pagesData?.totalPages || 1) || pagesFetching} onClick={() => setPageNumber(p => p + 1)}>
+                  Next
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>
