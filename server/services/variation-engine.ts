@@ -155,10 +155,19 @@ export function buildVariationPage(
   const h2Style = `style="font-size:1.35rem;font-weight:700;color:#111827;margin:2rem 0 .75rem;padding-bottom:.5rem;border-bottom:2px solid #2563eb20"`;
   const section = (heading: string, body: string) => body ? `<h2 ${h2Style}>${sanitizeGeoText(heading, geoTarget)}</h2>\n${body}` : "";
 
-  // CHANGED: render one saved brand image when available
-  const selectedBrandMedia = (brandContext?.brandMedia || [])
-    .filter((media) => media.publicUrl || media.r2Key)
-    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))[0];
+  // ✅ CHANGED: deterministically choose intro image by category.
+  // 🔒 UNTOUCHED: image rendering position, markup, R2 URL format, and page structure.
+  const activeBrandMedia = (brandContext?.brandMedia || [])
+    .filter((media) => (media.publicUrl || media.r2Key) && (media.active ?? true))
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+  const selectBrandMediaByCategory = (category: string) =>
+    activeBrandMedia.find((media) => media.category === category);
+
+  const selectedBrandMedia =
+    selectBrandMediaByCategory("hero") ||
+    selectBrandMediaByCategory("business_general") ||
+    activeBrandMedia[0];
 
   const brandImageUrl = selectedBrandMedia
     ? selectedBrandMedia.publicUrl && /^https?:\/\//i.test(selectedBrandMedia.publicUrl)
