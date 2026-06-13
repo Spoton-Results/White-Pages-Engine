@@ -243,9 +243,14 @@ function applyBlueprintTemplates(
       .replace(/\{state\|[^}]*\}/gi, slugifyStr(vars.state))
       .replace(/\{state\}/gi, vars.state)
       .replace(/\{brand[^}]*\}/gi, vars.brand)
+      // ✅ CHANGED: prevent comparison blueprint placeholders from leaking into generated pages.
+      // 🔒 UNTOUCHED: existing service/location/state/brand replacement behavior.
+      .replace(/\{comparison[-_]x[^}]*\}/gi, vars.brand)
+      .replace(/\{comparison[-_]y[^}]*\}/gi, vars.service)
+      .replace(/\{audience[^}]*\}/gi, "local businesses")
       .replace(/\{keyword[^}]*\}/gi, vars.service)
       .replace(/\{cluster[^}]*\}/gi, vars.cluster ?? "")
-      .replace(/\{industry[^}]*\}/gi, "")
+      .replace(/\{industry[^}]*\}/gi, vars.service)
       .replace(/-{2,}/g, "-").replace(/\s{2,}/g, " ").trim();
   const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   let rawSlug = slugify(interp(blueprint.slugTemplate));
