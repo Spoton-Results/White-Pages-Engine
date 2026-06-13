@@ -307,13 +307,15 @@ async function runBulkCampaign(parentJobId: string) {
         passedPages,
         failedPages,
         settings: {
-          ...(((await storage.getGenerationJob(parentJobId)) as any)?.settings || {}),
+          ...(((latestParent as any).settings || {}) as AnyJob),
           currentBlueprintIndex: i + 1,
           completedBlueprints: i + 1,
           childJobs,
         } as any,
       } as any);
     }
+
+    const completedParent = await storage.getGenerationJob(parentJobId);
 
     await storage.updateGenerationJob(parentJobId, {
       status: JOB_STATUS.COMPLETED as any,
@@ -322,7 +324,7 @@ async function runBulkCampaign(parentJobId: string) {
       passedPages,
       failedPages,
       settings: {
-        ...(((await storage.getGenerationJob(parentJobId)) as any)?.settings || {}),
+        ...(((completedParent as any)?.settings || {}) as AnyJob),
         completedBlueprints: blueprintIds.length,
         childJobs,
       } as any,
