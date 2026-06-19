@@ -39,6 +39,53 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, "&#39;");
 }
 
+function getBrandMediaUrl(media: any) {
+  if (media?.public_url && /^https?:\/\//i.test(media.public_url)) return media.public_url;
+  if (media?.r2_key) return `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${media.r2_key}`;
+  return "";
+}
+
+async function getClientDomainImageFallbackHtml(ctx: any, page: any) {
+  const brandProfileId = ctx.brand_profile_id || "";
+  if (!brandProfileId) return "";
+
+  const result = await pool.query(
+    `SELECT public_url, r2_key, alt_text, category, sort_order
+     FROM brand_media
+     WHERE brand_profile_id::text = $1::text
+       AND active = true
+       AND (website_id IS NULL OR website_id::text = $2::text)
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [brandProfileId, ctx.website_id],
+  ).catch(() => ({ rows: [] as any[] }));
+
+  const media = result.rows[0];
+  const imageUrl = getBrandMediaUrl(media);
+  if (!imageUrl) return "";
+
+  const brandName = ctx.website_settings?.brandName || ctx.brand_name || ctx.website_name || ctx.website_domain || "Brand image";
+  const altText = media.alt_text || `${brandName} ${page.title || page.h1 || page.slug || "page image"}`;
+
+  return `<figure data-nexus-image-fallback="client-domain" style="margin:1.75rem 0 2rem;border-radius:.9rem;overflow:hidden;border:1px solid #e5e7eb;background:#f9fafb">` +
+    `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(altText)}" loading="lazy" style="display:block;width:100%;height:auto;max-height:420px;object-fit:cover" />` +
+    `</figure>`;
+}
+
+async function ensureClientDomainImageFallback(contentHtml: string, ctx: any, page: any) {
+  const content = String(contentHtml || "");
+  if (/<img\b/i.test(content)) return content;
+
+  const imageHtml = await getClientDomainImageFallbackHtml(ctx, page);
+  if (!imageHtml) return content;
+
+  if (/<\/p>/i.test(content)) {
+    return content.replace(/<\/p>/i, `</p>\n${imageHtml}`);
+  }
+
+  return `${imageHtml}\n${content}`;
+}
+
 function notFoundHtml(message: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Page Not Found</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;color:#0f172a}.box{max-width:520px;padding:32px;text-align:center}h1{font-size:34px;margin:0 0 10px}p{color:#64748b;line-height:1.6}</style></head><body><main class="box"><h1>404</h1><p>${escapeHtml(message)}</p></main></body></html>`;
 }
@@ -247,7 +294,8 @@ async function serveClientPage(ctx: any, host: string, slug: string, res: Respon
   const version = versionResult.rows[0];
   if (!version) return res.status(404).type("text/html").send(notFoundHtml("This page is published but does not have an active page version yet."));
 
-  const contentHtml = version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "";
+  let contentHtml = version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "";
+  contentHtml = await ensureClientDomainImageFallback(contentHtml, ctx, page);
   const links = await getPublicInternalLinks(page.id, ctx.website_id);
   const canonicalUrl = `https://${host}/${page.slug}`;
   const settings = ctx.website_settings || {};
