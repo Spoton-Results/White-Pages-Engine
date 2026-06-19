@@ -43,6 +43,24 @@ function substitute(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+// ✅ CHANGED: keep state-data facts from being injected as full sentence fragments inside normal prose.
+// 🔒 UNTOUCHED: actual page sections, section order, bank selection, slugs, images, and scoring remain unchanged.
+function safePhrase(value: unknown, fallback: string): string {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  if (/[.;:]/.test(text) || text.split(/\s+/).length > 7) return fallback;
+  return text;
+}
+
+function cleanGeneratedText(html: string, brandName: string): string {
+  return html
+    // ✅ CHANGED: repair bank templates that start sentences with an unresolved brand/company placeholder.
+    .replace(/(<p>\s*)(recognizes|adjusts|transitions|tailors|ensures|helps|provides)\b/gi, `$1${brandName} $2`)
+    .replace(/(<p>\s*Yes\.\s*)(ensures|helps|provides|recognizes|adjusts|tailors)\b/gi, `$1${brandName} $2`)
+    // ✅ CHANGED: repair known CTA typo caused by pasted brand/demo text.
+    .replace(/\bTGet a high-converting websiteoday\b/g, "Get a high-converting website today");
+}
+
 function buildFaqJsonLd(faqHtml: string): string {
   const entities: Array<{ "@type": string; name: string; acceptedAnswer: { "@type": string; text: string } }> = [];
   const regex = /<p><strong>Q:\s*(.*?)<\/strong><\/p>\s*<p>(.*?)<\/p>/gis;
@@ -112,6 +130,11 @@ export function buildVariationPage(
   const geoTarget = { locationName, locationType, stateName, stateAbbr };
   const displayLocation = getDisplayLocation(geoTarget);
 
+  const safeBusinessCulture = safePhrase(state?.businessCulture, `${stateName} business conditions`);
+  const safePaymentRegulations = safePhrase(state?.paymentRegulations, "payment and compliance considerations");
+  const safePopulation = state?.population && Number(state.population) < 1000000 ? state.population.toLocaleString() : "local";
+  const safeBusinessCount = state?.businessCount && Number(state.businessCount) < 100000 ? state.businessCount.toLocaleString() : "many";
+
   const vars: Record<string, string> = {
     service: serviceName,
     city,
@@ -119,11 +142,19 @@ export function buildVariationPage(
     state: stateDisplay,
     state_abbr: stateAbbr,
     landmark,
-    business_culture: state?.businessCulture ?? "",
-    payment_regulations: state?.paymentRegulations ?? "",
-    population: state?.population?.toLocaleString() ?? "",
-    business_count: state?.businessCount?.toLocaleString() ?? "",
+    // ✅ CHANGED: use safe phrases so full state facts do not leak into unrelated sentences.
+    business_culture: safeBusinessCulture,
+    payment_regulations: safePaymentRegulations,
+    population: safePopulation,
+    business_count: safeBusinessCount,
     brand: brandName,
+    // ✅ CHANGED: alias common bank placeholders to brand instead of blanking them out.
+    company: brandName,
+    company_name: brandName,
+    business: brandName,
+    business_name: brandName,
+    provider: brandName,
+    agency: brandName,
     primary_keyword: cluster?.primaryKeyword ?? serviceName,
     secondary_keywords: cluster?.secondaryKeywords?.join(", ") ?? "",
     intent_type: cluster?.intentType ?? "",
@@ -134,7 +165,7 @@ export function buildVariationPage(
     if (!bank) return "";
     const variations = bank.variations as string[];
     if (!variations.length) return "";
-    return sanitizeGeoText(substitute(pick(variations), vars), geoTarget);
+    return cleanGeneratedText(sanitizeGeoText(substitute(pick(variations), vars), geoTarget), brandName);
   };
 
   const intro = getSection("intro");
@@ -205,7 +236,7 @@ export function buildVariationPage(
   // ✅ CHANGED: demo banner rendered at top of every page when demoBannerUrl is provided; empty string = hidden
   const demoBanner = brandContext?.demoBannerUrl
     ? `<div style="background:#1e40af;color:#fff;padding:.75rem 1.5rem;border-radius:.5rem;margin-bottom:1.5rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">` +
-      `<span><strong>${brandContext.demoBannerHeading || ""}</strong>${brandContext.demoBannerSubtext ? ` — ${brandContext.demoBannerSubtext}` : ""}</span>` +
+      `<span><strong>${cleanGeneratedText(brandContext.demoBannerHeading || "", brandName)}</strong>${brandContext.demoBannerSubtext ? ` — ${cleanGeneratedText(brandContext.demoBannerSubtext, brandName)}` : ""}</span>` +
       `<a href="${brandContext.demoBannerUrl}" style="background:#fff;color:#1e40af;font-weight:700;padding:.4rem 1.25rem;border-radius:.4rem;text-decoration:none;white-space:nowrap">${brandContext.demoBannerButton || "Learn More"}</a>` +
       `</div>`
     : "";
@@ -240,9 +271,9 @@ export function buildVariationPage(
 
   // ✅ CHANGED: CTA block now uses brandContext overrides (ctaHeading, ctaBody, ctaButtonLabel, websiteUrl)
   // with full fallback to existing hardcoded defaults so pages without brandContext are unaffected
-  const ctaHeading = brandContext?.ctaHeading || "Ready to Get Started?";
-  const ctaBody = brandContext?.ctaBody || cta || "";
-  const ctaButtonLabel = brandContext?.ctaButtonLabel || "";
+  const ctaHeading = cleanGeneratedText(brandContext?.ctaHeading || "Ready to Get Started?", brandName);
+  const ctaBody = cleanGeneratedText(brandContext?.ctaBody || cta || "", brandName);
+  const ctaButtonLabel = cleanGeneratedText(brandContext?.ctaButtonLabel || "", brandName);
   const ctaUrl = brandContext?.websiteUrl || "#";
   const ctaBlock = ctaBody || ctaHeading !== "Ready to Get Started?"
     ? `<div style="background:#2563eb;color:#fff;border-radius:.75rem;padding:2rem;margin:2.5rem 0;text-align:center">\n` +
@@ -279,7 +310,8 @@ export function buildVariationPage(
     localBusinessJsonLd,
   ].filter(Boolean).join("\n");
 
-  const wordCount = contentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+  const finalContentHtml = cleanGeneratedText(sanitizeGeoText(contentHtml, geoTarget), brandName);
+  const wordCount = finalContentHtml.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
   const clusterSlug = cluster?.primaryKeyword ? slugify(cluster.primaryKeyword) : null;
   const locationSlug = locationType === "state" ? slugify(stateName) : sanitizeSlug(`${slugify(locationName)}-${stateAbbr.toLowerCase()}`);
   const slug = sanitizeSlug(clusterSlug ? `${serviceSlug}--${clusterSlug}--in-${locationSlug}` : `${serviceSlug}-in-${locationSlug}`);
@@ -293,7 +325,7 @@ export function buildVariationPage(
     : `Looking for ${targetKeyword} in ${stateName}? ${brandName} delivers reliable ${serviceName} solutions to businesses across ${stateDisplay}. Get a free quote today.`;
 
   return {
-    contentHtml: sanitizeGeoText(contentHtml, geoTarget),
+    contentHtml: finalContentHtml,
     title: sanitizeGeoText(title, geoTarget),
     h1: sanitizeGeoText(h1, geoTarget),
     metaDescription: sanitizeGeoText(metaDescription, geoTarget),
