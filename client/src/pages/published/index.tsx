@@ -370,9 +370,7 @@ export default function PublishedPagesPage() {
     if (kind.startsWith("q:")) { setSearchText(kind.slice(2)); return; }
   };
 
-  const pageTypes = (pagesData?.pageTypeOptions?.length
-    ? pagesData.pageTypeOptions
-    : Array.from(new Set((pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean)))) as string[];
+  const pageTypes = Array.from(new Set((pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean))) as string[];
 
   const platformBase = window.location.origin;
   const pageUrl = (page: any) => {
