@@ -313,33 +313,14 @@ export async function getWebsites(accountId?: string): Promise<Website[]> {
   if (accountId) {
     // Raw SQL to avoid Drizzle ORM camelCase→snake_case bug with account_id column in production
     const res = await pool.query(
-      `SELECT w.*,
-              COALESCE(pc.published_count, 0)::int AS published_pages,
-              COALESCE(pc.total_count, 0)::int AS page_count
-       FROM websites w
-       LEFT JOIN (
-         SELECT website_id, COUNT(*)::int AS total_count,
-                COUNT(*) FILTER (WHERE status='published')::int AS published_count
-         FROM pages GROUP BY website_id
-       ) pc ON pc.website_id = w.id
-       WHERE w.account_id = $1
-       ORDER BY w.created_at DESC`,
+      `SELECT * FROM websites WHERE account_id = $1 ORDER BY created_at DESC`,
       [accountId]
     );
     return res.rows.map(mapWebsiteRow);
   }
   // Use raw SQL for the all-websites path too — same Drizzle camelCase→snake_case
   // bug affects account_id, published_pages, brand_profile_id etc. in production builds.
-  const res = await pool.query(`SELECT w.*,
-              COALESCE(pc.published_count, 0)::int AS published_pages,
-              COALESCE(pc.total_count, 0)::int AS page_count
-       FROM websites w
-       LEFT JOIN (
-         SELECT website_id, COUNT(*)::int AS total_count,
-                COUNT(*) FILTER (WHERE status='published')::int AS published_count
-         FROM pages GROUP BY website_id
-       ) pc ON pc.website_id = w.id
-       ORDER BY w.created_at DESC`);
+  const res = await pool.query(`SELECT * FROM websites ORDER BY created_at DESC`);
   return res.rows.map(mapWebsiteRow);
 }
 
