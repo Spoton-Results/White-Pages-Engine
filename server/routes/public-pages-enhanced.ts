@@ -94,6 +94,14 @@ function firstNonEmpty(...values: any[]) {
   return "";
 }
 
+function escapeAttr(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;");
+}
+
 async function getWebsiteForHost(host: string) {
   const result = await pool.query(
     `SELECT id, account_id, brand_profile_id, domain, name, COALESCE(settings, '{}'::jsonb) AS settings,
@@ -183,6 +191,59 @@ async function getActiveContent(pageId: string, page: any) {
   return version.content_html || version.contentHtml || page.content_html || page.contentHtml || page.html || page.body || "";
 }
 
+// ✅ CHANGED: public render fallback for old saved pages that were generated before brand images existed.
+// 🔒 UNTOUCHED: stored page versions, generation jobs, slugs, metadata, and pages that already contain images.
+async function getBrandImageFallbackHtml(website: any, effectiveSettings: any, page: any) {
+  const brandProfileId = effectiveSettings.__brandProfileId || website.brand_profile_id || website.brandProfileId || "";
+  if (!brandProfileId) return "";
+
+  const result = await pool.query(
+    `SELECT public_url, r2_key, alt_text, category, sort_order
+     FROM brand_media
+     WHERE brand_profile_id::text = $1::text
+       AND active = true
+       AND (website_id IS NULL OR website_id::text = $2::text)
+     ORDER BY
+       CASE category WHEN 'hero' THEN 0 WHEN 'service' THEN 1 WHEN 'business_general' THEN 2 ELSE 3 END,
+       sort_order ASC,
+       created_at ASC
+     LIMIT 1`,
+    [brandProfileId, website.id]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  const media = result.rows[0];
+  if (!media) return "";
+
+  const imageUrl = media.public_url && /^https?:\/\//i.test(media.public_url)
+    ? media.public_url
+    : media.r2_key
+      ? `https://pub-1e7626f01f4a4399915b608da09ccc25.r2.dev/${media.r2_key}`
+      : "";
+
+  if (!imageUrl) return "";
+
+  const brandName = effectiveSettings.brandName || effectiveSettings.siteName || effectiveSettings.businessName || website.website_name || website.name || website.domain || "Brand image";
+  const altText = media.alt_text || `${brandName} ${page.title || page.h1 || page.slug || "page image"}`;
+
+  return `<figure data-nexus-image-fallback="true" style="margin:1.75rem 0 2rem;border-radius:.9rem;overflow:hidden;border:1px solid #e5e7eb;background:#f9fafb">` +
+    `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(altText)}" loading="lazy" style="display:block;width:100%;height:auto;max-height:420px;object-fit:cover" />` +
+    `</figure>`;
+}
+
+async function ensurePublicContentImageFallback(contentHtml: string, website: any, effectiveSettings: any, page: any) {
+  const content = String(contentHtml || "");
+  if (/<img\b/i.test(content)) return content;
+
+  const imageHtml = await getBrandImageFallbackHtml(website, effectiveSettings, page);
+  if (!imageHtml) return content;
+
+  if (/<\/p>/i.test(content)) {
+    return content.replace(/<\/p>/i, `</p>\n${imageHtml}`);
+  }
+
+  return `${imageHtml}\n${content}`;
+}
+
 router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
@@ -206,7 +267,8 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     if (!page) return next();
 
     const effectiveSettings = await getEffectiveSettings(website);
-    const content = await getActiveContent(page.id, page);
+    const rawContent = await getActiveContent(page.id, page);
+    const content = await ensurePublicContentImageFallback(rawContent, website, effectiveSettings, page);
     const canonical = `https://${host}/${page.slug}`;
     const links = await getPublicInternalLinks(page.id, page.website_id || page.websiteId || website.id);
 
@@ -226,6 +288,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
       hasPhone: !!effectiveSettings.phone,
       hasCta: !!effectiveSettings.ctaHeading || !!effectiveSettings.ctaText,
       hasDemoBanner: !!effectiveSettings.demoBannerUrl,
+      hasImageFallback: rawContent === content ? false : true,
       renderer: "public-domain-brand-v4",
     });
 
