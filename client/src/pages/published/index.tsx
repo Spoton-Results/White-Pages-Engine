@@ -370,7 +370,27 @@ export default function PublishedPagesPage() {
     if (kind.startsWith("q:")) { setSearchText(kind.slice(2)); return; }
   };
 
-  const pageTypes = Array.from(new Set((pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean))) as string[];
+  const knownPageTypes = [
+    "service_location",
+    "service_state",
+    "city_service",
+    "state_service",
+    "industry_service",
+    "service",
+    "location",
+    "hub",
+    "landing",
+    "blog",
+    "case_study",
+    "testimonial",
+    "comparison",
+    "faq",
+  ];
+
+  const pageTypes = Array.from(new Set([
+    ...knownPageTypes,
+    ...(pagesData?.pages || []).map((p: any) => p.pageType).filter(Boolean),
+  ])) as string[];
 
   const platformBase = window.location.origin;
   const pageUrl = (page: any) => {
