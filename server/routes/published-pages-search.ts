@@ -62,7 +62,8 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
   try {
     const websiteId = req.params.websiteId;
     const q = textParam(req.query.q).toLowerCase();
-    const status = textParam(req.query.status) || "published";
+    const includeDrafts = textParam(req.query.includeDrafts) === "true";
+    const status = includeDrafts ? "all" : (textParam(req.query.status) || "published");
     const pageType = textParam(req.query.pageType);
     const tier = textParam(req.query.tier);
     const scoreMin = textParam(req.query.scoreMin);
@@ -135,6 +136,16 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
       [websiteId]
     );
 
+    const pageTypesResult = await pool.query(
+      `SELECT DISTINCT p.page_type
+       FROM pages p
+       WHERE p.website_id::text = $1::text
+         AND p.page_type IS NOT NULL
+         AND p.page_type <> ''
+       ORDER BY p.page_type ASC`,
+      [websiteId]
+    );
+
     return res.json({
       pages: rowsResult.rows.map(rowToPage),
       total: totalResult.rows[0]?.total || 0,
@@ -142,6 +153,7 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
       limit,
       totalPages: Math.ceil((totalResult.rows[0]?.total || 0) / limit),
       facets: facetsResult.rows[0] || {},
+      pageTypeOptions: pageTypesResult.rows.map((r: any) => r.page_type).filter(Boolean),
     });
   } catch (err) {
     return next(err);
