@@ -27,6 +27,7 @@ import coreApiRouter from "./routes/core-api";
 import locationsApiRouter from "./routes/locations-api";
 import publishedPagesSearchRouter from "./routes/published-pages-search";
 import legacyPublicUrlRedirectRouter from "./routes/legacy-public-url-redirect";
+import spotonLegacyGoneRouter from "./routes/spoton-legacy-gone";
 import { registerDebugSectionsRoute } from "./routes/debug-sections";
 import sitePreviewRouter from "./routes/site-preview";
 import pagesSubdomainPublicRouter from "./routes/pages-subdomain-public";
@@ -68,6 +69,10 @@ export function mountSubRouters(app: Express) {
   app.use("/", bulkGenerateJobFastRouter);
   app.use("/", publishedPagesSearchRouter);
   app.use("/", legacyPublicUrlRedirectRouter);
+
+  // ✅ CHANGED: old SpotOn merchant-service URLs that no longer exist return 410 before fallback 404 handling.
+  // 🔒 UNTOUCHED: current published pages still continue into the normal public renderers.
+  app.use("/", spotonLegacyGoneRouter);
 
   // ✅ CHANGED: public pages.* host renderer must run before the /sites/:domain/:slug
   // preview route so rewritten live-domain requests cannot be intercepted first.
