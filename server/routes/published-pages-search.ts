@@ -81,57 +81,92 @@ function safeIdent(name: string) {
   return `"${name}"`;
 }
 
-async function deleteByWebsiteId(client: any, tableName: string, websiteId: string) {
+async function deleteWebsiteBatch(client: any, tableName: string, websiteId: string, batchSize: number) {
   if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, "website_id"))) return 0;
-  const result = await client.query(`DELETE FROM ${safeIdent(tableName)} WHERE website_id::text = $1::text`, [websiteId]);
-  return result.rowCount || 0;
-}
-
-async function deleteByPageId(client: any, tableName: string, columnName: string, websiteId: string) {
-  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, columnName))) return 0;
   const result = await client.query(
-    `DELETE FROM ${safeIdent(tableName)} t
-     USING pages p
-     WHERE t.${safeIdent(columnName)}::text = p.id::text
-       AND p.website_id::text = $1::text`,
-    [websiteId],
+    `DELETE FROM ${safeIdent(tableName)}
+     WHERE ctid IN (
+       SELECT ctid
+       FROM ${safeIdent(tableName)}
+       WHERE website_id::text = $1::text
+       LIMIT $2
+     )`,
+    [websiteId, batchSize],
   );
   return result.rowCount || 0;
 }
 
-// ✅ CHANGED: destructive website-scoped cleanup for Published Pages reset.
+async function deletePageChildBatch(client: any, tableName: string, columnName: string, websiteId: string, batchSize: number) {
+  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, columnName))) return 0;
+  const result = await client.query(
+    `DELETE FROM ${safeIdent(tableName)} t
+     WHERE t.ctid IN (
+       SELECT t.ctid
+       FROM ${safeIdent(tableName)} t
+       JOIN pages p ON t.${safeIdent(columnName)}::text = p.id::text
+       WHERE p.website_id::text = $1::text
+       LIMIT $2
+     )`,
+    [websiteId, batchSize],
+  );
+  return result.rowCount || 0;
+}
+
+// ✅ CHANGED: batch website-scoped cleanup so huge page banks do not time out.
 // 🔒 UNTOUCHED: accounts, websites, services, locations, brand profiles, brand media, blueprints, query clusters, and generator settings are not deleted.
 router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
     const websiteId = req.params.websiteId;
+    const batchSize = intParam(req.query.batchSize, 5000, 500, 10000);
     const website = await client.query(`SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`, [websiteId]);
     if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
 
     await client.query("BEGIN");
 
     const counts: Record<string, number> = {};
-    counts.pageVersions = await deleteByPageId(client, "page_versions", "page_id", websiteId);
-    counts.pageMetrics = await deleteByWebsiteId(client, "page_metrics", websiteId);
-    counts.publicPageEvents = await deleteByWebsiteId(client, "public_page_events", websiteId);
-    counts.internalLinks = await deleteByWebsiteId(client, "internal_links", websiteId);
-    counts.fallbackHitLogs = await deleteByWebsiteId(client, "fallback_hit_logs", websiteId);
-    counts.sitemaps = await deleteByWebsiteId(client, "sitemaps", websiteId);
-    counts.publishedPages = await deleteByWebsiteId(client, "published_pages", websiteId);
+    counts.pageVersions = await deletePageChildBatch(client, "page_versions", "page_id", websiteId, batchSize);
+    counts.pageMetrics = await deleteWebsiteBatch(client, "page_metrics", websiteId, batchSize);
+    counts.publicPageEvents = await deleteWebsiteBatch(client, "public_page_events", websiteId, batchSize);
+    counts.internalLinks = await deleteWebsiteBatch(client, "internal_links", websiteId, batchSize);
+    counts.fallbackHitLogs = await deleteWebsiteBatch(client, "fallback_hit_logs", websiteId, batchSize);
+    counts.sitemaps = await deleteWebsiteBatch(client, "sitemaps", websiteId, batchSize);
+    counts.publishedPages = await deleteWebsiteBatch(client, "published_pages", websiteId, batchSize);
+    counts.pages = await deleteWebsiteBatch(client, "pages", websiteId, batchSize);
 
-    const pagesResult = await client.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
-    counts.pages = pagesResult.rowCount || 0;
-
-    await client.query(
-      `UPDATE websites
-       SET published_pages = 0,
-           updated_at = NOW()
-       WHERE id::text = $1::text`,
-      [websiteId],
+    const deletedThisBatch = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    const remainingPages = await client.query(`SELECT COUNT(*)::int AS count FROM pages WHERE website_id::text = $1::text`, [websiteId]);
+    const remainingSitemaps = await client.query(
+      (await hasTable(client, "sitemaps")) && (await hasColumn(client, "sitemaps", "website_id"))
+        ? `SELECT COUNT(*)::int AS count FROM sitemaps WHERE website_id::text = $1::text`
+        : `SELECT 0::int AS count`,
+      (await hasTable(client, "sitemaps")) && (await hasColumn(client, "sitemaps", "website_id")) ? [websiteId] : [],
     );
 
+    const hasMore = deletedThisBatch > 0 || (remainingPages.rows[0]?.count || 0) > 0 || (remainingSitemaps.rows[0]?.count || 0) > 0;
+    if (!hasMore) {
+      await client.query(
+        `UPDATE websites
+         SET published_pages = 0,
+             updated_at = NOW()
+         WHERE id::text = $1::text`,
+        [websiteId],
+      );
+    }
+
     await client.query("COMMIT");
-    return res.json({ ok: true, websiteId, deleted: counts });
+    return res.json({
+      ok: true,
+      websiteId,
+      batchSize,
+      deleted: counts,
+      deletedThisBatch,
+      remaining: {
+        pages: remainingPages.rows[0]?.count || 0,
+        sitemaps: remainingSitemaps.rows[0]?.count || 0,
+      },
+      hasMore,
+    });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => null);
     return next(err);
