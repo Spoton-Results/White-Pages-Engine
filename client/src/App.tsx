@@ -55,6 +55,7 @@ import BlueprintsPage from "@/pages/blueprints";
 import DraftsPage from "@/pages/drafts";
 import PublishQueuePage from "@/pages/publish-queue";
 import PublishedPagesPage from "@/pages/published";
+import PublishedPagesResetControl from "@/components/PublishedPagesResetControl";
 import JobsPage from "@/pages/jobs";
 import SitemapsPage from "@/pages/sitemaps";
 import UsersPage from "@/pages/users";
@@ -192,6 +193,7 @@ function App() {
         {/* AccountProvider wraps everything so selected account persists across page navigation */}
         <AccountProvider>
           <Toaster />
+          <PublishedPagesResetControl />
           <ErrorBoundary>
             <Router />
           </ErrorBoundary>
