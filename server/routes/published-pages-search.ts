@@ -58,6 +58,88 @@ function rowToPage(row: any) {
   };
 }
 
+async function hasTable(client: any, tableName: string) {
+  const result = await client.query(`SELECT to_regclass($1) AS table_name`, [`public.${tableName}`]);
+  return !!result.rows[0]?.table_name;
+}
+
+async function hasColumn(client: any, tableName: string, columnName: string) {
+  const result = await client.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = $1
+       AND column_name = $2
+     LIMIT 1`,
+    [tableName, columnName],
+  );
+  return result.rowCount > 0;
+}
+
+function safeIdent(name: string) {
+  if (!/^[a-z_][a-z0-9_]*$/.test(name)) throw new Error(`Unsafe identifier: ${name}`);
+  return `"${name}"`;
+}
+
+async function deleteByWebsiteId(client: any, tableName: string, websiteId: string) {
+  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, "website_id"))) return 0;
+  const result = await client.query(`DELETE FROM ${safeIdent(tableName)} WHERE website_id::text = $1::text`, [websiteId]);
+  return result.rowCount || 0;
+}
+
+async function deleteByPageId(client: any, tableName: string, columnName: string, websiteId: string) {
+  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, columnName))) return 0;
+  const result = await client.query(
+    `DELETE FROM ${safeIdent(tableName)} t
+     USING pages p
+     WHERE t.${safeIdent(columnName)}::text = p.id::text
+       AND p.website_id::text = $1::text`,
+    [websiteId],
+  );
+  return result.rowCount || 0;
+}
+
+// ✅ CHANGED: destructive website-scoped cleanup for Published Pages reset.
+// 🔒 UNTOUCHED: accounts, websites, services, locations, brand profiles, brand media, blueprints, query clusters, and generator settings are not deleted.
+router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  const client = await pool.connect();
+  try {
+    const websiteId = req.params.websiteId;
+    const website = await client.query(`SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`, [websiteId]);
+    if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
+
+    await client.query("BEGIN");
+
+    const counts: Record<string, number> = {};
+    counts.pageVersions = await deleteByPageId(client, "page_versions", "page_id", websiteId);
+    counts.pageMetrics = await deleteByWebsiteId(client, "page_metrics", websiteId);
+    counts.publicPageEvents = await deleteByWebsiteId(client, "public_page_events", websiteId);
+    counts.internalLinks = await deleteByWebsiteId(client, "internal_links", websiteId);
+    counts.fallbackHitLogs = await deleteByWebsiteId(client, "fallback_hit_logs", websiteId);
+    counts.sitemaps = await deleteByWebsiteId(client, "sitemaps", websiteId);
+    counts.publishedPages = await deleteByWebsiteId(client, "published_pages", websiteId);
+
+    const pagesResult = await client.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
+    counts.pages = pagesResult.rowCount || 0;
+
+    await client.query(
+      `UPDATE websites
+       SET published_pages = 0,
+           updated_at = NOW()
+       WHERE id::text = $1::text`,
+      [websiteId],
+    );
+
+    await client.query("COMMIT");
+    return res.json({ ok: true, websiteId, deleted: counts });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    return next(err);
+  } finally {
+    client.release();
+  }
+});
+
 router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const websiteId = req.params.websiteId;
