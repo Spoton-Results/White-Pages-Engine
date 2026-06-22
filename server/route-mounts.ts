@@ -60,6 +60,11 @@ export function mountSubRouters(app: Express) {
   app.use("/", agencyDashboardRouter);
   app.use("/", agencyMonthlyReportRouter);
   app.use("/", pageIntelligenceRouter);
+
+  // ✅ CHANGED: run old SpotOn merchant-service URL 410 handler before client-domain fallback resolver.
+  // 🔒 UNTOUCHED: client domain resolver remains mounted immediately after this guard.
+  app.use("/", spotonLegacyGoneRouter);
+
   app.use("/", clientDomainsRouter);
   app.use("/", searchConsoleAdminRouter);
   app.use("/", intentActionsRouter);
@@ -69,10 +74,6 @@ export function mountSubRouters(app: Express) {
   app.use("/", bulkGenerateJobFastRouter);
   app.use("/", publishedPagesSearchRouter);
   app.use("/", legacyPublicUrlRedirectRouter);
-
-  // ✅ CHANGED: old SpotOn merchant-service URLs that no longer exist return 410 before fallback 404 handling.
-  // 🔒 UNTOUCHED: current published pages still continue into the normal public renderers.
-  app.use("/", spotonLegacyGoneRouter);
 
   // ✅ CHANGED: public pages.* host renderer must run before the /sites/:domain/:slug
   // preview route so rewritten live-domain requests cannot be intercepted first.
