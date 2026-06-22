@@ -44,11 +44,8 @@ export default function PublishedPagesResetControl() {
   const runReset = () => {
     if (!selectedWebsite || resetPages.isPending) return;
     const label = currentWebsite?.settings?.parentDomain || currentWebsite?.domain || selectedWebsite;
-    if (!window.confirm(`Reset generated published page data for ${label}?\n\nAccounts, websites, services, locations, brand profiles, images, blueprints, and query clusters stay unchanged.`)) return;
-    if (window.prompt("Type RESET to confirm") !== "RESET") {
-      toast({ title: "Reset cancelled" });
-      return;
-    }
+    const confirmed = window.confirm(`Delete all published pages and sitemap rows for ${label}?\n\nAccounts, websites, services, locations, brand profiles, images, blueprints, and query clusters stay unchanged.`);
+    if (!confirmed) return;
     resetPages.mutate();
   };
 
@@ -73,7 +70,7 @@ export default function PublishedPagesResetControl() {
         disabled={!selectedWebsite || resetPages.isPending}
         data-testid="button-reset-published-pages"
       >
-        {resetPages.isPending ? "Resetting..." : "Delete All Published Pages"}
+        {resetPages.isPending ? "Deleting..." : "Delete All Published Pages"}
       </Button>
     </div>
   );
