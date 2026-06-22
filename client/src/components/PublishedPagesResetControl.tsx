@@ -14,22 +14,31 @@ export default function PublishedPagesResetControl() {
   const qc = useQueryClient();
   const [websiteId, setWebsiteId] = useState("");
 
-  if (!location.startsWith("/published")) return null;
-
-  const websitesUrl = selectedAccountId ? `/api/accounts/${selectedAccountId}/websites` : "/api/websites";
-  const { data: websites = [] } = useQuery({
+  const accountWebsitesUrl = selectedAccountId ? `/api/accounts/${selectedAccountId}/websites` : "/api/websites";
+  const { data: accountWebsites = [] } = useQuery({
     queryKey: ["/api/websites", selectedAccountId, "published-reset-control"],
-    queryFn: () => api.get<any[]>(websitesUrl),
+    queryFn: () => api.get<any[]>(accountWebsitesUrl),
+    enabled: location.startsWith("/published"),
   });
 
-  const selectedWebsite = websiteId || (websites as any[])[0]?.id || "";
+  const { data: allWebsites = [] } = useQuery({
+    queryKey: ["/api/websites", "published-reset-control-fallback"],
+    queryFn: () => api.get<any[]>("/api/websites"),
+    enabled: location.startsWith("/published") && (accountWebsites as any[]).length === 0,
+  });
+
+  const websites = (accountWebsites as any[]).length > 0 ? (accountWebsites as any[]) : (allWebsites as any[]);
+  const selectedWebsite = websiteId || websites[0]?.id || "";
   const currentWebsite = useMemo(
-    () => (websites as any[]).find((website: any) => website.id === selectedWebsite),
+    () => websites.find((website: any) => website.id === selectedWebsite),
     [websites, selectedWebsite],
   );
 
   const resetPages = useMutation({
     mutationFn: () => api.delete<any>(`/api/websites/${selectedWebsite}/pages/purge`),
+    onMutate: () => {
+      toast({ title: "Deleting published pages...", description: "Do not refresh this page until it finishes." });
+    },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["/api/pages/published"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -42,12 +51,18 @@ export default function PublishedPagesResetControl() {
   });
 
   const runReset = () => {
-    if (!selectedWebsite || resetPages.isPending) return;
+    if (!selectedWebsite) {
+      toast({ title: "Select a website first", variant: "destructive" });
+      return;
+    }
+    if (resetPages.isPending) return;
     const label = currentWebsite?.settings?.parentDomain || currentWebsite?.domain || selectedWebsite;
     const confirmed = window.confirm(`Delete all published pages and sitemap rows for ${label}?\n\nAccounts, websites, services, locations, brand profiles, images, blueprints, and query clusters stay unchanged.`);
     if (!confirmed) return;
     resetPages.mutate();
   };
+
+  if (!location.startsWith("/published")) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg border bg-background p-3 shadow-lg sm:flex-row sm:items-center">
@@ -56,7 +71,7 @@ export default function PublishedPagesResetControl() {
           <SelectValue placeholder="Select website" />
         </SelectTrigger>
         <SelectContent>
-          {(websites as any[]).map((website: any) => (
+          {websites.map((website: any) => (
             <SelectItem key={website.id} value={website.id}>
               {website.settings?.parentDomain || website.domain}
             </SelectItem>
@@ -66,8 +81,8 @@ export default function PublishedPagesResetControl() {
       <Button
         variant="destructive"
         size="sm"
-        onClick={runReset}
-        disabled={!selectedWebsite || resetPages.isPending}
+        onClick={(event) => { event.preventDefault(); runReset(); }}
+        disabled={resetPages.isPending}
         data-testid="button-reset-published-pages"
       >
         {resetPages.isPending ? "Deleting..." : "Delete All Published Pages"}
