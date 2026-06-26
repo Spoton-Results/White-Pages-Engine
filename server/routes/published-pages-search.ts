@@ -58,13 +58,13 @@ function rowToPage(row: any) {
   };
 }
 
-async function hasTable(client: any, tableName: string) {
-  const result = await client.query(`SELECT to_regclass($1) AS table_name`, [`public.${tableName}`]);
+async function hasTable(tableName: string) {
+  const result = await pool.query(`SELECT to_regclass($1) AS table_name`, [`public.${tableName}`]);
   return !!result.rows[0]?.table_name;
 }
 
-async function hasColumn(client: any, tableName: string, columnName: string) {
-  const result = await client.query(
+async function hasColumn(tableName: string, columnName: string) {
+  const result = await pool.query(
     `SELECT 1
      FROM information_schema.columns
      WHERE table_schema = 'public'
@@ -73,7 +73,7 @@ async function hasColumn(client: any, tableName: string, columnName: string) {
      LIMIT 1`,
     [tableName, columnName],
   );
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
 
 function safeIdent(name: string) {
@@ -81,95 +81,82 @@ function safeIdent(name: string) {
   return `"${name}"`;
 }
 
-async function deleteWebsiteBatch(client: any, tableName: string, websiteId: string, batchSize: number) {
-  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, "website_id"))) return 0;
-  const result = await client.query(
-    `DELETE FROM ${safeIdent(tableName)}
-     WHERE ctid IN (
-       SELECT ctid
-       FROM ${safeIdent(tableName)}
-       WHERE website_id::text = $1::text
-       LIMIT $2
-     )`,
-    [websiteId, batchSize],
-  );
-  return result.rowCount || 0;
-}
-
-async function deletePageChildBatch(client: any, tableName: string, columnName: string, websiteId: string, batchSize: number) {
-  if (!(await hasTable(client, tableName)) || !(await hasColumn(client, tableName, columnName))) return 0;
-  const result = await client.query(
-    `DELETE FROM ${safeIdent(tableName)} t
-     WHERE t.ctid IN (
-       SELECT t.ctid
-       FROM ${safeIdent(tableName)} t
-       JOIN pages p ON t.${safeIdent(columnName)}::text = p.id::text
-       WHERE p.website_id::text = $1::text
-       LIMIT $2
-     )`,
-    [websiteId, batchSize],
-  );
-  return result.rowCount || 0;
-}
-
-// ✅ CHANGED: batch website-scoped cleanup so huge page banks do not time out.
-// 🔒 UNTOUCHED: accounts, websites, services, locations, brand profiles, brand media, blueprints, query clusters, and generator settings are not deleted.
+// FIX: each batch acquires and releases its own connection so the pool
+//      stays available for login and other requests during a bulk delete.
+// UNTOUCHED: accounts, websites, services, locations, brand profiles, blueprints etc.
 router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
-  const client = await pool.connect();
   try {
     const websiteId = req.params.websiteId;
-    const website = await client.query(`SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`, [websiteId]);
+
+    const website = await pool.query(
+      `SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`,
+      [websiteId]
+    );
     if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
 
     const BATCH = 50000;
     const counts: Record<string, number> = {};
 
-    // Delete page child rows in own short transactions
     async function delChild(table: string, col: string) {
-      if (!(await hasTable(client, table)) || !(await hasColumn(client, table, col))) return;
+      if (!(await hasTable(table)) || !(await hasColumn(table, col))) return;
       let total = 0, rows = 1;
       while (rows > 0) {
-        await client.query("BEGIN");
-        const r = await client.query(
-          `DELETE FROM ${safeIdent(table)} t
-           WHERE t.ctid IN (
-             SELECT t.ctid FROM ${safeIdent(table)} t
-             JOIN pages p ON t.${safeIdent(col)}::text = p.id::text
-             WHERE p.website_id::text = $1::text
-             LIMIT $2
-           )`,
-          [websiteId, BATCH]
-        );
-        await client.query("COMMIT");
-        rows = r.rowCount || 0;
-        total += rows;
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const r = await client.query(
+            `DELETE FROM ${safeIdent(table)} t
+             WHERE t.ctid IN (
+               SELECT t.ctid FROM ${safeIdent(table)} t
+               JOIN pages p ON t.${safeIdent(col)}::text = p.id::text
+               WHERE p.website_id::text = $1::text
+               LIMIT $2
+             )`,
+            [websiteId, BATCH]
+          );
+          await client.query("COMMIT");
+          rows = r.rowCount || 0;
+          total += rows;
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => null);
+          throw e;
+        } finally {
+          client.release();
+        }
       }
       counts[table] = total;
     }
 
-    // Delete website-scoped rows in own short transactions
     async function delDirect(table: string) {
-      if (!(await hasTable(client, table)) || !(await hasColumn(client, table, "website_id"))) return;
+      if (!(await hasTable(table)) || !(await hasColumn(table, "website_id"))) return;
       let total = 0, rows = 1;
       while (rows > 0) {
-        await client.query("BEGIN");
-        const r = await client.query(
-          `DELETE FROM ${safeIdent(table)}
-           WHERE ctid IN (
-             SELECT ctid FROM ${safeIdent(table)}
-             WHERE website_id::text = $1::text
-             LIMIT $2
-           )`,
-          [websiteId, BATCH]
-        );
-        await client.query("COMMIT");
-        rows = r.rowCount || 0;
-        total += rows;
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const r = await client.query(
+            `DELETE FROM ${safeIdent(table)}
+             WHERE ctid IN (
+               SELECT ctid FROM ${safeIdent(table)}
+               WHERE website_id::text = $1::text
+               LIMIT $2
+             )`,
+            [websiteId, BATCH]
+          );
+          await client.query("COMMIT");
+          rows = r.rowCount || 0;
+          total += rows;
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => null);
+          throw e;
+        } finally {
+          client.release();
+        }
       }
       counts[table] = total;
     }
 
-    await delChild("page_versions",      "page_id");
+    await delChild("page_versions", "page_id");
     await delDirect("page_metrics");
     await delDirect("public_page_events");
     await delDirect("internal_links");
@@ -178,18 +165,15 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
     await delDirect("published_pages");
     await delDirect("pages");
 
-    // Reset counter
-    await client.query("BEGIN");
-    await client.query(`UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`, [websiteId]);
-    await client.query("COMMIT");
+    await pool.query(
+      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
+      [websiteId]
+    );
 
     const totalDeleted = Object.values(counts).reduce((s, n) => s + n, 0);
     return res.json({ ok: true, websiteId, deleted: counts, totalDeleted, hasMore: false });
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => null);
     return next(err);
-  } finally {
-    client.release();
   }
 });
 
@@ -257,15 +241,15 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
 
     const facetsResult = await pool.query(
       `SELECT
-         COUNT(*)::int AS all_count,
-         COUNT(*) FILTER (WHERE p.status='published')::int AS published_count,
-         COUNT(*) FILTER (WHERE p.status='review')::int AS review_count,
-         COUNT(*) FILTER (WHERE p.status='draft' OR p.is_draft=true)::int AS draft_count,
-         COUNT(*) FILTER (WHERE p.tier=1)::int AS tier1_count,
-         COUNT(*) FILTER (WHERE p.tier=2)::int AS tier2_count,
-         COUNT(*) FILTER (WHERE p.tier=3)::int AS tier3_count,
-         COUNT(*) FILTER (WHERE p.trust_score IS NULL OR p.evidence_score IS NULL OR p.quality_score IS NULL)::int AS missing_eeat_count,
-         COUNT(*) FILTER (WHERE COALESCE(p.word_count,0) < 700)::int AS thin_count
+        COUNT(*)::int AS all_count,
+        COUNT(*) FILTER (WHERE p.status='published')::int AS published_count,
+        COUNT(*) FILTER (WHERE p.status='review')::int AS review_count,
+        COUNT(*) FILTER (WHERE p.status='draft' OR p.is_draft=true)::int AS draft_count,
+        COUNT(*) FILTER (WHERE p.tier=1)::int AS tier1_count,
+        COUNT(*) FILTER (WHERE p.tier=2)::int AS tier2_count,
+        COUNT(*) FILTER (WHERE p.tier=3)::int AS tier3_count,
+        COUNT(*) FILTER (WHERE p.trust_score IS NULL OR p.evidence_score IS NULL OR p.quality_score IS NULL)::int AS missing_eeat_count,
+        COUNT(*) FILTER (WHERE COALESCE(p.word_count,0) < 700)::int AS thin_count
        FROM pages p WHERE p.website_id::text = $1::text`,
       [websiteId]
     );
