@@ -118,55 +118,54 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
   const client = await pool.connect();
   try {
     const websiteId = req.params.websiteId;
-    const batchSize = intParam(req.query.batchSize, 5000, 500, 10000);
     const website = await client.query(`SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`, [websiteId]);
     if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
 
     await client.query("BEGIN");
 
+    // Delete child records first, then parent pages — no LIMIT so all rows go in one pass.
     const counts: Record<string, number> = {};
-    counts.pageVersions = await deletePageChildBatch(client, "page_versions", "page_id", websiteId, batchSize);
-    counts.pageMetrics = await deleteWebsiteBatch(client, "page_metrics", websiteId, batchSize);
-    counts.publicPageEvents = await deleteWebsiteBatch(client, "public_page_events", websiteId, batchSize);
-    counts.internalLinks = await deleteWebsiteBatch(client, "internal_links", websiteId, batchSize);
-    counts.fallbackHitLogs = await deleteWebsiteBatch(client, "fallback_hit_logs", websiteId, batchSize);
-    counts.sitemaps = await deleteWebsiteBatch(client, "sitemaps", websiteId, batchSize);
-    counts.publishedPages = await deleteWebsiteBatch(client, "published_pages", websiteId, batchSize);
-    counts.pages = await deleteWebsiteBatch(client, "pages", websiteId, batchSize);
 
-    const deletedThisBatch = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    const remainingPages = await client.query(`SELECT COUNT(*)::int AS count FROM pages WHERE website_id::text = $1::text`, [websiteId]);
-    const remainingSitemaps = await client.query(
-      (await hasTable(client, "sitemaps")) && (await hasColumn(client, "sitemaps", "website_id"))
-        ? `SELECT COUNT(*)::int AS count FROM sitemaps WHERE website_id::text = $1::text`
-        : `SELECT 0::int AS count`,
-      (await hasTable(client, "sitemaps")) && (await hasColumn(client, "sitemaps", "website_id")) ? [websiteId] : [],
-    );
-
-    const hasMore = deletedThisBatch > 0 || (remainingPages.rows[0]?.count || 0) > 0 || (remainingSitemaps.rows[0]?.count || 0) > 0;
-    if (!hasMore) {
-      await client.query(
-        `UPDATE websites
-         SET published_pages = 0,
-             updated_at = NOW()
-         WHERE id::text = $1::text`,
-        [websiteId],
-      );
+    async function del(table: string, col: string, joinPages = false) {
+      if (!(await hasTable(client, table))) return;
+      if (joinPages) {
+        if (!(await hasColumn(client, table, col))) return;
+        const r = await client.query(
+          `DELETE FROM ${safeIdent(table)} t
+           USING pages p
+           WHERE t.${safeIdent(col)}::text = p.id::text
+             AND p.website_id::text = $1::text`,
+          [websiteId]
+        );
+        counts[table] = r.rowCount || 0;
+      } else {
+        if (!(await hasColumn(client, table, "website_id"))) return;
+        const r = await client.query(
+          `DELETE FROM ${safeIdent(table)} WHERE website_id::text = $1::text`,
+          [websiteId]
+        );
+        counts[table] = r.rowCount || 0;
+      }
     }
 
+    await del("page_versions",      "page_id",   true);
+    await del("page_metrics",       "website_id");
+    await del("public_page_events", "website_id");
+    await del("internal_links",     "website_id");
+    await del("fallback_hit_logs",  "website_id");
+    await del("sitemaps",           "website_id");
+    await del("published_pages",    "website_id");
+    await del("pages",              "website_id");
+
+    const totalDeleted = Object.values(counts).reduce((s, n) => s + n, 0);
+
+    await client.query(
+      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
+      [websiteId]
+    );
+
     await client.query("COMMIT");
-    return res.json({
-      ok: true,
-      websiteId,
-      batchSize,
-      deleted: counts,
-      deletedThisBatch,
-      remaining: {
-        pages: remainingPages.rows[0]?.count || 0,
-        sitemaps: remainingSitemaps.rows[0]?.count || 0,
-      },
-      hasMore,
-    });
+    return res.json({ ok: true, websiteId, deleted: counts, totalDeleted, hasMore: false });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => null);
     return next(err);
