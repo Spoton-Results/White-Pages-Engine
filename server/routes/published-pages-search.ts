@@ -121,50 +121,69 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
     const website = await client.query(`SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`, [websiteId]);
     if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
 
-    await client.query("BEGIN");
-
-    // Delete child records first, then parent pages — no LIMIT so all rows go in one pass.
+    const BATCH = 50000;
     const counts: Record<string, number> = {};
 
-    async function del(table: string, col: string, joinPages = false) {
-      if (!(await hasTable(client, table))) return;
-      if (joinPages) {
-        if (!(await hasColumn(client, table, col))) return;
+    // Delete page child rows in own short transactions
+    async function delChild(table: string, col: string) {
+      if (!(await hasTable(client, table)) || !(await hasColumn(client, table, col))) return;
+      let total = 0, rows = 1;
+      while (rows > 0) {
+        await client.query("BEGIN");
         const r = await client.query(
           `DELETE FROM ${safeIdent(table)} t
-           USING pages p
-           WHERE t.${safeIdent(col)}::text = p.id::text
-             AND p.website_id::text = $1::text`,
-          [websiteId]
+           WHERE t.ctid IN (
+             SELECT t.ctid FROM ${safeIdent(table)} t
+             JOIN pages p ON t.${safeIdent(col)}::text = p.id::text
+             WHERE p.website_id::text = $1::text
+             LIMIT $2
+           )`,
+          [websiteId, BATCH]
         );
-        counts[table] = r.rowCount || 0;
-      } else {
-        if (!(await hasColumn(client, table, "website_id"))) return;
-        const r = await client.query(
-          `DELETE FROM ${safeIdent(table)} WHERE website_id::text = $1::text`,
-          [websiteId]
-        );
-        counts[table] = r.rowCount || 0;
+        await client.query("COMMIT");
+        rows = r.rowCount || 0;
+        total += rows;
       }
+      counts[table] = total;
     }
 
-    await del("page_versions",      "page_id",   true);
-    await del("page_metrics",       "website_id");
-    await del("public_page_events", "website_id");
-    await del("internal_links",     "website_id");
-    await del("fallback_hit_logs",  "website_id");
-    await del("sitemaps",           "website_id");
-    await del("published_pages",    "website_id");
-    await del("pages",              "website_id");
+    // Delete website-scoped rows in own short transactions
+    async function delDirect(table: string) {
+      if (!(await hasTable(client, table)) || !(await hasColumn(client, table, "website_id"))) return;
+      let total = 0, rows = 1;
+      while (rows > 0) {
+        await client.query("BEGIN");
+        const r = await client.query(
+          `DELETE FROM ${safeIdent(table)}
+           WHERE ctid IN (
+             SELECT ctid FROM ${safeIdent(table)}
+             WHERE website_id::text = $1::text
+             LIMIT $2
+           )`,
+          [websiteId, BATCH]
+        );
+        await client.query("COMMIT");
+        rows = r.rowCount || 0;
+        total += rows;
+      }
+      counts[table] = total;
+    }
+
+    await delChild("page_versions",      "page_id");
+    await delDirect("page_metrics");
+    await delDirect("public_page_events");
+    await delDirect("internal_links");
+    await delDirect("fallback_hit_logs");
+    await delDirect("sitemaps");
+    await delDirect("published_pages");
+    await delDirect("pages");
+
+    // Reset counter
+    await client.query("BEGIN");
+    await client.query(`UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`, [websiteId]);
+    await client.query("COMMIT");
 
     const totalDeleted = Object.values(counts).reduce((s, n) => s + n, 0);
-
-    await client.query(
-      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
-      [websiteId]
-    );
-
-    await client.query("COMMIT");
     return res.json({ ok: true, websiteId, deleted: counts, totalDeleted, hasMore: false });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => null);
