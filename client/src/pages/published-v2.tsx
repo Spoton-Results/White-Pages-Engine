@@ -7,9 +7,19 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, ExternalLink, Filter, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
+import { Copy, ExternalLink, Filter, RefreshCw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 type PageRow = {
@@ -149,6 +159,11 @@ export default function PublishedPagesV2() {
   const [page, setPage] = useState(1);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  // --- Delete All state ---
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<string | null>(null);
+
   const { data: websites = [] } = useQuery({
     queryKey: ["/api/websites"],
     queryFn: () => api.get<any[]>("/api/websites"),
@@ -208,6 +223,50 @@ export default function PublishedPagesV2() {
     toast({ title: "URL copied" });
   };
 
+  // --- Delete All Published Pages handler ---
+  const handleDeleteAll = async () => {
+    if (!selectedWebsite) return;
+    setIsDeleting(true);
+    setDeleteProgress("Deleting pages…");
+    let totalDeleted = 0;
+    let batches = 0;
+    try {
+      let hasMore = true;
+      while (hasMore) {
+        batches++;
+        const res = await fetch(`/api/websites/${selectedWebsite}/pages/purge`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.message || `Request failed (${res.status})`);
+        }
+        const json = await res.json();
+        totalDeleted += json.deletedThisBatch ?? 0;
+        hasMore = json.hasMore ?? false;
+        if (hasMore) {
+          setDeleteProgress(`Deleted ${totalDeleted.toLocaleString()} records so far (batch ${batches})…`);
+        }
+      }
+      setShowDeleteConfirm(false);
+      toast({
+        title: "All published pages deleted",
+        description: `${totalDeleted.toLocaleString()} records removed across ${batches} batch${batches === 1 ? "" : "es"}.`,
+      });
+      refetch();
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteProgress(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-4 sm:space-y-5">
@@ -219,6 +278,16 @@ export default function PublishedPagesV2() {
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={`size-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={!selectedWebsite || isDeleting || isFetching}
+            >
+              <Trash2 className="size-4 mr-2" />
+              {isDeleting ? (deleteProgress ?? "Deleting…") : "Delete All Published Pages"}
             </Button>
           </div>
         </div>
@@ -389,6 +458,31 @@ export default function PublishedPagesV2() {
           </Table>
         </div>
       </div>
+
+      {/* Delete All Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!isDeleting) setShowDeleteConfirm(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all published pages?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>all {Number(facets.all_count || total || 0).toLocaleString()} pages</strong> for the selected website.
+              Accounts, websites, services, locations, brand profiles, and blueprints are not affected.
+              <br /><br />
+              <strong className="text-destructive">This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={(e) => { e.preventDefault(); handleDeleteAll(); }}
+            >
+              {isDeleting ? (deleteProgress ?? "Deleting…") : "Yes, delete all pages"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
