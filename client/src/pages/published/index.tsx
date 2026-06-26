@@ -15,6 +15,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useSearch } from "wouter";
 import { formatDistanceToNow } from "date-fns";
 import { useAccountContext } from "@/hooks/use-account-context";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const SLUG_RE = /^[a-z]+(-[a-z]+)*$/;
 
@@ -26,6 +36,9 @@ export default function PublishedPagesPage() {
   const { selectedAccountId } = useAccountContext();
   // ✅ CHANGED: capture the URL param once so we can use it to seed the override and fetch the website
   const urlWebsiteId = params.get("websiteId") || "";
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<string | null>(null);
   const [overrideWebsite, setOverrideWebsite] = useState(urlWebsiteId);
   const [searchText, setSearchText] = useState("");
   const [showDns, setShowDns] = useState(false);
@@ -406,6 +419,40 @@ export default function PublishedPagesPage() {
     if (url) { navigator.clipboard.writeText(url); toast({ title: "URL copied" }); }
   };
 
+  const handleDeleteAll = async () => {
+    if (!selectedWebsite) return;
+    setIsDeleting(true);
+    setDeleteProgress("Deleting pages…");
+    let totalDeleted = 0;
+    let batches = 0;
+    try {
+      let hasMore = true;
+      while (hasMore) {
+        batches++;
+        const res = await fetch(`/api/websites/${selectedWebsite}/pages/purge`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.message || `Request failed (${res.status})`);
+        }
+        const json = await res.json();
+        totalDeleted += json.deletedThisBatch ?? 0;
+        hasMore = json.hasMore ?? false;
+        if (hasMore) setDeleteProgress(`Deleted ${totalDeleted.toLocaleString()} records so far (batch ${batches})…`);
+      }
+      setShowDeleteConfirm(false);
+      toast({ title: "All published pages deleted", description: `${totalDeleted.toLocaleString()} records removed across ${batches} batch${batches === 1 ? "" : "es"}.` });
+      qc.refetchQueries({ queryKey: ["/api/pages/published", selectedWebsite] });
+    } catch (err) {
+      toast({ title: "Delete failed", description: err?.message || "An unexpected error occurred.", variant: "destructive" });
+    } finally {
+      setIsDeleting(false);
+      setDeleteProgress(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6">
@@ -455,7 +502,16 @@ export default function PublishedPagesPage() {
             )}
             <Button variant="outline" size="sm" onClick={() => qc.refetchQueries({ queryKey: ["/api/pages/published", selectedWebsite] })} disabled={pagesFetching}>
               <RefreshCw className={`size-4 mr-2 ${pagesFetching ? "animate-spin" : ""}`} />Refresh
+            </Button>            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDeleting}
+            >
+              <Trash2 className="size-4 mr-2" />
+              {isDeleting ? (deleteProgress ?? "Deleting…") : "Delete All Published Pages"}
             </Button>
+
           </div>
         </div>
 
@@ -1025,6 +1081,29 @@ export default function PublishedPagesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    
+      <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!isDeleting) setShowDeleteConfirm(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all published pages?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all pages for this website. Accounts, websites, services, locations, brand profiles, and blueprints are not affected.
+              <br /><br />
+              <strong className="text-destructive">This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={(e) => { e.preventDefault(); handleDeleteAll(); }}
+            >
+              {isDeleting ? (deleteProgress ?? "Deleting…") : "Yes, delete all pages"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+</DashboardLayout>
   );
 }
