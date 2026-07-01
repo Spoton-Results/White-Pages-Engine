@@ -1182,3 +1182,13 @@ router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, r
 });
 
 export default router;
+
+// Delete all pages for a website (keeps website, accounts, services, locations, blueprints)
+router.delete("/api/websites/:websiteId/pages", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const deleted = await storage.deleteAllPagesForWebsite(req.params.websiteId);
+    return res.json({ message: "All pages deleted", deleted });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+});

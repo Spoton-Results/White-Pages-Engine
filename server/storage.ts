@@ -1866,3 +1866,93 @@ export async function getZeroImpressionTier1Pages(
   `);
   return (rows as any).rows ?? [];
 }
+
+// ─── Delete All Pages For Website ────────────────────────────────────────────
+
+export async function deleteAllPagesForWebsite(websiteId: string): Promise<number> {
+  const { pool } = await import("./db");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tracked_calls WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM tracked_leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM booked_jobs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM call_tracking_numbers WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM demotion_logs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_metrics WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM internal_links WHERE from_page_id IN (SELECT id FROM pages WHERE website_id = $1) OR to_page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM sitemap_rows WHERE website_id = $1`, [websiteId]).catch(() => {});
+    const result = await client.query(`DELETE FROM pages WHERE website_id = $1`, [websiteId]);
+    const deleted = result.rowCount ?? 0;
+    await client.query(`UPDATE websites SET published_pages = 0 WHERE id = $1`, [websiteId]);
+    await client.query("COMMIT");
+    return deleted;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Delete All Pages For Website ────────────────────────────────────────────
+
+export async function deleteAllPagesForWebsite(websiteId: string): Promise<number> {
+  const { pool } = await import("./db");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tracked_calls WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM tracked_leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM booked_jobs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM call_tracking_numbers WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM demotion_logs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_metrics WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM internal_links WHERE from_page_id IN (SELECT id FROM pages WHERE website_id = $1) OR to_page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM sitemap_rows WHERE website_id = $1`, [websiteId]).catch(() => {});
+    const result = await client.query(`DELETE FROM pages WHERE website_id = $1`, [websiteId]);
+    const deleted = result.rowCount ?? 0;
+    await client.query(`UPDATE websites SET published_pages = 0 WHERE id = $1`, [websiteId]);
+    await client.query("COMMIT");
+    return deleted;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Delete All Pages For Website ────────────────────────────────────────────
+
+export async function deleteAllPagesForWebsite(websiteId: string): Promise<number> {
+  const { pool } = await import("./db");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM tracked_calls WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM tracked_leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM booked_jobs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM call_tracking_numbers WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM demotion_logs WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM leads WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_metrics WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM internal_links WHERE from_page_id IN (SELECT id FROM pages WHERE website_id = $1) OR to_page_id IN (SELECT id FROM pages WHERE website_id = $1)`, [websiteId]);
+    await client.query(`DELETE FROM sitemap_rows WHERE website_id = $1`, [websiteId]).catch(() => {});
+    const result = await client.query(`DELETE FROM pages WHERE website_id = $1`, [websiteId]);
+    const deleted = result.rowCount ?? 0;
+    await client.query(`UPDATE websites SET published_pages = 0 WHERE id = $1`, [websiteId]);
+    await client.query("COMMIT");
+    return deleted;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
