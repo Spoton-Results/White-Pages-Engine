@@ -1185,32 +1185,39 @@ router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, r
 // ✅ CHANGED: restore missing Published Pages purge endpoint
 router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req, res) => {
   const { websiteId } = req.params;
+  const client = await pool.connect();
 
   try {
-    await pool.query("BEGIN");
+    await client.query("BEGIN");
 
-    // ✅ CHANGED: delete only records scoped to this website
-    await pool.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
-    await pool.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
-    await pool.query(
+    // ✅ CHANGED: delete only published page records scoped to this website
+    await client.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
+    const deleted = await client.query(
+      `DELETE FROM pages WHERE website_id::text = $1::text AND status = 'published' RETURNING id`,
+      [websiteId]
+    );
+    await client.query(
       `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
       [websiteId]
     );
 
-    await pool.query("COMMIT");
+    await client.query("COMMIT");
 
     return res.json({
       success: true,
       websiteId,
+      deleted: deleted.rowCount ?? 0,
       message: "Published pages purged",
     });
   } catch (err: any) {
-    await pool.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => {});
     console.error("[published-pages] purge failed:", err);
     return res.status(500).json({
       success: false,
       message: err?.message || "Failed to purge published pages",
     });
+  } finally {
+    client.release();
   }
 });
 
