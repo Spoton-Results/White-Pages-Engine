@@ -1181,6 +1181,40 @@ router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, r
   }
 });
 
+
+// ✅ CHANGED: restore missing Published Pages purge endpoint
+router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req, res) => {
+  const { websiteId } = req.params;
+
+  try {
+    await pool.query("BEGIN");
+
+    // ✅ CHANGED: delete only records scoped to this website
+    await pool.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
+    await pool.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
+    await pool.query(
+      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
+      [websiteId]
+    );
+
+    await pool.query("COMMIT");
+
+    return res.json({
+      success: true,
+      websiteId,
+      message: "Published pages purged",
+    });
+  } catch (err: any) {
+    await pool.query("ROLLBACK").catch(() => {});
+    console.error("[published-pages] purge failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Failed to purge published pages",
+    });
+  }
+});
+
+
 export default router;
 
 // Delete all pages for a website (keeps website, accounts, services, locations, blueprints)
