@@ -1876,7 +1876,7 @@ export async function deleteAllPagesForWebsite(websiteId: string): Promise<numbe
   // Use a dedicated client with no timeout for large deletes
   const { Client } = await import("pg");
   const client = new Client({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
     query_timeout: 0,
     connectionTimeoutMillis: 30000,

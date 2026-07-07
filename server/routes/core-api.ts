@@ -1227,9 +1227,9 @@ export default router;
 // Delete all pages for a website (keeps website, accounts, services, locations, blueprints)
 router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response) => {
   try {
-    const deleted = await storage.deleteAllPagesForWebsite(req.params.websiteId);
-    return res.json({ message: "All pages deleted", deleted: { pages: deleted, sitemaps: 0 } });
-  } catch (err: any) {
-    return res.status(500).json({ message: err.message });
+    // Fire and forget — avoids Railway HTTP timeout
+    storage.deleteAllPagesForWebsite(req.params.websiteId).catch((err: any) => console.error("[purge] failed:", err.message));
+    return res.json({ message: "Delete started in background", deleted: { pages: 0, sitemaps: 0 } });
+
   }
 });
