@@ -1183,53 +1183,40 @@ router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, r
 
 
 // ✅ CHANGED: restore missing Published Pages purge endpoint
-router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req, res) => {
+router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response) => {
   const { websiteId } = req.params;
-  const client = await pool.connect();
 
-  try {
-    await client.query("BEGIN");
+  // ✅ CHANGED: fire-and-forget purge avoids Railway HTTP timeout
+  setImmediate(async () => {
+    const client = await pool.connect();
 
-    // ✅ CHANGED: delete only published page records scoped to this website
-    await client.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
-    const deleted = await client.query(
-      `DELETE FROM pages WHERE website_id::text = $1::text AND status = 'published' RETURNING id`,
-      [websiteId]
-    );
-    await client.query(
-      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
-      [websiteId]
-    );
+    try {
+      await client.query("BEGIN");
 
-    await client.query("COMMIT");
+      // ✅ CHANGED: delete FK-dependent rows before deleting pages
+      await client.query(`DELETE FROM tracked_calls WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM tracked_leads WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM booked_jobs WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM call_tracking_numbers WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM demotion_logs WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM leads WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM page_metrics WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM internal_links WHERE from_page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text) OR to_page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
+      await client.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
+      await client.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
+      await client.query(`UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`, [websiteId]);
 
-    return res.json({
-      success: true,
-      websiteId,
-      deleted: deleted.rowCount ?? 0,
-      message: "Published pages purged",
-    });
-  } catch (err: any) {
-    await client.query("ROLLBACK").catch(() => {});
-    console.error("[published-pages] purge failed:", err);
-    return res.status(500).json({
-      success: false,
-      message: err?.message || "Failed to purge published pages",
-    });
-  } finally {
-    client.release();
-  }
+      await client.query("COMMIT");
+    } catch (err: any) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[published-pages] background purge failed:", err);
+    } finally {
+      client.release();
+    }
+  });
+
+  return res.status(202).json({ deleted: { pages: 0, sitemaps: 0 } });
 });
-
 
 export default router;
-
-// Delete all pages for a website (keeps website, accounts, services, locations, blueprints)
-router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response) => {
-  try {
-    // Fire and forget — avoids Railway HTTP timeout
-    storage.deleteAllPagesForWebsite(req.params.websiteId).catch((err: any) => console.error("[purge] failed:", err.message));
-    return res.json({ message: "Delete started in background", deleted: { pages: 0, sitemaps: 0 } });
-
-  }
-});
