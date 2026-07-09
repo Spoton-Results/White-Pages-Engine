@@ -1182,41 +1182,5 @@ router.post("/api/users", requireAuth, requireSuperAdmin, async (req: Request, r
 });
 
 
-// ✅ CHANGED: restore missing Published Pages purge endpoint
-router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response) => {
-  const { websiteId } = req.params;
-
-  // ✅ CHANGED: fire-and-forget purge avoids Railway HTTP timeout
-  setImmediate(async () => {
-    const client = await pool.connect();
-
-    try {
-      await client.query("BEGIN");
-
-      // ✅ CHANGED: delete FK-dependent rows before deleting pages
-      await client.query(`DELETE FROM tracked_calls WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM tracked_leads WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM booked_jobs WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM call_tracking_numbers WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM demotion_logs WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM leads WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM page_metrics WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM page_versions WHERE page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM internal_links WHERE from_page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text) OR to_page_id IN (SELECT id FROM pages WHERE website_id::text = $1::text)`, [websiteId]);
-      await client.query(`DELETE FROM sitemaps WHERE website_id::text = $1::text`, [websiteId]);
-      await client.query(`DELETE FROM pages WHERE website_id::text = $1::text`, [websiteId]);
-      await client.query(`UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`, [websiteId]);
-
-      await client.query("COMMIT");
-    } catch (err: any) {
-      await client.query("ROLLBACK").catch(() => {});
-      console.error("[published-pages] background purge failed:", err);
-    } finally {
-      client.release();
-    }
-  });
-
-  return res.status(202).json({ deleted: { pages: 0, sitemaps: 0 } });
-});
 
 export default router;
