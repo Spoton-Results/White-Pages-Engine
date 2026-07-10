@@ -84,36 +84,36 @@ function safeIdent(name: string) {
 // FIX: each batch acquires and releases its own connection so the pool
 //      stays available for login and other requests during a bulk delete.
 // UNTOUCHED: accounts, websites, services, locations, brand profiles, blueprints etc.
-router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const websiteId = req.params.websiteId;
+router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: Request, res: Response) => {
+  const websiteId = req.params.websiteId;
 
-    const website = await pool.query(
-      `SELECT id FROM websites WHERE id::text = $1::text LIMIT 1`,
-      [websiteId]
-    );
-    if (!website.rows[0]) return res.status(404).json({ message: "Website not found" });
-
+  // ✅ CHANGED: respond before touching Postgres so Railway/DB pool timeouts do not block the UI
+  setImmediate(async () => {
     const BATCH = 50000;
     const counts: Record<string, number> = {};
 
     async function delChild(table: string, col: string) {
       if (!(await hasTable(table)) || !(await hasColumn(table, col))) return;
       let total = 0, rows = 1;
+
       while (rows > 0) {
         const client = await pool.connect();
+
         try {
           await client.query("BEGIN");
+
           const r = await client.query(
             `DELETE FROM ${safeIdent(table)} t
              WHERE t.ctid IN (
-               SELECT t.ctid FROM ${safeIdent(table)} t
+               SELECT t.ctid
+               FROM ${safeIdent(table)} t
                JOIN pages p ON t.${safeIdent(col)}::text = p.id::text
                WHERE p.website_id::text = $1::text
                LIMIT $2
              )`,
             [websiteId, BATCH]
           );
+
           await client.query("COMMIT");
           rows = r.rowCount || 0;
           total += rows;
@@ -124,25 +124,31 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
           client.release();
         }
       }
+
       counts[table] = total;
     }
 
     async function delDirect(table: string) {
       if (!(await hasTable(table)) || !(await hasColumn(table, "website_id"))) return;
       let total = 0, rows = 1;
+
       while (rows > 0) {
         const client = await pool.connect();
+
         try {
           await client.query("BEGIN");
+
           const r = await client.query(
             `DELETE FROM ${safeIdent(table)}
              WHERE ctid IN (
-               SELECT ctid FROM ${safeIdent(table)}
+               SELECT ctid
+               FROM ${safeIdent(table)}
                WHERE website_id::text = $1::text
                LIMIT $2
              )`,
             [websiteId, BATCH]
           );
+
           await client.query("COMMIT");
           rows = r.rowCount || 0;
           total += rows;
@@ -153,28 +159,44 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
           client.release();
         }
       }
+
       counts[table] = total;
     }
 
-    await delChild("page_versions", "page_id");
-    await delDirect("page_metrics");
-    await delDirect("public_page_events");
-    await delDirect("internal_links");
-    await delDirect("fallback_hit_logs");
-    await delDirect("sitemaps");
-    await delDirect("published_pages");
-    await delDirect("pages");
+    try {
+      await delChild("page_versions", "page_id");
+      await delDirect("page_metrics");
+      await delDirect("public_page_events");
+      await delDirect("internal_links");
+      await delDirect("fallback_hit_logs");
+      await delDirect("sitemaps");
+      await delDirect("published_pages");
+      await delDirect("pages");
 
-    await pool.query(
-      `UPDATE websites SET published_pages = 0, updated_at = NOW() WHERE id::text = $1::text`,
-      [websiteId]
-    );
+      await pool.query(
+        `UPDATE websites
+         SET published_pages = 0,
+             updated_at = NOW()
+         WHERE id::text = $1::text`,
+        [websiteId]
+      );
 
-    const totalDeleted = Object.values(counts).reduce((s, n) => s + n, 0);
-    return res.json({ ok: true, websiteId, deleted: counts, totalDeleted, hasMore: false });
-  } catch (err) {
-    return next(err);
-  }
+      console.log("[published-pages] background purge complete", {
+        websiteId,
+        deleted: counts,
+        totalDeleted: Object.values(counts).reduce((sum, value) => sum + value, 0),
+      });
+    } catch (err) {
+      console.error("[published-pages] background purge failed:", err);
+    }
+  });
+
+  return res.status(202).json({
+    deleted: {
+      pages: 0,
+      sitemaps: 0,
+    },
+  });
 });
 
 router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
