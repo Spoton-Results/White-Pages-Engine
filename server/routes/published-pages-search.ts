@@ -88,7 +88,7 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
   const websiteId = req.params.websiteId;
 
   // ✅ CHANGED: respond before touching Postgres so Railway/DB pool timeouts do not block the UI
-  setImmediate(async () => {
+  setTimeout(async () => {
     const BATCH = 1000;
     const BATCH_DELAY_MS = 100;
     const counts: Record<string, number> = {};
@@ -201,7 +201,7 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
     } catch (err) {
       console.error("[published-pages] background purge failed:", err);
     }
-  });
+  }, 0);
 
   return res.status(202).json({
     deleted: {
