@@ -89,8 +89,12 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
 
   // ✅ CHANGED: respond before touching Postgres so Railway/DB pool timeouts do not block the UI
   setImmediate(async () => {
-    const BATCH = 50000;
+    const BATCH = 1000;
+    const BATCH_DELAY_MS = 100;
     const counts: Record<string, number> = {};
+
+    const pauseBetweenBatches = () =>
+      new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
 
     async function delChild(table: string, col: string) {
       if (!(await hasTable(table)) || !(await hasColumn(table, col))) return;
@@ -117,6 +121,10 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
           await client.query("COMMIT");
           rows = r.rowCount || 0;
           total += rows;
+
+          if (rows > 0) {
+            await pauseBetweenBatches();
+          }
         } catch (e) {
           await client.query("ROLLBACK").catch(() => null);
           throw e;
@@ -152,6 +160,10 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
           await client.query("COMMIT");
           rows = r.rowCount || 0;
           total += rows;
+
+          if (rows > 0) {
+            await pauseBetweenBatches();
+          }
         } catch (e) {
           await client.query("ROLLBACK").catch(() => null);
           throw e;
