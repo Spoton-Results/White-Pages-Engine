@@ -237,6 +237,76 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
   });
 });
 
+// ✅ CHANGED: apply the same pruned status used by the row-level Prune action,
+// while preserving page rows and page versions.
+// 🔒 UNTOUCHED: the existing destructive purge route above remains unchanged.
+router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, async (req: Request, res: Response) => {
+  const websiteId = req.params.websiteId;
+
+  setTimeout(async () => {
+    const BATCH = 1000;
+    const BATCH_DELAY_MS = 100;
+    let totalPruned = 0;
+    let rows = 1;
+
+    console.log("[published-pages] background prune started", { websiteId });
+
+    try {
+      while (rows > 0) {
+        const client = await pool.connect();
+
+        try {
+          await client.query("BEGIN");
+          const result = await client.query(
+            `UPDATE pages
+             SET status = 'pruned',
+                 prune_reason = 'Manually pruned from published view',
+                 updated_at = NOW()
+             WHERE ctid IN (
+               SELECT ctid
+               FROM pages
+               WHERE website_id::text = $1::text
+                 AND status = 'published'
+               LIMIT $2
+             )`,
+            [websiteId, BATCH],
+          );
+          await client.query("COMMIT");
+
+          rows = result.rowCount || 0;
+          totalPruned += rows;
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => null);
+          throw error;
+        } finally {
+          client.release();
+        }
+
+        if (rows > 0) {
+          await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+        }
+      }
+
+      await pool.query(
+        `UPDATE websites
+         SET published_pages = 0,
+             updated_at = NOW()
+         WHERE id::text = $1::text`,
+        [websiteId],
+      );
+
+      console.log("[published-pages] background prune complete", {
+        websiteId,
+        totalPruned,
+      });
+    } catch (error) {
+      console.error("[published-pages] background prune failed:", error);
+    }
+  }, 0);
+
+  return res.status(202).json({ started: true });
+});
+
 router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const websiteId = req.params.websiteId;
