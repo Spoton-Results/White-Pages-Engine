@@ -33,30 +33,31 @@ export default function PublishedPagesResetControl() {
     [websites, selectedWebsite],
   );
 
-  const resetPages = useMutation({
-    mutationFn: () => api.delete<any>(`/api/websites/${selectedWebsite}/pages/purge`),
+  const prunePages = useMutation({
+    // ✅ CHANGED: use website-scoped bulk prune instead of destructive hard purge
+    mutationFn: () => api.post<any>(`/api/websites/${selectedWebsite}/pages/prune-all-published`, {}),
     onMutate: () => {
-      toast({ title: "Starting published page deletion...", description: "The request is being sent to the background purge process." });
+      toast({ title: "Starting published page prune...", description: "The pages will be marked as pruned in the background." });
     },
     onSuccess: () => {
       toast({
-        title: "Published page deletion started",
-        description: "The pages are being removed in the background. Check Railway logs for progress before refreshing.",
+        title: "Published page prune started",
+        description: "Published pages are being marked as pruned in the background. Check Railway logs for progress before refreshing.",
       });
     },
-    onError: (error: any) => toast({ title: "Reset failed", description: error.message, variant: "destructive" }),
+    onError: (error: any) => toast({ title: "Prune failed", description: error.message, variant: "destructive" }),
   });
 
-  const runReset = () => {
+  const runPrune = () => {
     if (!selectedWebsite) {
       toast({ title: "Select a website first", variant: "destructive" });
       return;
     }
-    if (resetPages.isPending) return;
+    if (prunePages.isPending) return;
     const label = currentWebsite?.settings?.parentDomain || currentWebsite?.domain || selectedWebsite;
-    const confirmed = window.confirm(`Delete all published pages and sitemap rows for ${label}?\n\nAccounts, websites, services, locations, brand profiles, images, blueprints, and query clusters stay unchanged.`);
+    const confirmed = window.confirm(`Prune all published pages for ${label}?\n\nThis uses the same pruned status as the row-level Prune action. Page records and versions stay in the database. Accounts, websites, services, locations, brand profiles, images, blueprints, and query clusters stay unchanged.`);
     if (!confirmed) return;
-    resetPages.mutate();
+    prunePages.mutate();
   };
 
   if (!location.startsWith("/published")) return null;
@@ -78,11 +79,11 @@ export default function PublishedPagesResetControl() {
       <Button
         variant="destructive"
         size="sm"
-        onClick={(event) => { event.preventDefault(); runReset(); }}
-        disabled={resetPages.isPending}
-        data-testid="button-reset-published-pages"
+        onClick={(event) => { event.preventDefault(); runPrune(); }}
+        disabled={prunePages.isPending}
+        data-testid="button-prune-published-pages"
       >
-        {resetPages.isPending ? "Deleting..." : "Delete All Published Pages"}
+        {prunePages.isPending ? "Starting..." : "Prune All Published Pages"}
       </Button>
     </div>
   );
