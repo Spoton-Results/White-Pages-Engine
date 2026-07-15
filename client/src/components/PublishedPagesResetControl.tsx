@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -11,7 +11,6 @@ export default function PublishedPagesResetControl() {
   const [location] = useLocation();
   const { selectedAccountId } = useAccountContext();
   const { toast } = useToast();
-  const qc = useQueryClient();
   const [websiteId, setWebsiteId] = useState("");
 
   const accountWebsitesUrl = selectedAccountId ? `/api/accounts/${selectedAccountId}/websites` : "/api/websites";
@@ -37,14 +36,12 @@ export default function PublishedPagesResetControl() {
   const resetPages = useMutation({
     mutationFn: () => api.delete<any>(`/api/websites/${selectedWebsite}/pages/purge`),
     onMutate: () => {
-      toast({ title: "Deleting published pages...", description: "Do not refresh this page until it finishes." });
+      toast({ title: "Starting published page deletion...", description: "The request is being sent to the background purge process." });
     },
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ["/api/pages/published"] });
-      qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+    onSuccess: () => {
       toast({
-        title: "Published pages reset complete",
-        description: `${result?.deleted?.pages ?? 0} pages and ${result?.deleted?.sitemaps ?? 0} sitemap rows reset for this website.`,
+        title: "Published page deletion started",
+        description: "The pages are being removed in the background. Check Railway logs for progress before refreshing.",
       });
     },
     onError: (error: any) => toast({ title: "Reset failed", description: error.message, variant: "destructive" }),
