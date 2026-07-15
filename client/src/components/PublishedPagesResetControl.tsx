@@ -1,40 +1,41 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { useAccountContext } from "@/hooks/use-account-context";
 
 export default function PublishedPagesResetControl() {
   const [location] = useLocation();
-  const { selectedAccountId } = useAccountContext();
   const { toast } = useToast();
-  const [websiteId, setWebsiteId] = useState("");
+  const queryClient = useQueryClient();
+  const [selectedWebsite, setSelectedWebsite] = useState("");
 
-  const accountWebsitesUrl = selectedAccountId ? `/api/accounts/${selectedAccountId}/websites` : "/api/websites";
-  const { data: accountWebsites = [] } = useQuery({
-    queryKey: ["/api/websites", selectedAccountId, "published-reset-control"],
-    queryFn: () => api.get<any[]>(accountWebsitesUrl),
-    enabled: location.startsWith("/published"),
+  useEffect(() => {
+    // ✅ CHANGED: use the website ID from the active Published Pages table query.
+    // This keeps bulk prune scoped to the same website currently shown on screen.
+    const syncSelectedWebsite = () => {
+      const activePublishedQueries = queryClient.getQueryCache().findAll({
+        queryKey: ["/api/pages/published"],
+        type: "active",
+      });
+      const activeQuery = activePublishedQueries[activePublishedQueries.length - 1];
+      const websiteId = String(activeQuery?.queryKey?.[1] || "");
+      setSelectedWebsite(websiteId);
+    };
+
+    syncSelectedWebsite();
+    return queryClient.getQueryCache().subscribe(syncSelectedWebsite);
+  }, [queryClient]);
+
+  const { data: currentWebsite } = useQuery({
+    queryKey: ["/api/websites", selectedWebsite, "published-prune-control"],
+    queryFn: () => api.get<any>(`/api/websites/${selectedWebsite}`),
+    enabled: location.startsWith("/published") && !!selectedWebsite,
   });
-
-  const { data: allWebsites = [] } = useQuery({
-    queryKey: ["/api/websites", "published-reset-control-fallback"],
-    queryFn: () => api.get<any[]>("/api/websites"),
-    enabled: location.startsWith("/published") && (accountWebsites as any[]).length === 0,
-  });
-
-  const websites = (accountWebsites as any[]).length > 0 ? (accountWebsites as any[]) : (allWebsites as any[]);
-  const selectedWebsite = websiteId || websites[0]?.id || "";
-  const currentWebsite = useMemo(
-    () => websites.find((website: any) => website.id === selectedWebsite),
-    [websites, selectedWebsite],
-  );
 
   const prunePages = useMutation({
-    // ✅ CHANGED: use website-scoped bulk prune instead of destructive hard purge
+    // 🔒 UNTOUCHED: existing website-scoped bulk prune route.
     mutationFn: () => api.post<any>(`/api/websites/${selectedWebsite}/pages/prune-all-published`, {}),
     onMutate: () => {
       toast({ title: "Starting published page prune...", description: "The pages will be marked as pruned in the background." });
@@ -50,7 +51,7 @@ export default function PublishedPagesResetControl() {
 
   const runPrune = () => {
     if (!selectedWebsite) {
-      toast({ title: "Select a website first", variant: "destructive" });
+      toast({ title: "Wait for the Published Pages website to load", variant: "destructive" });
       return;
     }
     if (prunePages.isPending) return;
@@ -63,24 +64,15 @@ export default function PublishedPagesResetControl() {
   if (!location.startsWith("/published")) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg border bg-background p-3 shadow-lg sm:flex-row sm:items-center">
-      <Select value={selectedWebsite} onValueChange={setWebsiteId}>
-        <SelectTrigger className="h-9 w-64 max-w-full" data-testid="select-reset-published-website">
-          <SelectValue placeholder="Select website" />
-        </SelectTrigger>
-        <SelectContent>
-          {websites.map((website: any) => (
-            <SelectItem key={website.id} value={website.id}>
-              {website.settings?.parentDomain || website.domain}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border bg-background p-3 shadow-lg">
+      <span className="max-w-64 truncate text-sm text-muted-foreground">
+        {currentWebsite?.settings?.parentDomain || currentWebsite?.domain || "Loading selected website..."}
+      </span>
       <Button
         variant="destructive"
         size="sm"
         onClick={(event) => { event.preventDefault(); runPrune(); }}
-        disabled={prunePages.isPending}
+        disabled={prunePages.isPending || !selectedWebsite}
         data-testid="button-prune-published-pages"
       >
         {prunePages.isPending ? "Starting..." : "Prune All Published Pages"}
