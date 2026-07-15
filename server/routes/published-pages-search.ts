@@ -93,14 +93,27 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
     const BATCH_DELAY_MS = 100;
     const counts: Record<string, number> = {};
 
+    console.log("[published-pages] background purge started", { websiteId });
+
     const pauseBetweenBatches = () =>
       new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
 
     async function delChild(table: string, col: string) {
-      if (!(await hasTable(table)) || !(await hasColumn(table, col))) return;
+      console.log("[published-pages] purge table started", { websiteId, table });
+
+      if (!(await hasTable(table)) || !(await hasColumn(table, col))) {
+        console.log("[published-pages] purge table skipped", { websiteId, table });
+        return;
+      }
+
       let total = 0, rows = 1;
+      let batchNumber = 0;
 
       while (rows > 0) {
+        batchNumber += 1;
+        if (batchNumber === 1) {
+          console.log("[published-pages] waiting for database connection", { websiteId, table });
+        }
         const client = await pool.connect();
 
         try {
@@ -134,13 +147,25 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
       }
 
       counts[table] = total;
+      console.log("[published-pages] purge table complete", { websiteId, table, deleted: total });
     }
 
     async function delDirect(table: string) {
-      if (!(await hasTable(table)) || !(await hasColumn(table, "website_id"))) return;
+      console.log("[published-pages] purge table started", { websiteId, table });
+
+      if (!(await hasTable(table)) || !(await hasColumn(table, "website_id"))) {
+        console.log("[published-pages] purge table skipped", { websiteId, table });
+        return;
+      }
+
       let total = 0, rows = 1;
+      let batchNumber = 0;
 
       while (rows > 0) {
+        batchNumber += 1;
+        if (batchNumber === 1) {
+          console.log("[published-pages] waiting for database connection", { websiteId, table });
+        }
         const client = await pool.connect();
 
         try {
@@ -173,6 +198,7 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
       }
 
       counts[table] = total;
+      console.log("[published-pages] purge table complete", { websiteId, table, deleted: total });
     }
 
     try {
