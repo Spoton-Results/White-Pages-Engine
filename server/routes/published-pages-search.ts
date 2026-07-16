@@ -258,17 +258,20 @@ router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, a
         try {
           await client.query("BEGIN");
           const result = await client.query(
-            `UPDATE pages
+            `WITH batch AS (
+               SELECT id
+               FROM pages
+               WHERE website_id = $1
+                 AND status = 'published'
+               ORDER BY id
+               LIMIT $2
+             )
+             UPDATE pages p
              SET status = 'pruned',
                  prune_reason = 'Manually pruned from published view',
                  updated_at = NOW()
-             WHERE ctid IN (
-               SELECT ctid
-               FROM pages
-               WHERE website_id::text = $1::text
-                 AND status = 'published'
-               LIMIT $2
-             )`,
+             FROM batch
+             WHERE p.id = batch.id`,
             [websiteId, BATCH],
           );
           await client.query("COMMIT");
