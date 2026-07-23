@@ -330,7 +330,8 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
     const page = intParam(req.query.page, 1, 1, 100000);
     const offset = (page - 1) * limit;
 
-    const where: string[] = ["p.website_id::text = $1::text"];
+    // ✅ CHANGED: keep UUID comparisons indexable.
+    const where: string[] = ["p.website_id = $1"];
     const values: any[] = [websiteId];
     let i = 2;
 
@@ -357,13 +358,21 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
     if (indexed === "not_submitted") where.push("p.gsc_submitted_at IS NULL");
 
     const whereSql = where.join(" AND ");
+
+    // ✅ CHANGED: native UUID joins preserve index use.
     const fromSql = `FROM pages p
-      LEFT JOIN services s ON p.service_id::text = s.id::text
-      LEFT JOIN locations l ON p.location_id::text = l.id::text
-      LEFT JOIN blueprints b ON p.blueprint_id::text = b.id::text
+      LEFT JOIN services s ON p.service_id = s.id
+      LEFT JOIN locations l ON p.location_id = l.id
+      LEFT JOIN blueprints b ON p.blueprint_id = b.id
       WHERE ${whereSql}`;
 
-    const totalResult = await pool.query(`SELECT COUNT(*)::int AS total ${fromSql}`, values);
+    // ✅ CHANGED: the count query only joins tables referenced by active filters.
+    const countFromSql = `FROM pages p
+      ${service ? "LEFT JOIN services s ON p.service_id = s.id" : ""}
+      ${location ? "LEFT JOIN locations l ON p.location_id = l.id" : ""}
+      WHERE ${whereSql}`;
+
+    const totalResult = await pool.query(`SELECT COUNT(*)::int AS total ${countFromSql}`, values);
     const rowsResult = await pool.query(
       `SELECT p.*, s.name AS service_name, l.name AS location_name, l.state_code AS location_state, b.name AS blueprint_name
        ${fromSql}
@@ -383,7 +392,7 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
         COUNT(*) FILTER (WHERE p.tier=3)::int AS tier3_count,
         COUNT(*) FILTER (WHERE p.trust_score IS NULL OR p.evidence_score IS NULL OR p.quality_score IS NULL)::int AS missing_eeat_count,
         COUNT(*) FILTER (WHERE COALESCE(p.word_count,0) < 700)::int AS thin_count
-       FROM pages p WHERE p.website_id::text = $1::text`,
+       FROM pages p WHERE p.website_id = $1`,
       [websiteId]
     );
 
