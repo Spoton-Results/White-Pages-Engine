@@ -381,28 +381,29 @@ router.get("/api/websites/:websiteId/pages/search", requireAuth, async (req: Req
       [...values, limit, offset]
     );
 
-    const facetsResult = await pool.query(
-      `SELECT
-        COUNT(*)::int AS all_count,
-        COUNT(*) FILTER (WHERE p.status='published')::int AS published_count,
-        COUNT(*) FILTER (WHERE p.status='review')::int AS review_count,
-        COUNT(*) FILTER (WHERE p.status='draft' OR p.is_draft=true)::int AS draft_count,
-        COUNT(*) FILTER (WHERE p.tier=1)::int AS tier1_count,
-        COUNT(*) FILTER (WHERE p.tier=2)::int AS tier2_count,
-        COUNT(*) FILTER (WHERE p.tier=3)::int AS tier3_count,
-        COUNT(*) FILTER (WHERE p.trust_score IS NULL OR p.evidence_score IS NULL OR p.quality_score IS NULL)::int AS missing_eeat_count,
-        COUNT(*) FILTER (WHERE COALESCE(p.word_count,0) < 700)::int AS thin_count
-       FROM pages p WHERE p.website_id = $1`,
-      [websiteId]
-    );
+    // ✅ CHANGED: do not run a second multimillion-row aggregate on every table load.
+    // Keep the existing response shape so the frontend and filters remain compatible.
+    const total = totalResult.rows[0]?.total || 0;
+    const publishedCount = status === "published" ? total : 0;
+    const facets = {
+      all_count: total,
+      published_count: publishedCount,
+      review_count: status === "review" ? total : 0,
+      draft_count: status === "drafts" ? total : 0,
+      tier1_count: tier === "1" ? total : 0,
+      tier2_count: tier === "2" ? total : 0,
+      tier3_count: tier === "3" ? total : 0,
+      missing_eeat_count: eeat === "missing" ? total : 0,
+      thin_count: wordsMax !== "" && Number(wordsMax) < 700 ? total : 0,
+    };
 
     return res.json({
       pages: rowsResult.rows.map(rowToPage),
-      total: totalResult.rows[0]?.total || 0,
+      total,
       page,
       limit,
-      totalPages: Math.ceil((totalResult.rows[0]?.total || 0) / limit),
-      facets: facetsResult.rows[0] || {},
+      totalPages: Math.ceil(total / limit),
+      facets,
     });
   } catch (err) {
     return next(err);
