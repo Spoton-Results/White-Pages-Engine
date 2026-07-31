@@ -4,6 +4,10 @@ import { pool } from "../db";
 
 const router = Router();
 
+// ✅ CHANGED: prevent more than one bulk prune loop per website in this process.
+// 🔒 UNTOUCHED: row-level prune and the destructive purge route use their existing behavior.
+const runningPublishedPagePrunes = new Set<string>();
+
 const SORTS: Record<string, string> = {
   newest: "p.published_at DESC NULLS LAST, p.updated_at DESC NULLS LAST",
   updated: "p.updated_at DESC NULLS LAST",
@@ -243,9 +247,22 @@ router.delete("/api/websites/:websiteId/pages/purge", requireAuth, async (req: R
 router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, async (req: Request, res: Response) => {
   const websiteId = req.params.websiteId;
 
+  // ✅ CHANGED: a second click cannot launch another loop for the same website.
+  if (runningPublishedPagePrunes.has(websiteId)) {
+    return res.status(409).json({
+      started: false,
+      alreadyRunning: true,
+      message: "A published page prune is already running for this website.",
+    });
+  }
+
+  runningPublishedPagePrunes.add(websiteId);
+
   setTimeout(async () => {
     const BATCH = 1000;
     const BATCH_DELAY_MS = 100;
+    const PROGRESS_INTERVAL = 10000;
+    let nextProgressLog = PROGRESS_INTERVAL;
     let totalPruned = 0;
     let rows = 1;
 
@@ -265,6 +282,7 @@ router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, a
                  AND status = 'published'
                ORDER BY id
                LIMIT $2
+               FOR UPDATE SKIP LOCKED
              )
              UPDATE pages p
              SET status = 'pruned',
@@ -278,6 +296,16 @@ router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, a
 
           rows = result.rowCount || 0;
           totalPruned += rows;
+
+          if (totalPruned >= nextProgressLog) {
+            console.log("[published-pages] background prune progress", {
+              websiteId,
+              totalPruned,
+            });
+            while (nextProgressLog <= totalPruned) {
+              nextProgressLog += PROGRESS_INTERVAL;
+            }
+          }
         } catch (error) {
           await client.query("ROLLBACK").catch(() => null);
           throw error;
@@ -304,6 +332,9 @@ router.post("/api/websites/:websiteId/pages/prune-all-published", requireAuth, a
       });
     } catch (error) {
       console.error("[published-pages] background prune failed:", error);
+    } finally {
+      // ✅ CHANGED: failures and successful completion both release the website guard.
+      runningPublishedPagePrunes.delete(websiteId);
     }
   }, 0);
 
