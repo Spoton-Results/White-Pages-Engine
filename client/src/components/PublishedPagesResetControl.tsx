@@ -28,6 +28,27 @@ export default function PublishedPagesResetControl() {
     return queryClient.getQueryCache().subscribe(syncSelectedWebsite);
   }, [queryClient]);
 
+  useEffect(() => {
+    if (!location.startsWith("/published")) return;
+
+    // ✅ CHANGED: remove the obsolete destructive purge button from the Published Pages UI.
+    // 🔒 UNTOUCHED: the backend purge route remains available but is no longer exposed here.
+    const hideObsoletePurgeButton = () => {
+      document.querySelectorAll("button").forEach((button) => {
+        if (button.textContent?.trim().includes("Delete All Published Pages")) {
+          button.style.display = "none";
+          button.setAttribute("aria-hidden", "true");
+          button.setAttribute("tabindex", "-1");
+        }
+      });
+    };
+
+    hideObsoletePurgeButton();
+    const observer = new MutationObserver(hideObsoletePurgeButton);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [location]);
+
   const { data: currentWebsite } = useQuery({
     queryKey: ["/api/websites", selectedWebsite, "published-prune-control"],
     queryFn: () => api.get<any>(`/api/websites/${selectedWebsite}`),
