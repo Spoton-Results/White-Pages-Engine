@@ -23,7 +23,8 @@ router.get("/api/dashboard/stats", requireSuperAdmin, async (req, res) => {
       pool.query(`SELECT COUNT(*)::int AS count FROM brand_profiles`),
       pool.query(`SELECT COUNT(*)::int AS count FROM industries`),
       pool.query(`SELECT COUNT(*)::int AS count FROM pages WHERE status = 'published'`),
-      pool.query(`SELECT COUNT(*)::int AS count FROM pages WHERE status = 'failed_qa'`),
+      // ✅ CHANGED: draftPages must query the valid page_status enum value used by Nexus.
+      pool.query(`SELECT COUNT(*)::int AS count FROM pages WHERE status = 'draft'`),
       pool.query(`SELECT COUNT(*)::int AS count FROM generation_jobs WHERE status = 'running'`),
     ]);
 
