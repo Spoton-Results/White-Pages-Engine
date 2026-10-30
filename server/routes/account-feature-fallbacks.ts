@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../auth";
 import { pool } from "../db";
-import { insertServiceSchema } from "@shared/schema";
-import { createService } from "../storage";
+import { insertServiceSchema, insertQueryClusterSchema } from "@shared/schema";
+import { createService, createQueryCluster } from "../storage";
 
 const router = Router();
 
@@ -144,6 +144,26 @@ router.get("/api/websites/:websiteId/services", requireAuth, async (req: Request
   if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapService));
   const all = await pool.query(`SELECT * FROM services ORDER BY name ASC`);
   return res.json(all.rows.map(mapService));
+});
+
+router.post("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertQueryClusterSchema.safeParse({
+    ...req.body,
+    accountId: req.params.accountId,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const cluster = await createQueryCluster(parsed.data);
+    return res.status(201).json(cluster);
+  } catch (error: any) {
+    return res.status(500).json({
+      message: error?.message || "Failed to create query cluster",
+    });
+  }
 });
 
 router.get("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
