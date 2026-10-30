@@ -683,6 +683,26 @@ export default function BlueprintsPage() {
               <div className="text-xs text-muted-foreground">
                 {bulkBpJob ? `${bulkBpJob.done} / ${bulkBpJob.total} processed — ${bulkBpJob.created ?? 0} created` : "Starting…"}
               </div>
+              {bulkBpJob && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  {bulkBpJob.failed ?? 0} failed
+                </div>
+              )}
+              {Array.isArray(bulkBpJob?.errors) && bulkBpJob.errors.length > 0 && (
+                <div role="alert" className="mt-3 max-h-48 overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
+                  <div className="font-medium text-destructive mb-2">Failure details</div>
+                  <ul className="space-y-3">
+                    {bulkBpJob.errors.map((error: any, index: number) => (
+                      <li key={index} className="break-words whitespace-pre-wrap">
+                        <div className="font-medium">
+                          {error.serviceName || "General"} — {PAGE_TYPES.find(pt => pt.value === error.pageType)?.label || error.pageType || "Job"}
+                        </div>
+                        <div>{error.message || "No error message returned"}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -729,3 +749,4 @@ export default function BlueprintsPage() {
     </DashboardLayout>
   );
 }
+
