@@ -70,5 +70,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 #
 # Railway injects DATABASE_URL into that command's environment, so it works
 # correctly there. The container itself just starts the app.
-ENTRYPOINT ["/sbin/dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/index.cjs"]
