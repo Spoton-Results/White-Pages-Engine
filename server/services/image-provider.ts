@@ -7,7 +7,7 @@ export interface GeneratedImage {
   provider: "openai";
 }
 
-const OPENAI_IMAGE_MODEL = "gpt-image-1";
+const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 
 export async function generateImage(prompt: string): Promise<GeneratedImage> {
   const apiKey = process.env.OPENAI_API_KEY;
