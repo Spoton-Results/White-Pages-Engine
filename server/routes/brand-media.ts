@@ -3,8 +3,29 @@ import { requireAuth } from "../auth";
 import * as storage from "../storage";
 import { generateImage } from "../services/image-provider";
 import { saveBrandMediaImage } from "../services/r2";
+import { insertBrandProfileSchema } from "@shared/schema";
 
 const router = Router();
+
+router.post("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertBrandProfileSchema.safeParse({
+    ...req.body,
+    accountId: req.params.accountId,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const brand = await storage.createBrandProfile(parsed.data);
+    return res.status(201).json(brand);
+  } catch (error: any) {
+    return res.status(500).json({
+      message: error?.message || "Failed to create brand profile",
+    });
+  }
+});
 
 function slugPart(value: string): string {
   return String(value || "")
