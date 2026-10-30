@@ -9,5 +9,5 @@
 -- CONCURRENTLY means this runs without locking the table on live deployments.
 -- Remove CONCURRENTLY if you are running this inside a transaction block.
 
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS cvb_website_service_section_unique
+CREATE UNIQUE INDEX IF NOT EXISTS cvb_website_service_section_unique
   ON content_variation_banks (website_id, service, section_name);
