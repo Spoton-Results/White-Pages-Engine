@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../auth";
 import { pool } from "../db";
+import { insertServiceSchema } from "@shared/schema";
+import { createService } from "../storage";
 
 const router = Router();
 
@@ -105,6 +107,26 @@ router.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: R
   if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapBrandProfile));
   const all = await pool.query(`SELECT * FROM brand_profiles ORDER BY created_at DESC`);
   return res.json(all.rows.map(mapBrandProfile));
+});
+
+router.post("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
+  const parsed = insertServiceSchema.safeParse({
+    ...req.body,
+    accountId: req.params.accountId,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const service = await createService(parsed.data);
+    return res.status(201).json(service);
+  } catch (error: any) {
+    return res.status(500).json({
+      message: error?.message || "Failed to create service",
+    });
+  }
 });
 
 router.get("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
