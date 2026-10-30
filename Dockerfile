@@ -22,6 +22,7 @@ COPY script ./script
 # ✅ UNCHANGED: scripts/ (plural) copied for migrate.ts
 COPY scripts ./scripts
 COPY drizzle.config.ts ./
+COPY migrations ./migrations
 
 # ✅ UNCHANGED: pre-create migrations dir so COPY never fails when DATABASE_URL
 # is absent at build time and db:migrate exits without creating the directory.
