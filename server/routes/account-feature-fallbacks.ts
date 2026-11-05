@@ -264,7 +264,7 @@ router.get("/api/websites/:websiteId/hub-pages", requireAuth, async (req: Reques
 router.get("/api/accounts/:accountId/hub-pages", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM hub_pages WHERE account_id::text = $1::text ORDER BY hub_type ASC, name ASC`, [req.params.accountId]);
   if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapHubPage));
-  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY name ASC`);
+  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY hub_type ASC, name ASC`);
   return res.json(all.rows.map(mapHubPage));
 });
 
