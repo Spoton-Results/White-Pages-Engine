@@ -3,8 +3,46 @@ import { requireAuth } from "../auth";
 import { pool } from "../db";
 import { insertServiceSchema, insertQueryClusterSchema } from "@shared/schema";
 import { createService, createQueryCluster } from "../storage";
+import { z } from "zod";
+import { suggestServices } from "../services/claude";
 
 const router = Router();
+
+// CHANGED: restore the existing Services-page AI suggestion endpoint.
+router.post("/api/ai/suggest-services", requireAuth, async (req: Request, res: Response) => {
+  const parsed = z.object({
+    businessName: z.string().trim().min(1, "Business name is required"),
+    websiteUrl: z.string().trim().optional(),
+    industry: z.string().trim().min(1, "Industry is required"),
+    existingServices: z.array(z.string()).optional(),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const suggested = await suggestServices(parsed.data);
+    const validated = z.array(z.object({
+      name: z.string().trim().min(1),
+      slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      description: z.string(),
+      keywords: z.array(z.string()),
+    })).safeParse(suggested);
+
+    if (!validated.success) {
+      return res.status(502).json({
+        message: "AI returned an invalid service list",
+      });
+    }
+
+    return res.json(validated.data);
+  } catch (error: any) {
+    return res.status(500).json({
+      message: error?.message || "Failed to suggest services",
+    });
+  }
+});
 
 function mapIndustry(r: any) {
   return { ...r, accountId: r.account_id, naicsCode: r.naics_code, createdAt: r.created_at, updatedAt: r.updated_at };
@@ -226,7 +264,7 @@ router.get("/api/websites/:websiteId/hub-pages", requireAuth, async (req: Reques
 router.get("/api/accounts/:accountId/hub-pages", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM hub_pages WHERE account_id::text = $1::text ORDER BY hub_type ASC, name ASC`, [req.params.accountId]);
   if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapHubPage));
-  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY hub_type ASC, name ASC`);
+  const all = await pool.query(`SELECT * FROM hub_pages ORDER BY name ASC`);
   return res.json(all.rows.map(mapHubPage));
 });
 
