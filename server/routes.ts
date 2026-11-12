@@ -1021,6 +1021,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<Serv
           // 🔒 UNTOUCHED: use existing hub page storage helper/schema shape
           await storage.createHubPage({
             websiteId,
+            accountId: website.accountId,
             hubType,
             name: cleanName,
             slug,
