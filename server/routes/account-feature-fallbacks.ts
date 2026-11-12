@@ -128,6 +128,74 @@ router.post("/api/accounts/:accountId/query-clusters/bulk-suggest", requireAccou
   }
 });
 
+router.post("/api/accounts/:accountId/query-clusters/bulk-save", requireAccountAccess, async (req: Request, res: Response) => {
+  const parsed = z.object({
+    clusters: z.array(z.object({
+      serviceId: z.string().trim().min(1).max(500).nullable().optional(),
+      name: z.string().trim().min(1).max(500),
+      intentType: z.enum(["transactional", "informational", "local", "navigational"]),
+      primaryKeyword: z.string().trim().min(1).max(500),
+      secondaryKeywords: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
+      searchVolume: z.number().int().min(0).max(2147483647).nullable().optional(),
+      difficulty: z.number().int().min(0).max(100).nullable().optional(),
+    })).min(1).max(750),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  const client = await pool.connect().catch(() => null);
+  if (!client) {
+    return res.status(500).json({ message: "Failed to connect to the database. No clusters were saved." });
+  }
+
+  try {
+    await client.query("BEGIN");
+    const account = await client.query(
+      "SELECT id FROM accounts WHERE id::text = $1::text FOR SHARE",
+      [req.params.accountId],
+    );
+    if (account.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Account not found" });
+    }
+
+    const serviceIds = [...new Set(parsed.data.clusters.flatMap((cluster) => cluster.serviceId ? [cluster.serviceId] : []))];
+    if (serviceIds.length > 0) {
+      const services = await client.query<{ id: string }>(
+        "SELECT id FROM services WHERE account_id::text = $1::text AND id::text = ANY($2::text[]) FOR SHARE",
+        [req.params.accountId, serviceIds],
+      );
+      if (services.rows.length !== serviceIds.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Every cluster service must belong to this account. No clusters were saved." });
+      }
+    }
+
+    const result = await client.query(
+      `INSERT INTO query_clusters (
+        account_id, service_id, name, intent_type, primary_keyword,
+        secondary_keywords, search_volume, difficulty
+      )
+      SELECT $1, c."serviceId", c.name, c."intentType", c."primaryKeyword",
+        c."secondaryKeywords", c."searchVolume", c.difficulty
+      FROM jsonb_to_recordset($2::jsonb) AS c(
+        "serviceId" text, name text, "intentType" text, "primaryKeyword" text,
+        "secondaryKeywords" text[], "searchVolume" integer, difficulty integer
+      )`,
+      [req.params.accountId, JSON.stringify(parsed.data.clusters)],
+    );
+    await client.query("COMMIT");
+    return res.json({ saved: result.rowCount ?? 0 });
+  } catch {
+    await client.query("ROLLBACK").catch(() => {});
+    return res.status(500).json({ message: "Cluster save failed. Check the saved cluster list before retrying if the connection was interrupted." });
+  } finally {
+    client.release();
+  }
+});
+
 function mapIndustry(r: any) {
   return { ...r, accountId: r.account_id, naicsCode: r.naics_code, createdAt: r.created_at, updatedAt: r.updated_at };
 }
