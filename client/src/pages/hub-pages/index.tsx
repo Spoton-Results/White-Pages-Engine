@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -250,11 +250,17 @@ function HubCard({
   websiteId,
   domain,
   onRefresh,
+  selected,
+  onSelect,
+  selectionDisabled,
 }: {
   hub: HubPage;
   websiteId: string;
   domain: string;
   onRefresh: () => void;
+  selected: boolean;
+  onSelect: () => void;
+  selectionDisabled: boolean;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -314,6 +320,14 @@ function HubCard({
         {/* Header row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <input
+              type="checkbox"
+              aria-label={`Select hub ${hub.name} (${hub.id})`}
+              data-testid={`checkbox-hub-${hub.id}`}
+              checked={selected}
+              disabled={selectionDisabled || isBusy}
+              onChange={onSelect}
+            />
             <span style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, borderRadius: 12, fontSize: ".72rem", fontWeight: 700, padding: "2px 8px" }}>
               {HUB_TYPE_LABELS[hub.hubType]}
             </span>
@@ -784,6 +798,16 @@ function BulkPublishDraftsButton({
 export default function HubPagesPage() {
   const [websiteId, setWebsiteId] = useState("");
   const qc = useQueryClient();
+  const { toast } = useToast();
+  const [selectedHubIds, setSelectedHubIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; deleted: number; failed: number } | null>(null);
+  const bulkDeleteLock = useRef(false);
+
+  useEffect(() => {
+    setSelectedHubIds(new Set());
+    setBulkProgress(null);
+  }, [websiteId]);
 
   const websitesQ = useQuery<Website[]>({
     queryKey: ["/api/websites"],
@@ -809,9 +833,65 @@ export default function HubPagesPage() {
   const withContent = hubs.filter(h => h.content).length;
   const draftCount = hubs.filter(h => h.status === "draft").length;
   const domain = (currentWebsite as any)?.domain || "";
+  const selectableHubs = hubs.filter(hub => hub.websiteId === websiteId);
+  const selectedHubs = selectableHubs.filter(hub => selectedHubIds.has(hub.id));
+  const allSelected = selectableHubs.length > 0 && selectedHubs.length === selectableHubs.length;
+
+  const toggleHub = (id: string) => {
+    if (bulkDeleteLock.current) return;
+    setSelectedHubIds(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (bulkDeleteLock.current || selectedHubs.length === 0) return;
+    const targetWebsiteId = websiteId;
+    const targets = [...new Set(selectedHubs.map(hub => hub.id))];
+    const websiteLabel = currentWebsite ? `${currentWebsite.name} (${currentWebsite.domain})` : targetWebsiteId;
+    if (!window.confirm(`Delete ${targets.length} selected hub record(s) from ${websiteLabel}? This cannot be undone. Child pages, services, locations, and R2/Cloudflare objects will not be deleted.`)) return;
+
+    bulkDeleteLock.current = true;
+    setBulkDeleting(true);
+    const failedIds = new Set<string>();
+    const errors: string[] = [];
+    let deleted = 0;
+    setBulkProgress({ done: 0, total: targets.length, deleted: 0, failed: 0 });
+    try {
+      for (const id of targets) {
+        try {
+          const response = await apiRequest("DELETE", `/api/websites/${targetWebsiteId}/hub-pages/${id}`, {});
+          const result = await response.json();
+          if (result?.deleted !== true || result?.id !== id) {
+            throw new Error("The server did not confirm deletion of the selected hub.");
+          }
+          deleted++;
+        } catch (error: unknown) {
+          failedIds.add(id);
+          errors.push(error instanceof Error ? error.message : "Unknown delete error");
+        }
+        setBulkProgress({ done: deleted + failedIds.size, total: targets.length, deleted, failed: failedIds.size });
+      }
+    } finally {
+      setSelectedHubIds(failedIds);
+      await qc.invalidateQueries({ queryKey: ["/api/websites", targetWebsiteId, "hub-pages"] }).catch(() => {});
+      setBulkDeleting(false);
+      bulkDeleteLock.current = false;
+      toast({
+        title: `Deleted ${deleted} of ${targets.length} hub record(s)`,
+        description: failedIds.size > 0
+          ? `${failedIds.size} failed or were not confirmed. Remaining failed items stay selected. Check the refreshed list before retrying. ${errors[0]?.slice(0, 200) || ""}`
+          : "Deletion confirmed. The hub list has been refreshed.",
+        variant: failedIds.size > 0 ? "destructive" : "default",
+      });
+    }
+  };
 
   return (
     <DashboardLayout>
+      <fieldset disabled={bulkDeleting} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "2rem 1.5rem" }}>
 
         {/* Header */}
@@ -826,7 +906,12 @@ export default function HubPagesPage() {
             <select
               data-testid="select-website"
               value={websiteId}
-              onChange={e => setWebsiteId(e.target.value)}
+              onChange={e => {
+                if (bulkDeleteLock.current) return;
+                setSelectedHubIds(new Set());
+                setBulkProgress(null);
+                setWebsiteId(e.target.value);
+              }}
               style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: ".9rem", minWidth: 220, cursor: "pointer" }}
             >
               <option value="">— Select website —</option>
@@ -873,6 +958,35 @@ export default function HubPagesPage() {
               ))}
             </div>
 
+            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: "1.25rem" }}>
+              <button
+                type="button"
+                data-testid="button-select-all-hubs"
+                disabled={bulkDeleting || selectableHubs.length === 0}
+                onClick={() => {
+                  if (!bulkDeleteLock.current) setSelectedHubIds(allSelected ? new Set() : new Set(selectableHubs.map(hub => hub.id)));
+                }}
+                style={{ border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", color: "#374151", padding: "8px 14px", fontWeight: 600, cursor: "pointer" }}
+              >
+                {allSelected ? "Deselect All" : "Select All"}
+              </button>
+              <span style={{ fontSize: ".85rem", color: "#6b7280" }}>{selectedHubs.length} selected in this website</span>
+              <button
+                type="button"
+                data-testid="button-delete-selected-hubs"
+                disabled={bulkDeleting || selectedHubs.length === 0}
+                onClick={deleteSelected}
+                style={{ border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#dc2626", padding: "8px 14px", fontWeight: 600, cursor: bulkDeleting || selectedHubs.length === 0 ? "not-allowed" : "pointer" }}
+              >
+                {bulkDeleting ? "Deleting..." : `Delete Selected (${selectedHubs.length})`}
+              </button>
+              {bulkProgress && (
+                <span role="status" aria-live="polite" style={{ fontSize: ".85rem", color: "#6b7280" }}>
+                  {bulkProgress.done}/{bulkProgress.total} processed - {bulkProgress.deleted} deleted, {bulkProgress.failed} failed
+                </span>
+              )}
+            </div>
+
             {/* Groups by type */}
             {(["service", "state", "city"] as const).map(type => {
               const group = byType(type);
@@ -891,7 +1005,16 @@ export default function HubPagesPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {group.map(hub => (
-                      <HubCard key={hub.id} hub={hub} websiteId={websiteId} domain={domain} onRefresh={refresh} />
+                      <HubCard
+                        key={hub.id}
+                        hub={hub}
+                        websiteId={websiteId}
+                        domain={domain}
+                        onRefresh={refresh}
+                        selected={hub.websiteId === websiteId && selectedHubIds.has(hub.id)}
+                        onSelect={() => toggleHub(hub.id)}
+                        selectionDisabled={bulkDeleting || hub.websiteId !== websiteId}
+                      />
                     ))}
                   </div>
                 </div>
@@ -901,6 +1024,7 @@ export default function HubPagesPage() {
         )}
 
       </div>
+      </fieldset>
     </DashboardLayout>
   );
 }
