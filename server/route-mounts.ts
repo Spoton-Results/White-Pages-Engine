@@ -47,8 +47,10 @@ import websiteDomainEditRouter from "./routes/website-domain-edit";
 import brandR2RepairRouter from "./routes/brand-r2-repair";
 import brandMediaRouter from "./routes/brand-media";
 import onboardingTestRouter from "./routes/onboarding-test";
+import hubPageDeleteRouter from "./routes/hub-page-delete";
 
 export function mountSubRouters(app: Express) {
+  app.use("/", hubPageDeleteRouter);
   app.use("/", authLiveRouter);
   app.use("/", variationBankWriterFixRouter);
   app.use("/", variationBankQueueRouter);
