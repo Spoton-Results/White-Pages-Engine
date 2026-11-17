@@ -9,6 +9,8 @@
  *   - DB job progress updated every PAGE_BATCH_SIZE pages, not every page
  */
 import * as storage from "../storage";
+import { buildBulkPlan, NO_BULK_CLUSTERS, normalizeBulkText } from "../../shared/bulk-generation-plan";
+import { assembleBlueprintBankContent } from "./blueprint-bank-content";
 import { buildVariationPage, ClusterContext, BrandContext } from "./variation-engine"; // ✅ CHANGED: import BrandContext
 import { submitUrlsToGoogle } from "./gsc-indexing";
 import { scorePageContent, computeBankCompleteness } from "./scoring";
@@ -248,7 +250,7 @@ function applyBlueprintTemplates(
       .replace(/\{comparison[-_]x[^}]*\}/gi, vars.brand)
       .replace(/\{comparison[-_]y[^}]*\}/gi, vars.service)
       .replace(/\{audience[^}]*\}/gi, "local businesses")
-      .replace(/\{keyword[^}]*\}/gi, vars.service)
+      .replace(/\{keyword[^}]*\}/gi, vars.cluster || vars.service)
       .replace(/\{cluster[^}]*\}/gi, vars.cluster ?? "")
       .replace(/\{industry[^}]*\}/gi, vars.service)
       .replace(/-{2,}/g, "-").replace(/\s{2,}/g, " ").trim();
@@ -304,7 +306,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const job = await bulkGetJob(jobId);
   if (!job) return;
   const settings = job.settings as unknown as BulkJobSettings;
-  const { services, blueprintId, queryClusterIds, mode, states, cities, overwrite } = settings;
+  const { services: requestedServices, blueprintId, queryClusterIds, mode, states, cities, overwrite } = settings;
   await bulkUpdateJob(jobId, { status: "running", startedAt: new Date() });
   const website = await bulkGetWebsite(job.websiteId);
   if (!website) {
@@ -372,7 +374,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       r2Key: media.r2Key || media.r2_key,
       altText: media.altText || media.alt_text || `${brandName} brand image`,
       category: media.category || "business_general",
-      sortOrder: media.sortOrder || media.sort_order || 0,
+      sortOrder: media.sortOrder || 0,
       active: media.active, // ✅ CHANGED
     })),
   };
@@ -380,7 +382,21 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   const effectiveBlueprintId = blueprintId || (website.settings as any)?.defaultBlueprintId || null;
   const blueprint = effectiveBlueprintId ? await bulkGetBlueprint(effectiveBlueprintId) : null;
   const [accountServices, accountClusters] = await Promise.all([bulkGetServices(website.accountId!), bulkGetQueryClusters(website.accountId!)]);
-  const eligibleClusters = queryClusterIds && queryClusterIds.length > 0 ? accountClusters.filter((c: any) => queryClusterIds.includes(c.id)) : accountClusters;
+  if (!blueprint || blueprint.accountId !== website.accountId) throw new Error("A blueprint belonging to this account is required.");
+  const requestedClusterIds = (queryClusterIds || []).filter(id => id !== NO_BULK_CLUSTERS);
+  const plan = buildBulkPlan({ blueprints: [blueprint], services: accountServices, selectedServices: requestedServices,
+    clusters: accountClusters, clusterIds: requestedClusterIds.length ? requestedClusterIds : null,
+    locationType: mode === "specific_cities" ? "city" : "state" });
+  const services = [...new Set(plan.pairs.map(pair => pair.serviceName))];
+  const eligibleClusters = accountClusters.filter(cluster => plan.pairs.some(pair => pair.clusterId === cluster.id));
+  const validationIssues = [...plan.skipped];
+  settings.progress = services.map(service => settings.progress?.find(row => row.service === service) || { service, status: "pending", created: 0, updated: 0, skipped: 0, errors: 0 });
+  (settings as any).validationIssues = validationIssues;
+  if (!plan.pairs.length) {
+    await bulkUpdateJob(jobId, { status: "failed", completedAt: new Date(), totalPages: 0,
+      settings: { ...settings, fatalError: validationIssues[0] || "No service-matched blueprint/cluster combinations are eligible." } as any });
+    return;
+  }
   const serviceIdByName = new Map<string, string>(accountServices.map((s: any) => [s.name.toLowerCase(), s.id]));
   const stateDataMap = await bulkGetAllStateData();
   let targets = await buildTargets(mode, stateDataMap, states, cities);
@@ -413,8 +429,8 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   }
   const basePassedPages = resumePassedPages;
   const baseProcessedPages = resumeProcessedPages;
-  const clusterCount = eligibleClusters.length > 0 ? eligibleClusters.length : 1;
-  let totalPages = services.length * clusterCount * targets.length;
+  const combinationCount = plan.pairs.length;
+  let totalPages = combinationCount * targets.length;
 
   const blueprintTemplate = blueprint ? { titleTemplate: blueprint.titleTemplate, h1Template: blueprint.h1Template, metaDescTemplate: blueprint.metaDescTemplate, slugTemplate: blueprint.slugTemplate } : null;
   if (blueprintTemplate) {
@@ -428,7 +444,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
         seenStates.add(t.stateAbbr.toUpperCase());
         return true;
       });
-      totalPages = services.length * clusterCount * targets.length;
+      totalPages = combinationCount * targets.length;
       console.log(`[bulk-background] State-level blueprint detected — deduplicated to ${targets.length} unique state targets (${totalPages} total pages)`);
     }
   }
@@ -447,7 +463,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     const svcId = serviceIdByName.get(svc.toLowerCase());
     const banks = await bulkGetVariationBanks(job.websiteId, svc);
     if (banks.length === 0) {
-      settings.progress[si] = { service: svc, status: "no-bank", created: 0, updated: 0, skipped: 0, errors: 0 };
+      const missingBankPages = plan.pairs.filter(pair => pair.serviceId === svcId).length * targets.length;
+      totalFailed += missingBankPages;
+      if (validationIssues.length < 50) validationIssues.push(`${svc}: service content banks are missing; no pages were published.`);
+      settings.progress[si] = { service: svc, status: "no-bank", created: 0, updated: 0, skipped: 0, errors: missingBankPages };
       await bulkUpdateJob(jobId, { settings: settings as any });
       continue;
     }
@@ -519,7 +538,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       }
     };
 
-    const clustersToIterate: Array<(typeof eligibleClusters)[0] | null> = eligibleClusters.length > 0 ? eligibleClusters : [null];
+    const clustersToIterate = plan.pairs.filter(pair => pair.serviceId === svcId).map(pair => pair.clusterId ? eligibleClusters.find(cluster => cluster.id === pair.clusterId)! : null);
     for (const cl of clustersToIterate) {
       const svcCluster: ClusterContext | null = cl ? { id: cl.id, primaryKeyword: cl.primaryKeyword, secondaryKeywords: (cl as any).secondaryKeywords ?? [], intentType: cl.intentType } : null;
       for (const t of targets) {
@@ -532,9 +551,21 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           let finalSlug = bpOverride?.slug || result.slug;
           finalSlug = namespaceSlugWithBlueprint(finalSlug, blueprint, settings as any);
           finalSlug = forceTargetSlugDimensions(finalSlug, t);
-          const finalTitle = bpOverride?.title || result.title;
-          const finalH1 = bpOverride?.h1 || result.h1;
-          const finalMeta = bpOverride?.metaDescription || result.metaDescription;
+          const topic = normalizeBulkText(svcCluster?.primaryKeyword || "");
+          const scoped = (candidate: string | undefined, fallback: string) => candidate && (!topic || normalizeBulkText(candidate).includes(topic)) ? candidate : fallback;
+          const finalTitle = scoped(bpOverride?.title, result.title);
+          const finalH1 = scoped(bpOverride?.h1, result.h1);
+          const finalMeta = scoped(bpOverride?.metaDescription, result.metaDescription);
+          const assembled = assembleBlueprintBankContent({ sections: blueprint.sections, banks, baselineHtml: result.contentHtml,
+            requiredWordCount: blueprint.requiredWordCount, clusterKeyword: svcCluster?.primaryKeyword,
+            vars: { service: svc, city: t.locationName, location: t.locationName, state: t.stateName, state_abbr: t.stateAbbr,
+              brand: brandName, company: brandName, company_name: brandName, business: brandName, business_name: brandName,
+              provider: brandName, agency: brandName, landmark: t.locationName,
+              business_culture: `${t.stateName} business conditions`, payment_regulations: "applicable payment requirements",
+              population: "local", business_count: "local", primary_keyword: svcCluster?.primaryKeyword || svc,
+              secondary_keywords: svcCluster?.secondaryKeywords.join(", ") || "", intent_type: svcCluster?.intentType || "" } });
+          result.contentHtml = assembled.contentHtml;
+          result.wordCount = assembled.wordCount;
           const pageScore = scorePageContent(result.contentHtml, finalMeta, finalTitle, result.wordCount, banks, minScoreForTier1);
           const pageTier = pageScore.recommendedTier;
           const existingStatus = existingSlugStatusMap.get(finalSlug);
@@ -555,13 +586,14 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
           } else {
             existingSlugStatusMap.set(finalSlug, settings.isDraft ? "draft" : "published");
             const draftFields = settings.isDraft ? { isDraft: true, draftReason: settings.draftReason || "onboarding_initial", publishWave: 0, status: "draft" as const } : {};
-            pendingPageData.push({ websiteId: job.websiteId, blueprintId: effectiveBlueprintId || null, serviceId: svcId || null, locationId: null, queryClusterId: svcCluster?.id || null, slug: finalSlug, title: finalTitle, h1: finalH1, metaDescription: finalMeta, status: "published", pageType: t.locationType === "state" ? "state_hub" : "service_city", wordCount: result.wordCount, tier: pageTier, qualityScore: pageScore.total, scoreBreakdown: pageScore as any, indexStatus: "queued", lastEvaluatedAt: new Date(), ...draftFields } as any);
+            pendingPageData.push({ websiteId: job.websiteId, blueprintId: effectiveBlueprintId || null, serviceId: svcId || null, locationId: null, queryClusterId: svcCluster?.id || null, slug: finalSlug, title: finalTitle, h1: finalH1, metaDescription: finalMeta, status: "published", pageType: blueprint.pageType, wordCount: result.wordCount, tier: pageTier, qualityScore: pageScore.total, scoreBreakdown: pageScore as any, indexStatus: "queued", lastEvaluatedAt: new Date(), ...draftFields } as any);
             pendingContent.push(result.contentHtml);
             if (pendingPageData.length >= INSERT_BATCH_SIZE) await flushInsertBatch();
           }
         } catch (err) {
           svcErrors++;
           totalFailed++;
+          if (validationIssues.length < 50) validationIssues.push(`${svc} / ${t.locationName}: ${err instanceof Error ? err.message : String(err)}`);
           console.error("[bulk-background] error", svc, t.locationName, err);
         }
 
@@ -599,9 +631,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
   await bulkSyncPublishedCount(job.websiteId);
   const rawFinal = baseProcessedPages + totalCreated + totalUpdated + totalFailed + totalSkipped;
   const rawPassedFinal = basePassedPages + totalCreated + totalUpdated;
-  await bulkUpdateJob(jobId, { status: "completed", completedAt: new Date(), processedPages: Math.min(rawFinal, totalPages), passedPages: Math.min(rawPassedFinal, totalPages), failedPages: totalFailed, settings: { ...(settings as any), publishedMaxMode: true, revivedUnpublished: totalRevivedUnpublished } as any });
+  await bulkUpdateJob(jobId, { status: totalFailed > 0 && totalCreated + totalUpdated + basePassedPages === 0 ? "failed" : "completed", completedAt: new Date(), processedPages: Math.min(rawFinal, totalPages), passedPages: Math.min(rawPassedFinal, totalPages), failedPages: totalFailed, settings: { ...(settings as any), publishedMaxMode: true, revivedUnpublished: totalRevivedUnpublished } as any });
 
-  if (!settings.isDraft) {
+  if (!settings.isDraft && totalCreated + totalUpdated > 0) {
     try {
       const { generateSitemapsForWebsite } = await import("./sitemap");
       const pDomain = (website.settings as any)?.parentDomain;
@@ -617,8 +649,10 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     } catch { /* non-critical */ }
     try { await submitUrlsToGoogle(newPageUrls); } catch { /* non-critical */ }
   } else {
-    console.log(`[bulk-background] Draft mode — skipped sitemap regen, Google ping, GSC indexing for ${website.domain}`);
+    console.log(`[bulk-background] Draft mode or no new public output — skipped sitemap regen, Google ping, GSC indexing for ${website.domain}`);
   }
+
+  if (totalCreated + totalUpdated === 0) return;
 
   try {
     const { runAutoScoringJob } = await import("./automation");
@@ -633,3 +667,4 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     console.error("[auto1] Failed to create scoring job (non-fatal):", err);
   }
 }
+
