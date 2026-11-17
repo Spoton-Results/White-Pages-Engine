@@ -159,7 +159,6 @@ async function removePublicRewriteWorkaround() {
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
   await patchBulkGeneratorForMaxPages();
-  await patchBulkGeneratorUiToBackendCampaign();
   await patchBackendCampaignChunking();
   await patchPublicLeadFormGuard();
   await removePublicRewriteWorkaround();
