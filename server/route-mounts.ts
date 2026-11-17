@@ -48,6 +48,7 @@ import brandR2RepairRouter from "./routes/brand-r2-repair";
 import brandMediaRouter from "./routes/brand-media";
 import onboardingTestRouter from "./routes/onboarding-test";
 import hubPageDeleteRouter from "./routes/hub-page-delete";
+import hubWorkflowRouter from "./routes/hub-workflow";
 
 export function mountSubRouters(app: Express) {
   app.use("/", hubPageDeleteRouter);
@@ -66,6 +67,7 @@ export function mountSubRouters(app: Express) {
   // ✅ CHANGED: run old SpotOn merchant-service URL 410 handler before client-domain fallback resolver.
   // 🔒 UNTOUCHED: client domain resolver remains mounted immediately after this guard.
   app.use("/", spotonLegacyGoneRouter);
+  app.use("/", hubWorkflowRouter);
 
   app.use("/", clientDomainsRouter);
   app.use("/", searchConsoleAdminRouter);
