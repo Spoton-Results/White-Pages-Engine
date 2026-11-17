@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth, requireAccountAccess } from "../auth";
 import { pool } from "../db";
-import { insertServiceSchema, insertQueryClusterSchema } from "@shared/schema";
-import { createService, createQueryCluster } from "../storage";
+import { insertServiceSchema, insertQueryClusterSchema, insertIndustrySchema } from "@shared/schema";
+import { createService, createQueryCluster, createIndustry } from "../storage";
 import { z } from "zod";
 import { suggestServices } from "../services/claude";
 import { callAI } from "../services/ai-provider";
@@ -284,6 +284,33 @@ function mapHubPage(r: any) {
     updatedAt: r.updated_at,
   };
 }
+
+router.post("/api/accounts/:accountId/industries", requireAccountAccess, async (req: Request, res: Response) => {
+  const parsed = insertIndustrySchema.safeParse({
+    ...req.body,
+    accountId: req.params.accountId,
+  });
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.message });
+  }
+
+  try {
+    const account = await pool.query(
+      "SELECT id FROM accounts WHERE id::text = $1::text LIMIT 1",
+      [req.params.accountId],
+    );
+    if (account.rows.length === 0) {
+      return res.status(404).json({ message: "Account not found" });
+    }
+
+    const industry = await createIndustry(parsed.data);
+    return res.status(201).json(industry);
+  } catch (error: any) {
+    console.error("[accounts/industries/create]", error);
+    return res.status(500).json({ message: "Failed to create industry" });
+  }
+});
 
 router.get("/api/accounts/:accountId/industries", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM industries WHERE account_id::text = $1::text ORDER BY name ASC`, [req.params.accountId]);
