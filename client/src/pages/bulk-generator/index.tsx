@@ -10,8 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Loader2, Play, XCircle, Zap } from "lucide-react";
 import { api } from "@/lib/api";
+import { buildBulkPlan, NO_BULK_CLUSTERS } from "@shared/bulk-generation-plan";
 
-type QueueItem = { bpId: string; locPayload: Record<string, any>; label: string };
+type QueueItem = { bpId: string; locPayload: Record<string, any>; label: string; service: string; queryClusterIds: string[] };
 type ProgressRow = { service: string; status: string; created: number; updated: number; skipped: number; errors: number };
 type CityLimit = "100" | "500" | "1000" | "5000" | "all";
 type QueryCluster = { id: string; serviceId?: string | null; name: string; intentType: string; primaryKeyword: string; secondaryKeywords?: string[] };
@@ -90,12 +91,12 @@ export default function BulkGeneratorPage() {
   const selectedWebsite = websites.find((w: any) => w.id === websiteId);
   const accountId = selectedWebsite?.accountId || "";
 
-  const servicesQ = useQuery<string[]>({
+  const servicesQ = useQuery<Array<{ id: string; name: string }>>({
     queryKey: ["/api/accounts", accountId, "services", "bulk-generator"],
     queryFn: async () => {
       const rows = await api.get<any[]>(`/api/accounts/${accountId}/services`);
       return rows
-        .map((service: any) => typeof service === "string" ? service : service.name)
+        .map((service: any) => typeof service === "string" ? { id: "", name: service } : { id: String(service.id || ""), name: String(service.name || "") })
         .filter(Boolean);
     },
     enabled: !!accountId,
@@ -124,7 +125,8 @@ export default function BulkGeneratorPage() {
     staleTime: 0,
   });
 
-  const services = servicesQ.data ?? [];
+  const serviceRecords = servicesQ.data ?? [];
+  const services = serviceRecords.map(service => service.name);
   const bankedServices = bankServicesQ.data ?? [];
   const bankServicesSet = new Set(bankedServices);
   const allLocations = locationsQ.data ?? [];
@@ -204,6 +206,9 @@ export default function BulkGeneratorPage() {
     if (handledTerminalJobRef.current === job.id) return;
     handledTerminalJobRef.current = job.id;
 
+    if (Array.isArray(job.settings?.validationIssues) && job.settings.validationIssues.length) {
+      setLastFailure((previous) => [previous, ...job.settings.validationIssues].filter(Boolean).join("\n").slice(-6000));
+    }
     const totals = summarizeProgress(progress);
     accumulatedRef.current.created += totals.created;
     accumulatedRef.current.skipped += totals.skipped;
@@ -231,7 +236,7 @@ export default function BulkGeneratorPage() {
       return;
     }
 
-    const message = job.settings?.fatalError || `Job ended with status: ${job.status}`;
+    const message = job.settings?.fatalError || (Array.isArray(job.settings?.validationIssues) ? job.settings.validationIssues.slice(-3).join(" ") : "") || `Job ended with status: ${job.status}`;
     bpQueueRef.current = [];
     bpQueueIdxRef.current = 0;
     setIsRunningAll(false);
@@ -319,10 +324,10 @@ export default function BulkGeneratorPage() {
 
   async function submitJobForBlueprint(item: QueueItem) {
     try {
-      const queryClusterIds = selectedQueryClusterIds();
+      const queryClusterIds = item.queryClusterIds;
 
       const payload: Record<string, any> = {
-        services: Array.from(selectedServices),
+        services: [item.service],
         ...item.locPayload,
         overwrite,
       };
@@ -343,6 +348,39 @@ export default function BulkGeneratorPage() {
     }
   }
 
+  function buildMatchedQueue(): { queue: QueueItem[]; skipped: string[] } {
+    const chosenBlueprints = cycleBlueprints ? blueprints : blueprints.filter((bp: any) => bp.id === blueprintId);
+    const locations: Array<{ kind: "state" | "city"; payload: Record<string, any> }> = [];
+    if (runBothLocations) {
+      if (selectedStateCodes.size > 0 || mode === "all_states") locations.push({ kind: "state", payload: buildStatePayload() });
+      if (expandedStateCities.length) locations.push({ kind: "city", payload: buildExpandedCityPayload() });
+    } else {
+      locations.push({ kind: mode === "specific_cities" ? "city" : "state", payload: buildLocationPayload() });
+    }
+    const queue: QueueItem[] = [];
+    const skipped: string[] = [];
+    for (const location of locations) {
+      const plan = buildBulkPlan({ blueprints: chosenBlueprints, services: serviceRecords,
+        selectedServices: Array.from(selectedServices), clusters: queryClusters,
+        clusterIds: clusterMode === "none" ? null : selectedQueryClusterIds(), locationType: location.kind });
+      skipped.push(...plan.skipped);
+      const grouped = new Map<string, QueueItem>();
+      for (const pair of plan.pairs) {
+        const key = `${pair.blueprintId}|${pair.serviceId}`;
+        let item = grouped.get(key);
+        if (!item) {
+          const bp = chosenBlueprints.find((row: any) => row.id === pair.blueprintId);
+          item = { bpId: pair.blueprintId, service: pair.serviceName, queryClusterIds: [], locPayload: location.payload,
+            label: `${bp?.name || pair.blueprintId} · ${location.kind}` };
+          grouped.set(key, item);
+        }
+        item.queryClusterIds.push(pair.clusterId || NO_BULK_CLUSTERS);
+      }
+      queue.push(...grouped.values());
+    }
+    return { queue, skipped: [...new Set(skipped)].slice(0, 50) };
+  }
+
   async function runAllServices() {
     if (!websiteId || selectedServices.size === 0) return;
     if (clusterMode === "selected" && selectedClusterIds.size === 0) {
@@ -354,30 +392,12 @@ export default function BulkGeneratorPage() {
       return;
     }
 
-    const bpIds = cycleBlueprints && blueprints.length > 1 ? blueprints.map((bp: any) => bp.id) : [blueprintId].filter(Boolean);
-    if (bpIds.length === 0) {
-      toast({ title: "Choose a blueprint", description: "Select a blueprint before generating pages.", variant: "destructive" });
+    const { queue, skipped } = buildMatchedQueue();
+    if (queue.length === 0) {
+      toast({ title: "No eligible combinations", description: skipped[0] || "Select a matching service, blueprint, cluster, and location.", variant: "destructive" });
       return;
     }
-
-    const queue: QueueItem[] = [];
-    if (runBothLocations) {
-      const hasStateSelection = selectedStateCodes.size > 0 || mode === "all_states";
-      const hasCitySelection = expandedStateCities.length > 0;
-      if (!hasStateSelection && !hasCitySelection) {
-        toast({ title: "Choose locations", description: "Select at least one state or city before running both location types.", variant: "destructive" });
-        return;
-      }
-      for (const id of bpIds) {
-        const bpIndex = bpIds.indexOf(id) + 1;
-        if (hasStateSelection) queue.push({ bpId: id, locPayload: buildStatePayload(), label: `State pages ${bpIndex}/${bpIds.length}` });
-        if (hasCitySelection) queue.push({ bpId: id, locPayload: buildExpandedCityPayload(), label: `City pages ${bpIndex}/${bpIds.length}` });
-      }
-    } else {
-      queue.push(...bpIds.map((id, i) => ({ bpId: id, locPayload: buildLocationPayload(), label: `Blueprint ${i + 1}/${bpIds.length}` })));
-    }
-
-    if (queue.length === 0) return;
+    if (skipped.length) toast({ title: "Unsupported combinations excluded", description: skipped.slice(0, 2).join(" ") });
     bpQueueRef.current = queue;
     bpQueueIdxRef.current = 0;
     accumulatedRef.current = { created: 0, skipped: 0, errors: 0 };
@@ -394,10 +414,10 @@ export default function BulkGeneratorPage() {
   const cityTargetCount = runBothLocations ? expandedStateCities.length : selectedCitySlugs.size;
   const singleModeTargetCount = mode === "all_states" ? (dbStates.length || 50) : mode === "specific_states" ? selectedStateCodes.size : selectedCitySlugs.size;
   const effectiveTargetCount = runBothLocations ? stateTargetCount + cityTargetCount : singleModeTargetCount;
-  const blueprintMultiplier = cycleBlueprints && blueprints.length > 1 ? blueprints.length : 1;
-  const clusterMultiplier = clusterMode === "all" ? Math.max(queryClusters.length, 0) : clusterMode === "selected" ? selectedClusterIds.size : 1;
-  const estimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier * Math.max(clusterMultiplier, 1);
-  const baseEstimatedPages = selectedServices.size * effectiveTargetCount * blueprintMultiplier;
+  const matchedQueue = buildMatchedQueue().queue;
+  const targetCountFor = (item: QueueItem) => item.locPayload.mode === "specific_states" ? item.locPayload.states.length : item.locPayload.mode === "specific_cities" ? item.locPayload.cities.length : 50;
+  const estimatedPages = matchedQueue.reduce((sum, item) => sum + targetCountFor(item) * item.queryClusterIds.length, 0);
+  const baseEstimatedPages = matchedQueue.reduce((sum, item) => sum + targetCountFor(item), 0);
   const showStatePicker = runBothLocations || mode === "specific_states";
   const showCityPicker = runBothLocations || mode === "specific_cities";
   const isClusterReady = clusterMode === "none" || (clusterMode === "all" && queryClusters.length > 0) || (clusterMode === "selected" && selectedClusterIds.size > 0);
@@ -438,7 +458,7 @@ export default function BulkGeneratorPage() {
         {websiteId && <Card>
           <CardHeader>
             <CardTitle>Configure</CardTitle>
-            <CardDescription>{estimatedPages.toLocaleString()} estimated page(s){clusterMode !== "none" ? ` · base ${baseEstimatedPages.toLocaleString()} x ${clusterMultiplier.toLocaleString()} cluster intent(s)` : ""}</CardDescription>
+            <CardDescription>{estimatedPages.toLocaleString()} eligible candidate page(s) · {baseEstimatedPages.toLocaleString()} matched service/blueprint/location combinations. Unsupported bank content is blocked before publication.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
@@ -465,7 +485,7 @@ export default function BulkGeneratorPage() {
                   <SelectItem value="all">Use all clusters ({queryClusters.length})</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Clusters create one additional intent page per selected service/location/blueprint combination. Use this only for high-value intent coverage.</p>
+              <p className="text-xs text-muted-foreground">Only clusters assigned to each service are included. Each topic requires supporting bank copy and the matching blueprint sections; unsupported combinations will not publish.</p>
             </div>
 
             {clusterMode === "selected" && <div className="space-y-2">
@@ -518,8 +538,9 @@ export default function BulkGeneratorPage() {
           </CardContent>
         </Card>}
 
-        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? `Will queue selected state page job(s), then ${expandedStateCities.length.toLocaleString()} selected-state city target(s).` : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || !isClusterReady || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
+        {websiteId && selectedServices.size > 0 && <Card><CardHeader><CardTitle>Generate</CardTitle><CardDescription>{runBothLocations ? `Will queue selected state page job(s), then ${expandedStateCities.length.toLocaleString()} selected-state city target(s).` : "Polling stops on completed, failed, error, or cancelled."}</CardDescription></CardHeader><CardContent className="space-y-4"><Button size="lg" onClick={runAllServices} disabled={isRunningAll || effectiveTargetCount === 0 || estimatedPages === 0 || !isClusterReady || (!cycleBlueprints && !blueprintId)}><Play className="size-4 mr-2" />{isRunningAll ? "Running..." : `Generate ${estimatedPages.toLocaleString()} Pages`}</Button>{isRunningAll && activeJobId && <p className="text-xs text-muted-foreground"><Loader2 className="inline size-3 animate-spin mr-1" />Job {bpQueueDisplay.idx + 1} of {bpQueueDisplay.total}: {bpQueueDisplay.label}</p>}{serviceProgress.map((p) => <div key={p.service} className="flex items-center gap-2 border rounded px-3 py-2 text-sm">{p.status === "done" ? <CheckCircle2 className="size-4 text-green-600" /> : p.status === "error" ? <XCircle className="size-4 text-red-600" /> : <Loader2 className="size-4 animate-spin" />}<span className="flex-1">{p.service}</span><span className="text-xs text-muted-foreground">{p.status} · {p.created + p.updated} pages · {p.skipped} skipped · {p.errors} errors</span></div>)}{lastFailure && <div className="border border-red-200 bg-red-50 text-red-700 rounded p-3 text-sm">{lastFailure}</div>}{lastResult && !isRunningAll && <div className="border rounded p-3 text-sm">Generated/updated {lastResult.created.toLocaleString()} · skipped {lastResult.skipped.toLocaleString()} · errors {lastResult.errors.toLocaleString()}</div>}</CardContent></Card>}
       </div>
     </DashboardLayout>
   );
 }
+
