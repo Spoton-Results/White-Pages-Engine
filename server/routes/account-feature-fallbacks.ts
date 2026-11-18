@@ -385,9 +385,7 @@ router.post("/api/accounts/:accountId/query-clusters", requireAuth, async (req: 
 
 router.get("/api/accounts/:accountId/query-clusters", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM query_clusters WHERE account_id::text = $1::text ORDER BY name ASC`, [req.params.accountId]);
-  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapQueryCluster));
-  const all = await pool.query(`SELECT * FROM query_clusters ORDER BY name ASC`);
-  return res.json(all.rows.map(mapQueryCluster));
+  return res.json(scoped.rows.map(mapQueryCluster));
 });
 
 router.get("/api/websites/:websiteId/query-clusters", requireAuth, async (req: Request, res: Response) => {
@@ -395,16 +393,12 @@ router.get("/api/websites/:websiteId/query-clusters", requireAuth, async (req: R
     `SELECT qc.* FROM query_clusters qc JOIN websites w ON w.account_id::text = qc.account_id::text WHERE w.id::text = $1::text ORDER BY qc.name ASC`,
     [req.params.websiteId],
   );
-  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapQueryCluster));
-  const all = await pool.query(`SELECT * FROM query_clusters ORDER BY name ASC`);
-  return res.json(all.rows.map(mapQueryCluster));
+  return res.json(scoped.rows.map(mapQueryCluster));
 });
 
 router.get("/api/accounts/:accountId/blueprints", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM blueprints WHERE account_id::text = $1::text ORDER BY created_at DESC`, [req.params.accountId]);
-  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapBlueprint));
-  const all = await pool.query(`SELECT * FROM blueprints ORDER BY created_at DESC`);
-  return res.json(all.rows.map(mapBlueprint));
+  return res.json(scoped.rows.map(mapBlueprint));
 });
 
 router.get("/api/websites/:websiteId/blueprints", requireAuth, async (req: Request, res: Response) => {
@@ -415,10 +409,7 @@ router.get("/api/websites/:websiteId/blueprints", requireAuth, async (req: Reque
     `SELECT bp.* FROM blueprints bp JOIN websites w ON w.account_id::text = bp.account_id::text WHERE w.id::text = $1::text ORDER BY bp.created_at DESC`,
     [req.params.websiteId],
   );
-  if (accountScoped.rows.length > 0) return res.json(accountScoped.rows.map(mapBlueprint));
-
-  const all = await pool.query(`SELECT * FROM blueprints ORDER BY created_at DESC`);
-  return res.json(all.rows.map(mapBlueprint));
+  return res.json(accountScoped.rows.map(mapBlueprint));
 });
 
 router.get("/api/websites/:websiteId/hub-pages", requireAuth, async (req: Request, res: Response) => {
