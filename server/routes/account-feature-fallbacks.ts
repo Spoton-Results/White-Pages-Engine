@@ -321,9 +321,7 @@ router.get("/api/accounts/:accountId/industries", requireAuth, async (req: Reque
 
 router.get("/api/accounts/:accountId/brand-profiles", requireAuth, async (req: Request, res: Response) => {
   const scoped = await pool.query(`SELECT * FROM brand_profiles WHERE account_id::text = $1::text ORDER BY created_at DESC`, [req.params.accountId]);
-  if (scoped.rows.length > 0) return res.json(scoped.rows.map(mapBrandProfile));
-  const all = await pool.query(`SELECT * FROM brand_profiles ORDER BY created_at DESC`);
-  return res.json(all.rows.map(mapBrandProfile));
+  return res.json(scoped.rows.map(mapBrandProfile));
 });
 
 router.post("/api/accounts/:accountId/services", requireAuth, async (req: Request, res: Response) => {
