@@ -57,9 +57,7 @@ export function buildBulkPlan(input: {
     if (!blueprintSupportsLocation(blueprint.pageType, input.locationType)) {
       warn(`Skipped ${blueprint.name}: incompatible ${input.locationType} target.`); continue;
     }
-    const owners = blueprintServices(blueprint, input.services);
-    if (!owners.length) { warn(`Skipped ${blueprint.name}: service assignment is missing or ambiguous.`); continue; }
-    for (const service of owners.filter(row => selected.has(normalizeBulkText(row.name)))) {
+    for (const service of input.services.filter(row => row.id && selected.has(normalizeBulkText(row.name)))) {
       const clusters: Array<BulkCluster | null> = ids === null ? [null] : input.clusters.filter(row => ids.has(row.id) && row.serviceId === service.id && normalizeBulkText(row.primaryKeyword));
       if (!clusters.length) warn(`Skipped ${blueprint.name}: no selected clusters belong to ${service.name}.`);
       for (const cluster of clusters) {
