@@ -3,7 +3,7 @@ import { normalizeBulkText } from "../../shared/bulk-generation-plan";
 type Bank = { sectionName: string; variations: unknown };
 type LayoutSection = { name?: string; sectionKey?: string; key?: string; required?: boolean };
 const sectionAliases: Record<string, string> = {
-  intro: "intro", introduction: "intro", overview: "intro",
+  intro: "intro", introduction: "intro", overview: "intro", stateoverview: "intro",
   localcontext: "local_context", localmarketcontext: "local_context", localservicearea: "local_context",
   painpoint: "pain_point", painpoints: "pain_point", problem: "pain_point", problemoverview: "pain_point", problemdescription: "pain_point", commonproblems: "pain_point", challenges: "pain_point",
   howitworks: "how_it_works", solution: "how_it_works", proposedsolution: "how_it_works", process: "how_it_works", implementation: "how_it_works",
