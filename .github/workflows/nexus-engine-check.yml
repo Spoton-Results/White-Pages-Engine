@@ -1,0 +1,41 @@
+name: Nexus Engine Check
+
+on:
+  push:
+    branches:
+      - feat/nexus-number1-autonomous-engine
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexus-engine-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Nexus ${{ matrix.check.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - name: eligibility-smoke
+            command: npx --no-install tsx scripts/smoke-indexing-eligibility.ts
+          - name: typecheck
+            command: npm run check
+          - name: build
+            command: npm run build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run validation
+        run: ${{ matrix.check.command }}
