@@ -13,7 +13,7 @@ const url = (v: unknown) => {
   if (!text(v)) return false;
   try { return ["https:", "http:"].includes(new URL(v).protocol); } catch { return false; }
 };
-const schemaContext = (v: unknown): boolean => list(v).every(c => typeof c === "string" && /^https?:\/\/schema\.org\/?$/.test(c));
+const schemaContext = (v: unknown): boolean => list(v).length > 0 && list(v).every(c => typeof c === "string" && /^https?:\/\/schema\.org\/?$/.test(c));
 function validJob(n: Node): boolean {
   const org = n.hiringOrganization;
   const local = list(n.jobLocation).some(l => object(l) && typed(l, "Place") && object(l.address) && typed(l.address, "PostalAddress") && text(l.address.addressCountry));

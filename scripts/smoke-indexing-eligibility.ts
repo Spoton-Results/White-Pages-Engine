@@ -18,6 +18,7 @@ const cases: Array<[string, string, boolean]> = [
   ["array", wrap([{ "@context": context, ...job }]), true],
   ["missing evidence", wrap({ "@context": context, "@type": "JobPosting" }), false],
   ["foreign context", wrap({ "@context": "https://example.com", ...job }), false],
+  ["empty context", wrap({ "@context": [], ...job }), false],
   ["comment", `<!--${wrap({ "@context": context, ...job })}-->`, false],
   ["template", `<template>${wrap({ "@context": context, ...job })}</template>`, false],
   ["invalid mixed block", wrap({ "@context": context, ...job }) + '<script type="application/ld+json">{</script>', false],
