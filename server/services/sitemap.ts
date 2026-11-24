@@ -134,7 +134,12 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
     const key = `sitemaps/${websiteId}/${slug}.xml`;
 
     if (isR2Configured()) {
-      try { await saveSitemap(websiteId, slug, xml); sitemapKeys.push(key); } catch { sitemapKeys.push(key); }
+      try {
+        await saveSitemap(websiteId, slug, xml);
+        sitemapKeys.push(key);
+      } catch (err) {
+        console.error(`[Sitemap] R2 upload failed for ${websiteId}/${slug}:`, err);
+      }
     }
     await storage.upsertSitemap({
       websiteId, name: `Tier 1 Sitemap ${t1ChunkIndex + 1}`, slug, urlCount: urls.length,
@@ -158,7 +163,12 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
       const xml = buildSitemapXml(urls);
       const key = `sitemaps/${websiteId}/${slug}.xml`;
       if (isR2Configured()) {
-        try { await saveSitemap(websiteId, slug, xml); sitemapKeys.push(key); } catch { sitemapKeys.push(key); }
+        try {
+          await saveSitemap(websiteId, slug, xml);
+          sitemapKeys.push(key);
+        } catch (err) {
+          console.error(`[Sitemap] R2 upload failed for ${websiteId}/${slug}:`, err);
+        }
       }
       await storage.upsertSitemap({
         websiteId, name: `Sitemap ${fallbackChunkIndex + 1}`, slug, urlCount: urls.length,
@@ -181,7 +191,12 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
     const xml = buildSitemapXml(urls);
     const key = `sitemaps/${websiteId}/${slug}.xml`;
     if (isR2Configured()) {
-      try { await saveSitemap(websiteId, slug, xml); sitemapKeys.push(key); } catch { sitemapKeys.push(key); }
+      try {
+        await saveSitemap(websiteId, slug, xml);
+        sitemapKeys.push(key);
+      } catch (err) {
+        console.error(`[Sitemap] R2 upload failed for ${websiteId}/${slug}:`, err);
+      }
     }
     await storage.upsertSitemap({
       websiteId, name: `Tier 2 Sitemap ${t2ChunkIndex + 1}`, slug, urlCount: urls.length,
@@ -200,7 +215,11 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
   );
 
   if (isR2Configured()) {
-    try { await saveSitemap(websiteId, "sitemap-index", indexXml); } catch {}
+    try {
+      await saveSitemap(websiteId, "sitemap-index", indexXml);
+    } catch (err) {
+      console.error(`[Sitemap] R2 index upload failed for ${websiteId}:`, err);
+    }
   }
 
   return sitemapKeys;
