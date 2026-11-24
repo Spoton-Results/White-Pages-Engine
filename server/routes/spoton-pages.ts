@@ -235,8 +235,6 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
     const page = await getPublishedPage(slug);
     if (!page) return next();
 
-    if (h === ROOT) return res.redirect(301, `https://${PAGES}/${slug}`);
-
     const versionResult = await pool.query(
       `SELECT * FROM page_versions
        WHERE page_id::text = $1::text
@@ -251,7 +249,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
       page.content_html || page.contentHtml ||
       page.html || page.body || ""
     );
-    const canonical = `https://${PAGES}/${page.slug}`;
+    const canonical = `https://${ROOT}/${page.slug}`;
     const links = await getPublicInternalLinks(page.id, page.website_id || page.websiteId);
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
