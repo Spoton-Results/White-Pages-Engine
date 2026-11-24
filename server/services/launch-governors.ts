@@ -357,13 +357,16 @@ async function governor3LaunchCap(
       const pPath = (website.settings as any)?.proxyPath || "";
       const base = pDomain ? `https://${pDomain}${pPath}` : `https://${website.domain}`;
       const urls = toSubmit.map((p: any) => `${base}/${p.slug}`);
-      await submitUrlsToGoogle(urls);
-      const submitIds = toSubmit.map((p: any) => p.id);
-      await db.execute(sql`
-        UPDATE pages SET gsc_submitted_at = ${now} WHERE id = ANY(${submitIds})
-      `);
-      indexingSubmitted = toSubmit.length;
-      console.log(`[Governor 3] Submitted ${indexingSubmitted} URL(s) to Google Indexing API for ${website.domain}. ${queued} queued for next week.`);
+      const outcomes = await submitUrlsToGoogle(urls, websiteId);
+      const acceptedIds = new Set(outcomes.filter(o => o.status === "accepted").map(o => o.pageId));
+      const submitIds = toSubmit.filter((p: any) => acceptedIds.has(p.id)).map((p: any) => p.id);
+      if (submitIds.length > 0) {
+        await db.execute(sql`
+          UPDATE pages SET gsc_submitted_at = ${now} WHERE website_id = ${websiteId} AND id = ANY(${submitIds})
+        `);
+      }
+      indexingSubmitted = submitIds.length;
+      console.log(`[Governor 3] ${website.domain}: ${indexingSubmitted} accepted, ${outcomes.filter(o => o.status === "skipped").length} skipped, ${outcomes.filter(o => o.status === "failed").length} failed, ${outcomes.filter(o => o.status === "deferred").length} deferred. ${queued} held by weekly cap.`);
     } catch (err: any) {
       console.error(`[Governor 3] Indexing submission failed for ${website.domain}:`, err?.message);
     }
@@ -647,9 +650,13 @@ export async function checkWaveReadiness(websiteId: string): Promise<{
       const pPath = (website.settings as any)?.proxyPath || "";
       const base = pDomain ? `https://${pDomain}${pPath}` : `https://${website.domain}`;
       const urls = toSubmit.map((p: any) => `${base}/${p.slug}`);
-      await submitUrlsToGoogle(urls);
-      const submitIds = toSubmit.map((p: any) => p.id);
-      await db.execute(sql`UPDATE pages SET gsc_submitted_at = ${now} WHERE id = ANY(${submitIds})`);
+      const outcomes = await submitUrlsToGoogle(urls, websiteId);
+      const acceptedIds = new Set(outcomes.filter(o => o.status === "accepted").map(o => o.pageId));
+      const submitIds = toSubmit.filter((p: any) => acceptedIds.has(p.id)).map((p: any) => p.id);
+      if (submitIds.length > 0) {
+        await db.execute(sql`UPDATE pages SET gsc_submitted_at = ${now} WHERE website_id = ${websiteId} AND id = ANY(${submitIds})`);
+      }
+      console.log(`[Wave Unlock] ${website.domain}: ${submitIds.length} accepted, ${outcomes.filter(o => o.status === "skipped").length} skipped, ${outcomes.filter(o => o.status === "failed").length} failed, ${outcomes.filter(o => o.status === "deferred").length} deferred.`);
     } catch (err: any) {
       console.error(`[Wave Unlock] Indexing submission failed for ${website.domain}:`, err?.message);
     }
@@ -699,7 +706,7 @@ export async function runDailyWaveCheck(): Promise<void> {
     }
     console.log(`[Wave Unlock] Daily check complete. ${rows.length} warmup website(s) checked.`);
   } catch (err: any) {
-    console.error("[Wave Unlock] Daily check failed:", err?.message);
+    console.error("[Wave Unlock] Daily check failed:", err);
   }
 }
 
