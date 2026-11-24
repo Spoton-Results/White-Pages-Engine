@@ -13,7 +13,7 @@
  */
 
 import * as storage from "../storage";
-import { submitUrlsToGoogle } from "./gsc-indexing";
+import { submitUrlsToGoogle, type IndexingOutcome } from "./gsc-indexing";
 import { generateSitemapsForWebsite } from "./sitemap";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -81,17 +81,20 @@ export async function submitTier1UrlsToGoogle(
   websiteId: string,
   promotedPageIds: string[],
   website: { domain: string; settings?: any },
-): Promise<void> {
-  if (!promotedPageIds.length) return;
+): Promise<IndexingOutcome[]> {
+  if (!promotedPageIds.length) return [];
   try {
     const pDomain = (website.settings as any)?.parentDomain;
     const pPath = (website.settings as any)?.proxyPath || "";
     const base = pDomain ? `https://${pDomain}${pPath}` : `https://${website.domain}`;
     const urls = promotedPageIds.map(id => `${base}/${id}`); // id here is slug
-    await submitUrlsToGoogle(urls);
-    console.log(`[auto4] Submitted ${urls.length} Tier 1 URL(s) to Google for ${website.domain}`);
+    const outcomes = await submitUrlsToGoogle(urls, websiteId);
+    const count = (status: IndexingOutcome["status"]) => outcomes.filter(o => o.status === status).length;
+    console.log(`[auto4] ${website.domain}: ${count("accepted")} accepted, ${count("skipped")} skipped (ineligible or not indexable; sitemap-only), ${count("failed")} failed, ${count("deferred")} deferred`);
+    return outcomes;
   } catch (err) {
     console.error("[auto4] Google submit failed (non-fatal):", err);
+    return [];
   }
 }
 
