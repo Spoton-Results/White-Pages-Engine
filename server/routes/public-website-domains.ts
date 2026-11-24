@@ -160,14 +160,23 @@ async function serveSitemap(ctx: any, host: string, slug: string, res: Response)
   );
   let xml = result.rows[0]?.xml_content;
   if (!xml && sitemapSlug === "sitemap") {
-    const latest = await pool.query(
-      `SELECT slug, xml_content FROM sitemaps
+    const children = await pool.query(
+      `SELECT slug FROM sitemaps
        WHERE website_id::text = $1::text
-       ORDER BY last_generated DESC NULLS LAST, created_at DESC NULLS LAST
-       LIMIT 1`,
+         AND slug NOT IN ('sitemap', 'sitemap.xml', 'sitemap-index', 'sitemap-index.xml')
+       ORDER BY created_at ASC, slug ASC`,
       [ctx.website_id],
     );
-    xml = latest.rows[0]?.xml_content;
+    if (children.rows.length > 0) {
+      const items = children.rows.map((child: any) => {
+        const childSlug = String(child.slug).replace(/\.xml$/i, "");
+        return `  <sitemap>\n    <loc>${escapeHtml(`https://${host}/${childSlug}.xml`)}</loc>\n  </sitemap>`;
+      }).join("\n");
+      xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${items}
+</sitemapindex>`;
+    }
   }
   if (!xml) return res.status(404).type("text/html").send(notFoundHtml("Sitemap not found for this public website domain."));
   xml = String(xml).replaceAll(`https://${ctx.website_domain}`, `https://${host}`);
