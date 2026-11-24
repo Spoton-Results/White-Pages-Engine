@@ -706,7 +706,7 @@ export async function runDailyWaveCheck(): Promise<void> {
     }
     console.log(`[Wave Unlock] Daily check complete. ${rows.length} warmup website(s) checked.`);
   } catch (err: any) {
-    console.error("[Wave Unlock] Daily check failed:", err);
+    console.error("[Wave Unlock] Daily check failed:", err?.message);
   }
 }
 
