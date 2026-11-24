@@ -407,6 +407,9 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
     citiesByState.set(t.stateAbbr.toUpperCase(), list);
   }
   const allRelatedServices = services.map(s => ({ name: s, slug: s.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") }));
+  const indexingBase = (websiteSettings.parentDomain
+    ? `https://${websiteSettings.parentDomain}${websiteSettings.proxyPath || ""}`
+    : `https://${website.domain}`).replace(/\/+$/, "");
   const newPageUrls: string[] = [];
   let totalCreated = 0, totalUpdated = 0, totalFailed = 0, totalSkipped = 0;
   let totalRevivedUnpublished = 0;
@@ -531,7 +534,7 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       const created = await insertPagesBulk(batchData as schema.InsertPage[]);
       if (created.length > 0) {
         await insertVersionsBulk(created.map(p => ({ pageId: p.id, version: 1, contentHtml: slugToContent.get(p.slug) ?? "", isActive: true })));
-        for (const p of created) newPageUrls.push(`https://${website.domain}/${p.slug}`);
+        for (const p of created) newPageUrls.push(`${indexingBase}/${p.slug}`);
         svcCreated += created.length;
         totalCreated += created.length;
       }
@@ -636,7 +639,12 @@ export async function runBulkBackgroundJob(jobId: string): Promise<void> {
       await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
       console.log(`[bulk-background] Pinged Google sitemap for ${website.domain}`);
     } catch { /* non-critical */ }
-    try { await submitUrlsToGoogle(newPageUrls); } catch { /* non-critical */ }
+    try {
+      const outcomes = await submitUrlsToGoogle(newPageUrls, job.websiteId);
+      console.log(`[bulk-background] ${website.domain}: ${outcomes.filter(o => o.status === "accepted").length} accepted, ${outcomes.filter(o => o.status === "skipped").length} skipped, ${outcomes.filter(o => o.status === "failed").length} failed, ${outcomes.filter(o => o.status === "deferred").length} deferred`);
+    } catch (err) {
+      console.error(`[bulk-background] Indexing submission failed for ${website.domain}:`, err);
+    }
   } else {
     console.log(`[bulk-background] Draft mode or no new public output — skipped sitemap regen, Google ping, GSC indexing for ${website.domain}`);
   }
