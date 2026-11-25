@@ -150,7 +150,7 @@ export async function generateSitemapsForWebsite(websiteId: string, domain: stri
   });
 
   // If no Tier 1 pages exist yet, fall back to all non-Tier-3 pages for primary sitemap
-  if (t1Total === 0) {
+  if (t1Total === 0 && allowTier2Sitemap) {
     let fallbackChunkIndex = 0;
     await streamPagesByTier(websiteId, "all-visible", URLS_PER_SITEMAP, async (chunk) => {
       const slug = `sitemap-${fallbackChunkIndex + 1}`;
